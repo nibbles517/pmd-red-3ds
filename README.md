@@ -7,7 +7,10 @@ The game's C code is compiled for the 3DS's ARM11 processor instead of running i
 GBA emulator. The approach follows [Twin Embers](https://github.com/alex61194/twin-embers),
 a 3DS port of pret's FireRed decompilation.
 
-**Status:** early setup. Nothing boots yet.
+**Status:** early. In the test harness the game boots through the logos and
+title screen to the main menu, plays music, and reads existing saves. The 3DS
+backend is written but not yet tested on hardware. See
+[docs/BUILDING.md](docs/BUILDING.md).
 
 ## Goals
 
