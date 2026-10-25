@@ -214,6 +214,19 @@ index 002fa3c7..406bee8e 100644
      u32 *spAsU32 = (u32 *)sp0;
  
      *spAsU32 = func();
+diff --git a/src/dungeon_map_access.c b/src/dungeon_map_access.c
+index 4a9a72ad..9b88378e 100644
+--- a/src/dungeon_map_access.c
++++ b/src/dungeon_map_access.c
+@@ -83,7 +83,7 @@ void LoadDungeonTilesetAssets(void)
+ 
+   sprintf(fileName,"b%02dfon",gUnknown_8108EC0[gDungeon->tileset]);
+   file = OpenFileAndGetFileDataPtr(fileName,&gDungeonFileArchive);
+-  DecompressATGlobalFile((u32 *)0x06008000,0,file);
++  DecompressATGlobalFile((u32 *)(VRAM + 0x8000),0,file); // port: was (u32 *)0x06008000
+   CloseFile(file);
+ 
+   sprintf(fileName,"b%02dpal",gDungeon->tileset);
 diff --git a/src/flash.c b/src/flash.c
 index 172f2be9..c3dfe0d5 100644
 --- a/src/flash.c
@@ -300,7 +313,7 @@ index ddf7d16b..6b7ba38f 100644
  void sub_80A56A0(u8 param_1, u8 param_2)
  {
 diff --git a/src/m4a.c b/src/m4a.c
-index 2bcf6f8a..f2696fb7 100644
+index 2bcf6f8a..af9a133b 100644
 --- a/src/m4a.c
 +++ b/src/m4a.c
 @@ -309,10 +309,17 @@ void MPlayExtender(struct CgbChannel *cgbChans)
@@ -321,8 +334,21 @@ index 2bcf6f8a..f2696fb7 100644
  
  void ClearChain(void *x)
  {
+@@ -404,10 +411,10 @@ void SampleFreqSet(u32 freq)
+ 
+     m4aSoundVSyncOn();
+ 
+-    while (*(vu8 *)REG_ADDR_VCOUNT == 159)
++    while ((u8)REG_VCOUNT == 159) // port: live read (was *(vu8 *)REG_ADDR_VCOUNT)
+         ;
+ 
+-    while (*(vu8 *)REG_ADDR_VCOUNT != 159)
++    while ((u8)REG_VCOUNT != 159) // port: live read (was *(vu8 *)REG_ADDR_VCOUNT)
+         ;
+ 
+     REG_TM0CNT_H = TIMER_ENABLE | TIMER_1CLK;
 diff --git a/src/m4a_1.s b/src/m4a_1.s
-index 8a40a25c..f5c47f8f 100644
+index 8a40a25c..75e046f2 100644
 --- a/src/m4a_1.s
 +++ b/src/m4a_1.s
 @@ -79,7 +79,11 @@ SoundMain_5:
@@ -337,6 +363,19 @@ index 8a40a25c..f5c47f8f 100644
  lt_REG_VCOUNT:            .word REG_VCOUNT
  lt_o_SoundInfo_pcmBuffer: .word o_SoundInfo_pcmBuffer
  lt_PCM_DMA_BUF_SIZE:      .word PCM_DMA_BUF_SIZE
+@@ -548,6 +552,12 @@ ldrb_r3_r2:
+ @ It assumes that the jump table template is located at the end of the ROM.
+ 	.thumb_func
+ chk_adr_r2:
++#ifdef PLATFORM_3DS
++	@ The GBA check treats addresses below 0x2000000 as BIOS ROM and rejects
++	@ them. On the 3DS the whole program (code, songs, this table) lives
++	@ there, so accept every address.
++	bx lr
++#endif
+ 	push {r0}
+ 	lsrs r0, r2, 25
+ 	bne chk_adr_r2_done @ if adr >= 0x2000000 (i.e. not in BIOS ROM), accept it
 diff --git a/src/reg_control.c b/src/reg_control.c
 index e6872a26..c6368b99 100644
 --- a/src/reg_control.c

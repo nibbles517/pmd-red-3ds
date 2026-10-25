@@ -14,7 +14,7 @@ PREFIX   ?= arm-none-eabi-
 
 include port/game.mk
 
-.PHONY: all game upstream harness 3ds clean
+.PHONY: all game upstream harness prelink 3ds clean
 all: game
 
 upstream:
@@ -40,7 +40,7 @@ $(CORE_OBJ)/%.o: port/core/%.c port/core/port.h
 # sound.c reads the m4a driver's structures, so it builds like game code.
 $(CORE_OBJ)/sound.o: port/core/sound.c port/core/port.h
 	@mkdir -p $(dir $@)
-	@$(GAME_CC) $(ARCH_FLAGS) -O2 -g $(GAME_CPPFLAGS) -c $< -o $@
+	@$(GAME_CC) $(ARCH_FLAGS) $(GAME_ABI_FLAGS) -O2 -g -w $(GAME_CPPFLAGS) -c $< -o $@
 	@echo "  CC   $<"
 
 # The m4a mixer stays in its original ARM/Thumb assembly, which the 3DS CPU runs natively.
@@ -70,3 +70,53 @@ $(HARNESS_ELF): $(GAME_OBJS) $(PORT_OBJS) $(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/
 		-Wl,--no-warn-rwx-segments -Wl,-Map,$(BUILD)/pmd-red-harness.map -o $@ \
 		$(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/backend.o $(PORT_OBJS) $(GAME_OBJS) $(GAME_DATA_OBJS) -lc -lnosys -lgcc
 	@echo "  LD   $@"
+
+# ---------------------------------------------------------------------------
+# 3DS build
+#
+# Two steps, because the game half needs your ROM's data and pret's tools while
+# the 3DS half needs devkitPro:
+#   make prelink   (where the ROM and pret's tools are) -> build/pmd-red-game.o
+#                  game + platform core, partially linked; contains game data,
+#                  so it is for personal use only and never committed
+#   make 3ds       (in devkitPro's MSYS2) -> build/pmd-red-3ds.3dsx
+
+PRELINK := $(BUILD)/pmd-red-game.o
+
+prelink: $(PRELINK)
+$(PRELINK): $(GAME_OBJS) $(PORT_OBJS)
+	@$(PREFIX)ld -r -S -o $@ $(PORT_OBJS) $(GAME_OBJS) $(GAME_DATA_OBJS)
+	@echo "  LD   $@ (partial)"
+
+DEVKITPRO ?= /opt/devkitpro
+DEVKITARM ?= $(DEVKITPRO)/devkitARM
+CTRU      := $(DEVKITPRO)/libctru
+TOOLS_3DS := $(DEVKITPRO)/tools/bin
+CC_3DS    := $(DEVKITARM)/bin/arm-none-eabi-gcc
+GAME_PRELINK ?= $(PRELINK)
+
+APP_TITLE  := PMD Red Rescue Team
+APP_DESC   := pmd-red-3ds port (personal build)
+APP_AUTHOR := pret / pmd-red-3ds
+
+3DS_OBJ := $(BUILD)/3ds
+3DS_ELF := $(BUILD)/pmd-red-3ds.elf
+
+$(3DS_OBJ)/main.o: port/3ds/main.c port/core/port.h
+	@mkdir -p $(dir $@)
+	@$(CC_3DS) -O2 -g -Wall -marm -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -D__3DS__ -I$(CTRU)/include -c $< -o $@
+	@echo "  CC   $<"
+
+$(3DS_ELF): $(3DS_OBJ)/main.o $(GAME_PRELINK) port/3ds/game_sections.ld
+	@$(CC_3DS) -specs=3dsx.specs -g -marm -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft \
+		-Wl,-T,port/3ds/game_sections.ld -L port -Wl,-Map,$(BUILD)/pmd-red-3ds.map -Wl,--no-warn-rwx-segments \
+		-o $@ $(3DS_OBJ)/main.o $(GAME_PRELINK) -L$(CTRU)/lib -lctru -lm
+	@echo "  LD   $@"
+
+$(BUILD)/pmd-red-3ds.smdh: port/3ds/icon.png
+	@$(TOOLS_3DS)/smdhtool --create "$(APP_TITLE)" "$(APP_DESC)" "$(APP_AUTHOR)" $< $@
+
+3ds: $(BUILD)/pmd-red-3ds.3dsx
+$(BUILD)/pmd-red-3ds.3dsx: $(3DS_ELF) $(BUILD)/pmd-red-3ds.smdh
+	@$(TOOLS_3DS)/3dsxtool $< $@ --smdh=$(BUILD)/pmd-red-3ds.smdh
+	@echo "  3DSX $@"

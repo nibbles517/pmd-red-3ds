@@ -11,6 +11,9 @@ usage:
              [--press FRAME:KEYS:DURATION ...] [--save FILE] [--wav FILE]
 
   --press 300:A:5   hold A for 5 frames starting at frame 300
+  --save-state F    write a snapshot (CPU + memory) at the end of the run
+  --load-state F    start from a snapshot instead of booting; frame numbers
+                    for --press/--shot continue from the snapshot's frame
   keys: A B SELECT START RIGHT LEFT UP DOWN R L, combine with '+'
 needs: libunicorn (LIBUNICORN_PATH) and its Python bindings on PYTHONPATH
 """
@@ -121,6 +124,45 @@ class Harness:
         self.audio_rate = 0
         os.makedirs(args.out, exist_ok=True)
 
+    REG_NAMES = None
+
+    def _cpu_regs(self):
+        import unicorn.arm_const as c
+        names = [n for n in dir(c) if n.startswith('UC_ARM_REG_') and n not in ('UC_ARM_REG_INVALID', 'UC_ARM_REG_ENDING')]
+        ids = []
+        for n in sorted(names):
+            v = getattr(c, n)
+            if isinstance(v, int) and 0 < v < getattr(c, 'UC_ARM_REG_ENDING', 1000) and v not in ids:
+                ids.append(v)
+        return ids
+
+    def save_state(self, path):
+        import pickle
+        regs = {}
+        for r in self._cpu_regs():
+            try:
+                regs[r] = self.uc.reg_read(r)
+            except Exception:
+                pass
+        mem = [(b, e, bytes(self.uc.mem_read(b, e - b + 1))) for b, e, _ in self.uc.mem_regions() if b != IO_BASE]
+        with open(path, 'wb') as f:
+            pickle.dump({'regs': regs, 'mem': mem, 'frame': self.frame, 'io': self.regs}, f, protocol=4)
+
+    def load_state(self, path):
+        import pickle
+        st = pickle.load(open(path, 'rb'))
+        for b, e, data in st['mem']:
+            self.uc.mem_write(b, data)
+        # Restore CPSR/mode-related registers before the general ones.
+        for r, v in st['regs'].items():
+            try:
+                self.uc.reg_write(r, v)
+            except Exception:
+                pass
+        self.frame = st['frame']
+        self.regs = st['io']
+        return self.uc.reg_read(UC_ARM_REG_PC)
+
     def keys(self):
         m = 0
         for start, end, mask in self.presses:
@@ -173,18 +215,46 @@ class Harness:
 
     def run(self):
         t0 = time.time()
+        start = self.entry
+        first = self.frame
+        if self.args.load_state:
+            start = self.load_state(self.args.load_state)
+            first = self.frame
+            self.args.frames += self.frame  # --frames counts frames to run
         try:
-            self.uc.emu_start(self.entry, 0xFFFFFFFF)
+            self.uc.emu_start(start, 0xFFFFFFFF)
         except UcError as e:
             pc = self.uc.reg_read(UC_ARM_REG_PC)
             lr = self.uc.reg_read(UC_ARM_REG_LR)
             print(f'CRASH at frame {self.frame}: {e}\n  pc={pc:#010x} {where(self.syms, pc)}\n'
                   f'  lr={lr:#010x} {where(self.syms, lr)}', flush=True)
+            import unicorn.arm_const as c
+            regs = [self.uc.reg_read(getattr(c, f'UC_ARM_REG_R{i}')) for i in range(13)]
+            sp = self.uc.reg_read(UC_ARM_REG_SP)
+            print('  ' + ' '.join(f'r{i}={v:#x}' for i, v in enumerate(regs)) + f' sp={sp:#x}')
+            # Return addresses still on the stack, for a rough backtrace.
+            text_lo, text_hi = 0x100000, max(v for v, _, _ in self.syms)
+            try:
+                stack = self.uc.mem_read(sp, 0x400)
+                seen = 0
+                for i in range(0, len(stack), 4):
+                    v, = struct.unpack_from('<I', stack, i)
+                    if text_lo <= v < text_hi and v & 1 == 0:
+                        print(f'  stack+{i:#05x}: {v:#010x} {where(self.syms, v)}')
+                        seen += 1
+                        if seen >= 12:
+                            break
+            except UcError:
+                pass
             if self.last_frame:
                 write_png(os.path.join(self.args.out, 'crash_last_frame.png'), self.last_frame)
             return 2
         dt = time.time() - t0
-        print(f'ran {self.frame} frames in {dt:.1f}s ({self.frame / max(dt, 1e-6):.1f} fps emulated)')
+        ran = self.frame - first
+        print(f'ran {ran} frames (now at frame {self.frame}) in {dt:.1f}s ({ran / max(dt, 1e-6):.1f} fps emulated)')
+        if self.args.save_state:
+            self.save_state(self.args.save_state)
+            print(f'state saved to {self.args.save_state} at frame {self.frame}')
         if self.last_frame:
             write_png(os.path.join(self.args.out, 'last_frame.png'), self.last_frame)
         if self.args.wav and self.audio:
@@ -206,6 +276,8 @@ def main():
     ap.add_argument('--out', default='build/shots')
     ap.add_argument('--save')
     ap.add_argument('--wav')
+    ap.add_argument('--save-state')
+    ap.add_argument('--load-state')
     return Harness(ap.parse_args()).run()
 
 

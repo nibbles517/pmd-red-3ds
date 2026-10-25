@@ -16,8 +16,11 @@ ARCH_FLAGS   := -marm -march=armv6k+fp -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
 # MODERN=1 selects pmd-red's C fallbacks for functions that only match as asm.
 GAME_CPPFLAGS := -iquote $(UPSTREAM)/include -iquote $(ROOT)/port/decomp -Wno-trigraphs -DMODERN=1 -DPLATFORM_3DS
+# pmd-red's structs, data tables and save format assume the GBA's old APCS rule
+# that every struct's size is a multiple of 4 bytes. Reproduce it for game code.
+GAME_ABI_FLAGS := -mstructure-size-boundary=32
 # -fno-strict-aliasing/-fwrapv: decompiled code relies on GBA-era compiler leniency.
-GAME_CFLAGS   := $(ARCH_FLAGS) -O2 -g -fno-strict-aliasing -fwrapv -fno-common \
+GAME_CFLAGS   := $(ARCH_FLAGS) $(GAME_ABI_FLAGS) -O2 -g -fno-strict-aliasing -fwrapv -fno-common \
                  -ffunction-sections -fdata-sections -w
 
 # Every game C file, as upstream builds them. libisagbprn is a debug printer for
