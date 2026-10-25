@@ -83,10 +83,11 @@ $(HARNESS_ELF): $(GAME_OBJS) $(PORT_OBJS) $(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/
 
 PRELINK := $(BUILD)/pmd-red-game.o
 
-prelink: $(PRELINK)
-$(PRELINK): $(GAME_OBJS) $(PORT_OBJS)
-	@$(PREFIX)ld -r -S -o $@ $(PORT_OBJS) $(GAME_OBJS) $(GAME_DATA_OBJS)
-	@echo "  LD   $@ (partial)"
+# A plain target, not a file rule: `make 3ds` must use an existing
+# pmd-red-game.o as is, never try to rebuild it.
+prelink: $(GAME_OBJS) $(PORT_OBJS)
+	@$(PREFIX)ld -r -S -o $(PRELINK) $(PORT_OBJS) $(GAME_OBJS) $(GAME_DATA_OBJS)
+	@echo "  LD   $(PRELINK) (partial)"
 
 DEVKITPRO ?= /opt/devkitpro
 DEVKITARM ?= $(DEVKITPRO)/devkitARM
@@ -106,6 +107,10 @@ $(3DS_OBJ)/main.o: port/3ds/main.c port/core/port.h
 	@mkdir -p $(dir $@)
 	@$(CC_3DS) -O2 -g -Wall -marm -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft -D__3DS__ -I$(CTRU)/include -c $< -o $@
 	@echo "  CC   $<"
+
+$(GAME_PRELINK):
+	@echo "Missing $(GAME_PRELINK). Put pmd-red-game.o in the build folder (or run make prelink)."
+	@false
 
 $(3DS_ELF): $(3DS_OBJ)/main.o $(GAME_PRELINK) port/3ds/game_sections.ld
 	@$(CC_3DS) -specs=3dsx.specs -g -marm -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft \

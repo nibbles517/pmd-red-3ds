@@ -8,7 +8,7 @@
 
 GAME_CC      := $(PREFIX)gcc
 GAME_AS      := $(PREFIX)as
-GAME_CC1     := $(shell $(GAME_CC) --print-prog-name=cc1)
+GAME_CC1     := $(shell $(GAME_CC) --print-prog-name=cc1 2>/dev/null)
 GAME_PREPROC := $(UPSTREAM)/tools/preproc/preproc
 GAME_CHARMAP := $(UPSTREAM)/charmap.txt
 
