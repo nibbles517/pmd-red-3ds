@@ -1,0 +1,355 @@
+diff --git a/include/asm/constants/gba_constants.inc b/include/asm/constants/gba_constants.inc
+index 9d59c8fc..10cdcf67 100644
+--- a/include/asm/constants/gba_constants.inc
++++ b/include/asm/constants/gba_constants.inc
+@@ -26,7 +26,11 @@
+ 
+ 	.set OAM, 0x7000000
+ 
++#ifdef PLATFORM_3DS
++	.set SOUND_INFO_PTR, gPortSoundInfoPtr
++#else
+ 	.set SOUND_INFO_PTR, 0x3007FF0
++#endif
+ 	.set INTR_CHECK,     0x3007FF8
+ 	.set INTR_VECTOR,    0x3007FFC
+ 
+@@ -48,7 +52,11 @@
+ 	.set VCOUNT_VBLANK, 160
+ 	.set TOTAL_SCANLINES, 228
+ 
++#ifdef PLATFORM_3DS
++	.set REG_BASE, gPortRegs @ shadow I/O registers
++#else
+ 	.set REG_BASE, 0x4000000 @ I/O register base address
++#endif
+ 
+ @ I/O register offsets
+ 	.set OFFSET_REG_DISPCNT,     0x0
+diff --git a/include/gba/defines.h b/include/gba/defines.h
+index 1ccb7e9e..6f7d50d4 100644
+--- a/include/gba/defines.h
++++ b/include/gba/defines.h
+@@ -19,11 +19,27 @@
+ #define ALIGNED(n) __attribute__((aligned(n)))
+ #define ALIGNED_PACKED(n) __attribute__((packed, aligned(n)))
+ 
++#ifdef PLATFORM_3DS
++// The port has no GBA memory map. Hardware lives in ordinary RAM ("shadow
++// memory") that the platform layer reads each frame. See port/core/gba_shadow.h.
++extern unsigned char gPortRegs[0x400];
++extern unsigned char gPortVram[0x18000];
++extern unsigned char gPortPltt[0x400];
++extern unsigned char gPortOam[0x400];
++extern struct SoundInfo *gPortSoundInfoPtr;
++extern unsigned short gPortIntrCheck;
++extern void *gPortIntrVector;
++#define SOUND_INFO_PTR gPortSoundInfoPtr
++#define INTR_CHECK     gPortIntrCheck
++#define INTR_VECTOR    gPortIntrVector
++#define PLTT      ((__UINTPTR_TYPE__)gPortPltt)
++#else
+ #define SOUND_INFO_PTR (*(struct SoundInfo **)0x3007FF0)
+ #define INTR_CHECK     (*(u16 *)0x3007FF8)
+ #define INTR_VECTOR    (*(void **)0x3007FFC)
+ 
+ #define PLTT      0x5000000
++#endif
+ #define PLTT_SIZE 0x400
+ 
+ #define BG_PLTT      PLTT
+@@ -32,7 +48,11 @@
+ #define OBJ_PLTT      (PLTT + 0x200)
+ #define OBJ_PLTT_SIZE 0x200
+ 
++#ifdef PLATFORM_3DS
++#define VRAM      ((__UINTPTR_TYPE__)gPortVram)
++#else
+ #define VRAM      0x6000000
++#endif
+ #define VRAM_SIZE 0x18000
+ 
+ #define BG_VRAM           VRAM
+@@ -51,7 +71,11 @@
+ #define OBJ_VRAM1      (void *)(VRAM + 0x14000)
+ #define OBJ_VRAM1_SIZE 0x4000
+ 
++#ifdef PLATFORM_3DS
++#define OAM      ((__UINTPTR_TYPE__)gPortOam)
++#else
+ #define OAM      0x7000000
++#endif
+ #define OAM_SIZE 0x400
+ 
+ #define DISPLAY_WIDTH  240
+diff --git a/include/gba/io_reg.h b/include/gba/io_reg.h
+index b167fd7f..5f5f4d0d 100644
+--- a/include/gba/io_reg.h
++++ b/include/gba/io_reg.h
+@@ -1,7 +1,11 @@
+ #ifndef GUARD_GBA_IO_REG_H
+ #define GUARD_GBA_IO_REG_H
+ 
++#ifdef PLATFORM_3DS
++#define REG_BASE ((__UINTPTR_TYPE__)gPortRegs) // shadow I/O registers
++#else
+ #define REG_BASE 0x4000000 // I/O register base address
++#endif
+ 
+ // I/O register offsets
+ 
+@@ -778,4 +782,15 @@
+ #define WAITCNT_AGB (0 << 15)
+ #define WAITCNT_CGB (1 << 15)
+ 
++#ifdef PLATFORM_3DS
++// Reads with side effects: the platform advances a virtual scanline counter
++// so busy-waits finish, and polls input so "wait for release" loops finish.
++unsigned short Port_ReadVCount(void);
++unsigned short Port_ReadKeyInput(void);
++#undef REG_VCOUNT
++#define REG_VCOUNT (Port_ReadVCount())
++#undef REG_KEYINPUT
++#define REG_KEYINPUT (Port_ReadKeyInput())
++#endif // PLATFORM_3DS
++
+ #endif // GUARD_GBA_IO_REG_H
+diff --git a/include/gba/macro.h b/include/gba/macro.h
+index a0edf2a4..e7c70cb1 100644
+--- a/include/gba/macro.h
++++ b/include/gba/macro.h
+@@ -29,6 +29,13 @@
+ 
+ #define CpuFastCopy(src, dest, size) CpuFastSet(src, dest, ((size)/(32/8) & 0x1FFFFF))
+ 
++#ifdef PLATFORM_3DS
++// DMA runs in software: immediate transfers happen at once, HBlank and VBlank
++// transfers are recorded for the platform layer to replay.
++void Port_DmaSet(int dmaNum, const void *src, void *dest, u32 control);
++void Port_DmaStop(int dmaNum);
++#define DmaSet(dmaNum, src, dest, control) Port_DmaSet(dmaNum, (const void *)(src), (void *)(dest), (u32)(control))
++#else
+ #define DmaSet(dmaNum, src, dest, control)        \
+ {                                                 \
+     vu32 *dmaRegs = (vu32 *)REG_ADDR_DMA##dmaNum; \
+@@ -37,6 +44,7 @@
+     dmaRegs[2] = (vu32)(control);                 \
+     dmaRegs[2];                                   \
+ }
++#endif
+ 
+ #define DMA_FILL(dmaNum, value, dest, size, bit)                                              \
+ {                                                                                             \
+@@ -76,6 +84,9 @@
+ #define DmaCopy16(dmaNum, src, dest, size) DMA_COPY(dmaNum, src, dest, size, 16)
+ #define DmaCopy32(dmaNum, src, dest, size) DMA_COPY(dmaNum, src, dest, size, 32)
+ 
++#ifdef PLATFORM_3DS
++#define DmaStop(dmaNum) Port_DmaStop(dmaNum)
++#else
+ #define DmaStop(dmaNum)                                         \
+ {                                                               \
+     vu16 *dmaRegs = (vu16 *)REG_ADDR_DMA##dmaNum;               \
+@@ -83,6 +94,7 @@
+     dmaRegs[5] &= ~DMA_ENABLE;                                  \
+     dmaRegs[5];                                                 \
+ }
++#endif
+ 
+ #define DmaCopyLarge(dmaNum, src, dest, size, block, bit) \
+ {                                                         \
+diff --git a/include/gba/syscall.h b/include/gba/syscall.h
+index deddec5b..db4551d5 100644
+--- a/include/gba/syscall.h
++++ b/include/gba/syscall.h
+@@ -45,4 +45,11 @@ void RLUnCompVram(const void *src, void *dest);
+ 
+ int MultiBoot(struct MultiBootParam *mp);
+ 
++#ifdef PLATFORM_3DS
++// BIOS calls that pmd-red issues as inline asm; the platform layer implements them.
++void Port_Halt(void);              // swi 0x02: wait for the next interrupt
++void Port_Stop(void);              // swi 0x03: GBA sleep mode (no-op on 3DS)
++void Port_SoundGetJumpList(void *table); // swi 0x2A
++#endif
++
+ #endif // GUARD_GBA_SYSCALL_H
+diff --git a/src/code_800D090.c b/src/code_800D090.c
+index 002fa3c7..406bee8e 100644
+--- a/src/code_800D090.c
++++ b/src/code_800D090.c
+@@ -8,7 +8,11 @@ void Hang(void)
+ {
+     while (TRUE)
+     {
++#ifdef PLATFORM_3DS
++        Port_Halt();
++#else
+         asm("swi 0x2");
++#endif
+     }
+ }
+ 
+@@ -47,7 +51,11 @@ UNUSED static void sub_800D098(void)
+     REG_IME = 1;
+ 
+     SoundBiasReset();
++#ifdef PLATFORM_3DS
++    Port_Stop();
++#else
+     asm("swi 0x3");
++#endif
+     SoundBiasSet();
+ 
+     REG_IME = 0;
+@@ -529,7 +537,11 @@ static u32 sub_800D9B8(u16 dst[2][8])
+ {
+     s32 i;
+     u8 sp0[4];
++#ifdef PLATFORM_3DS
++    u32 (*func)(void) = sub_80001E8;
++#else
+     u32 (*func)(void) = (void *)gUnknown_202DB78;
++#endif
+     u32 *spAsU32 = (u32 *)sp0;
+ 
+     *spAsU32 = func();
+diff --git a/src/flash.c b/src/flash.c
+index 172f2be9..c3dfe0d5 100644
+--- a/src/flash.c
++++ b/src/flash.c
+@@ -5,6 +5,53 @@
+ 
+ EWRAM_INIT bool8 gFlashEnabled = {0};
+ 
++#ifdef PLATFORM_3DS
++// The port keeps the 128 KiB flash image in memory and writes it to the SD card
++// (port/core/save.c); the image is byte-compatible with a GBA emulator's .sav.
++void Port_FlashInit(void);
++void Port_FlashRead(u32 offset, void *dest, u32 size);
++void Port_FlashWrite(u32 offset, const void *src, u32 size);
++void Port_FlashErase(void);
++
++void InitFlash(void)
++{
++    Port_FlashInit();
++    gFlashEnabled = TRUE;
++}
++
++void ClearFlashData(void)
++{
++    if (gFlashEnabled)
++        Port_FlashErase();
++}
++
++s32 ReadFlashData(s32 sector, u8 *dest, s32 size)
++{
++    if (!gFlashEnabled)
++        return 3;
++    Port_FlashRead((u32)sector * 0x1000, dest, (u32)size);
++    return 0;
++}
++
++s32 WriteFlashData(s32 sector, u8 *src, s32 size)
++{
++    u8 buffer[0x1000];
++    s32 whole = size & ~0xFFF;
++
++    if (!gFlashEnabled)
++        return 3;
++    // As on hardware, a partial last sector is padded with erased bytes.
++    if (whole > 0)
++        Port_FlashWrite((u32)sector * 0x1000, src, (u32)whole);
++    if (size > whole) {
++        MemoryFill8(buffer, 0xFF, 0x1000);
++        MemoryCopy8(buffer, src + whole, size - whole);
++        Port_FlashWrite((u32)(sector + (whole >> 12)) * 0x1000, buffer, 0x1000);
++    }
++    return 0;
++}
++#else
++
+ extern FlashIntrFunc *GetInterruptHandler(s32);
+ 
+ static u8 TryProgramSector(s32, u8 *);
+@@ -90,3 +137,4 @@ static u8 TryProgramSector(s32 sector, u8 *src)
+ 
+     return FALSE;
+ }
++#endif // PLATFORM_3DS
+diff --git a/src/ground_map.c b/src/ground_map.c
+index ddf7d16b..6b7ba38f 100644
+--- a/src/ground_map.c
++++ b/src/ground_map.c
+@@ -536,6 +536,9 @@ void GroundMap_SelectDungeon(s32 mapId_, const DungeonLocation *loc, u32 param_2
+ }
+ 
+ // overlay_0000.bin::02154FAC
++#ifdef PLATFORM_3DS
++#include "bma_decode.inc.c"
++#else
+ NAKED
+ static u8* sub_80A5204(void *a, const u8 *b, BmaHeader *c, s32 d)
+ {
+@@ -1204,6 +1207,7 @@ static u8* sub_80A5204(void *a, const u8 *b, BmaHeader *c, s32 d)
+ "	pop {r1}            \n"
+ "	bx r1               ");
+ }
++#endif // PLATFORM_3DS
+ 
+ void sub_80A56A0(u8 param_1, u8 param_2)
+ {
+diff --git a/src/m4a.c b/src/m4a.c
+index 2bcf6f8a..f2696fb7 100644
+--- a/src/m4a.c
++++ b/src/m4a.c
+@@ -309,10 +309,17 @@ void MPlayExtender(struct CgbChannel *cgbChans)
+     soundInfo->ident = ident;
+ }
+ 
++#ifdef PLATFORM_3DS
++void MusicPlayerJumpTableCopy(void)
++{
++    Port_SoundGetJumpList(gMPlayJumpTable);
++}
++#else
+ void MusicPlayerJumpTableCopy(void)
+ {
+     asm("swi 0x2A");
+ }
++#endif
+ 
+ void ClearChain(void *x)
+ {
+diff --git a/src/m4a_1.s b/src/m4a_1.s
+index 8a40a25c..f5c47f8f 100644
+--- a/src/m4a_1.s
++++ b/src/m4a_1.s
+@@ -79,7 +79,11 @@ SoundMain_5:
+ 	.align 2, 0
+ lt_SOUND_INFO_PTR:        .word SOUND_INFO_PTR
+ lt_ID_NUMBER:             .word ID_NUMBER
++#ifdef PLATFORM_3DS
++lt_SoundMainRAM_Buffer:   .word SoundMainRAM
++#else
+ lt_SoundMainRAM_Buffer:   .word SoundMainRAM_Buffer + 1
++#endif
+ lt_REG_VCOUNT:            .word REG_VCOUNT
+ lt_o_SoundInfo_pcmBuffer: .word o_SoundInfo_pcmBuffer
+ lt_PCM_DMA_BUF_SIZE:      .word PCM_DMA_BUF_SIZE
+diff --git a/src/reg_control.c b/src/reg_control.c
+index e6872a26..c6368b99 100644
+--- a/src/reg_control.c
++++ b/src/reg_control.c
+@@ -360,7 +360,11 @@ UNUSED static void sub_800BB44(void)
+     REG_IME = 1;
+ 
+     SoundBiasReset();
++#ifdef PLATFORM_3DS
++    Port_Stop();
++#else
+     asm("swi 0x3");
++#endif
+     SoundBiasSet();
+ 
+     REG_IME = 0;
