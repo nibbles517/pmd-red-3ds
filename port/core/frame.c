@@ -36,8 +36,11 @@ enum {
 // frames for renderer regression tests). NULL in normal builds.
 void (*gPortLineHook)(int line);
 
-static uint16_t sFrame[GBA_W * GBA_H];
-static uint16_t sShown[GBA_W * GBA_H];
+static uint16_t sFrame[SCREEN_W * SCREEN_H];
+static uint16_t sShown[SCREEN_W * SCREEN_H];
+static uint16_t sLine[SCREEN_W];
+static int sViewWide = -1; // view of the last frame
+uint8_t gPortWideView;
 static uint64_t sFrames;
 static int sInFrame;     // inside the scanline loop: VCOUNT is the real line
 static int sVirtualLine; // outside it: advances on every read so busy-waits end
@@ -81,7 +84,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version5_UpdateRepoIfMissing != 5)
+    if (Backend_Version6_UpdateRepoIfMissing != 6)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -114,15 +117,37 @@ static void UpdateKeys(void)
 // while palettes and OAM (copied in the VBlank handler) stay on time.
 static void RunFrame(void)
 {
-    sInFrame = 1;
+    // The wide view stays on while the game keeps asking for it (it sets
+    // gPortWideView every frame it draws a dungeon floor or a ground map).
+    int wide = gPortWideView != 0;
+    if (wide)
+        gPortWideView--;
+    else
+        memset(gPortWideBg, 0, sizeof(gPortWideBg));
 
-    // Lines 0-159: visible.
+    sInFrame = 1;
+    if (wide != sViewWide) {
+        sViewWide = wide;
+        Ppu_SetView(wide);
+        memset(sFrame, 0, sizeof(sFrame)); // the narrow view's border is black
+    }
+
+    // Lines 0-159: visible. The wide view also draws lines below, as if the
+    // screen went on (no VCount events there, but the HBlank DMA continues).
     Ppu_BeginFrame();
-    for (int line = 0; line < GBA_H; line++) {
-        SetLine(line);
-        if (gPortLineHook)
-            gPortLineHook(line);
-        Ppu_RenderLine(line, &sFrame[line * GBA_W]);
+    for (int line = 0; line < (wide ? SCREEN_H : GBA_H); line++) {
+        if (line < GBA_H) {
+            SetLine(line);
+            if (gPortLineHook)
+                gPortLineHook(line);
+        }
+        if (wide) {
+            Ppu_RenderLine(line, &sFrame[line * SCREEN_W]);
+        }
+        else {
+            Ppu_RenderLine(line, sLine);
+            memcpy(&sFrame[(line + NARROW_OY) * SCREEN_W + NARROW_OX], sLine, GBA_W * sizeof(uint16_t));
+        }
         Dma_HBlank();
     }
     memcpy(sShown, sFrame, sizeof(sShown));

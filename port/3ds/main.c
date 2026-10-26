@@ -1,12 +1,13 @@
 // Nintendo 3DS backend (libctru).
 //
-// The game's 240x160 picture goes on the bottom screen by default, as on the
-// DS (1:1, or 4/3x to 320x213), or on the top screen (1:1, or 1.5x to
-// 360x240), chosen in Others > Game Options > Main Screen. Y toggles the
-// size. The other screen shows the DS-style second screen at 256x192 (team
-// panel in dungeons, world map elsewhere), or a short status text when there
-// is none (title screen). Sound goes through the DSP (needs
-// sdmc:/3ds/dspfirm.cdc, which most custom firmware setups already have).
+// The game's 256x192 picture (its 240x160 one framed, or a wider view of
+// dungeons and ground maps) goes on the bottom screen by default, as on the DS,
+// or on the top screen, chosen in Others > Screen/Layout Options > Main Screen;
+// 1:1, or 1.25x to 320x240 (Y toggles the size). The other screen shows the
+// DS-style second screen at 256x192 (team panel in dungeons, world map
+// elsewhere), or a short status text when there is none (title screen).
+// Sound goes through the DSP (needs sdmc:/3ds/dspfirm.cdc, which most custom
+// firmware setups already have).
 // The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save.
 
 #include <3ds.h>
@@ -25,7 +26,7 @@
 
 void AgbMain(void);
 
-const int Backend_Version5_UpdateRepoIfMissing = 5;
+const int Backend_Version6_UpdateRepoIfMissing = 6;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -79,34 +80,22 @@ static void PresentMain(const uint16_t *frame)
     uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
 
     if (!sScaled) {
-        const int ox = (width - GBA_W) / 2, oy = (240 - GBA_H) / 2;
-        for (int x = 0; x < GBA_W; x++) {
+        const int ox = (width - SCREEN_W) / 2, oy = (240 - SCREEN_H) / 2;
+        for (int x = 0; x < SCREEN_W; x++) {
             uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
-            for (int y = 0; y < GBA_H; y++)
-                col[-y] = lut[frame[y * GBA_W + x] & 0x7FFF];
+            for (int y = 0; y < SCREEN_H; y++)
+                col[-y] = lut[frame[y * SCREEN_W + x] & 0x7FFF];
         }
         return;
     }
 
-    if (sBottom) {
-        // 4/3x to 320x213: every source pixel becomes 1 or 2 screen pixels.
-        const int oy = (240 - 213) / 2;
-        for (int sx = 0; sx < 320; sx++) {
-            int x = sx * 3 / 4;
-            uint16_t *col = fb + sx * 240 + (239 - oy);
-            for (int sy = 0; sy < 213; sy++)
-                col[-sy] = lut[frame[(sy * 3 / 4) * GBA_W + x] & 0x7FFF];
-        }
-        return;
-    }
-
-    // 1.5x: every source pixel becomes 1 or 2 screen pixels in each direction.
-    const int ox = (400 - 360) / 2;
-    for (int sx = 0; sx < 360; sx++) {
-        int x = sx * 2 / 3;
+    // 1.25x to 320x240: every source pixel becomes 1 or 2 screen pixels.
+    const int ox = (width - 320) / 2;
+    for (int sx = 0; sx < 320; sx++) {
+        const uint16_t *src = frame + sx * 4 / 5;
         uint16_t *col = fb + (ox + sx) * 240 + 239;
         for (int sy = 0; sy < 240; sy++)
-            col[-sy] = lut[frame[(sy * 2 / 3) * GBA_W + x] & 0x7FFF];
+            col[-sy] = lut[src[(sy * 4 / 5) * SCREEN_W] & 0x7FFF];
     }
 }
 

@@ -4,6 +4,7 @@
 #define GUARD_PORT_GAME_H
 
 #include "gba/types.h"
+#include "../core/port_view.h"
 
 // A status symbol over a Pokémon (dungeon_pokemon_sprites.c), as the game
 // draws it this frame. Positions are relative to the point the Pokémon's
@@ -29,6 +30,9 @@ struct PortConfig
     u8 layout[2][2];        // [main, sub][size, scale]: placeholders for now
 };
 extern struct PortConfig gPortConfig;
+
+extern bool8 gPortGroundNarrow; // ground_bg.c
+bool8 Port_GroundViewIsNarrow(void); // ground_map.c
 void Port_SaveConfig(void);
 
 #endif

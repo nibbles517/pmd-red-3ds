@@ -8,6 +8,12 @@
 // backgrounds), mode 3, regular and affine sprites, windows 0/1 and the object
 // window, alpha blending, brighten/darken, and mosaic.
 //
+// Wide view (Ppu_SetView): the line is SCREEN_W (256) pixels, GBA x 0 drawn at
+// screen x WIDE_OX, and lines past 159 are drawn too (up to SCREEN_H). The game
+// only knows a 240x160 screen, so window edges at the screen's edges are
+// stretched to the new edges, and backgrounds the game draws for the larger
+// view (gPortWideBg) are read from wider maps kept outside VRAM.
+//
 // Speed matters here: this runs 160 times a frame on a 268 MHz CPU. Common
 // cases take fast paths (whole tile rows decoded at once, layers painted back
 // to front when no windows or alpha blending are active); everything else goes
@@ -19,7 +25,16 @@
 #include <string.h>
 #include "port.h"
 
-#define W 240
+#define W SCREEN_W // buffer size; the line drawn is sW pixels
+static int sW = GBA_W, sOx = 0, sWide = 0;
+struct PortWideBg gPortWideBg[4];
+
+void Ppu_SetView(int wide)
+{
+    sWide = wide;
+    sW = wide ? SCREEN_W : GBA_W;
+    sOx = wide ? WIDE_OX : 0;
+}
 #define TRANSPARENT 0x8000u
 
 enum { L_BG0, L_BG1, L_BG2, L_BG3, L_OBJ, L_BD };
@@ -96,8 +111,9 @@ static void RenderTextBgMosaic(int bg, int line, uint16_t *out)
     y = (y + vofs) & (heightPx - 1);
 
     int tileRow = y >> 3, inY = y & 7;
-    for (int sx = 0; sx < W; sx++) {
-        int px = sx - (sx % mosaicH);
+    for (int sx = 0; sx < sW; sx++) {
+        int gx = sx - sOx;
+        int px = gx - (((gx % mosaicH) + mosaicH) % mosaicH);
         int x = (px + hofs) & (widthPx - 1);
         unsigned block = 0;
         if (x >= 256) block += 1;
@@ -172,10 +188,57 @@ static inline int DecodeTileRow(uint16_t e, unsigned charBase, int inY, int colo
     return any;
 }
 
+// A background the game draws for the wide view: a 64x32-entry map in RAM,
+// scrolled by gPortWideBg (not by the BG registers). PORT_WIDE_BLACK entries
+// are opaque black (outside the map).
+static int RenderWideBg(int bg, int line, uint16_t *out)
+{
+    const struct PortWideBg *wb = &gPortWideBg[bg];
+    uint16_t cnt = R16(0x08 + bg * 2);
+    unsigned charBase = ((cnt >> 2) & 3) * 0x4000;
+    int color256 = (cnt >> 7) & 1;
+    int y = (line + wb->scrollY) & 255;
+    int inY = y & 7;
+    const uint16_t *row = &wb->map[(y >> 3) * 64];
+    int any = 0;
+    int x = (wb->scrollX - sOx) & 511;
+
+    for (int sx = 0; sx < sW;) {
+        uint16_t e = row[x >> 3];
+        int skip = x & 7;
+        int n = 8 - skip;
+        uint16_t px[8];
+        if (n > sW - sx) n = sW - sx;
+        if (e == PORT_WIDE_BLACK) {
+            for (int i = 0; i < n; i++) out[sx + i] = 0;
+            any = 1;
+        }
+        else if (DecodeTileRow(e, charBase, inY, color256, px)) {
+            for (int i = 0; i < n; i++) {
+                out[sx + i] = px[skip + i];
+                any |= !(px[skip + i] & TRANSPARENT);
+            }
+        }
+        else {
+            for (int i = 0; i < n; i++) out[sx + i] = TRANSPARENT;
+        }
+        sx += n;
+        x = (x + n) & 511;
+    }
+    return any;
+}
+
+// The text system puts this tile (a black line on its left) down the GBA
+// screen's left edge, in column 0 of BG0. The wide view shows what is left of
+// that edge, where the line would stand out: it is left out there.
+#define EDGE_TILE 0xF279
+
 // Returns nonzero if the line has any opaque pixel.
 static int RenderTextBg(int bg, int line, uint16_t *out)
 {
     uint16_t cnt = R16(0x08 + bg * 2);
+    if (sWide && gPortWideBg[bg].map)
+        return RenderWideBg(bg, line, out);
     if (cnt & 0x40) {
         RenderTextBgMosaic(bg, line, out);
         return 1;
@@ -195,17 +258,19 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
     int any = 0;
 
     int sx = 0;
-    int x = hofs & (widthPx - 1);
-    while (sx < W) {
+    int x = (hofs - sOx) & (widthPx - 1);
+    while (sx < sW) {
         unsigned mapOff = rowOff + ((x >= 256) ? 0x800 : 0) + ((x >> 3) & 31) * 2;
         int skip = x & 7;
         int n = 8 - skip;
-        if (n > W - sx) n = W - sx;
+        if (n > sW - sx) n = sW - sx;
         if (mapOff + 1 >= 0x10000) {
             for (int i = 0; i < n; i++) out[sx + i] = TRANSPARENT;
         }
         else {
             uint16_t e = *(const uint16_t *)&gPortVram[mapOff]; // map entries are 2-byte aligned
+            if (sWide && e == EDGE_TILE)
+                e = 0; // see EDGE_TILE
             if (n == 8) {
                 any |= DecodeTileRow(e, charBase, inY, color256, &out[sx]);
             }
@@ -240,10 +305,10 @@ static void RenderAffineBg(int bg, uint16_t *out)
     int wrap = (cnt >> 13) & 1;
     int16_t pa = (int16_t)R16(0x20 + i * 0x10);
     int16_t pc = (int16_t)R16(0x24 + i * 0x10);
-    int32_t fx = sAffX[i], fy = sAffY[i];
+    int32_t fx = sAffX[i] - sOx * pa, fy = sAffY[i] - sOx * pc;
     int mosaicH = (cnt & 0x40) ? (R16(0x4C) & 0xF) + 1 : 1;
 
-    for (int sx = 0; sx < W; sx++, fx += pa, fy += pc) {
+    for (int sx = 0; sx < sW; sx++, fx += pa, fy += pc) {
         int32_t sampleX = fx, sampleY = fy;
         if (mosaicH > 1) {
             int back = sx % mosaicH;
@@ -263,8 +328,10 @@ static void RenderAffineBg(int bg, uint16_t *out)
 
 static void RenderMode3(int line, uint16_t *out)
 {
-    for (int x = 0; x < W; x++) {
-        unsigned a = (line * W + x) * 2;
+    for (int x = 0; x < sW; x++) {
+        int gx = x - sOx;
+        if (gx < 0 || gx >= GBA_W || line >= GBA_H) { out[x] = TRANSPARENT; continue; }
+        unsigned a = (line * GBA_W + gx) * 2;
         out[x] = (uint16_t)((gPortVram[a] | (gPortVram[a + 1] << 8)) & 0x7FFF);
     }
 }
@@ -319,7 +386,7 @@ static void RenderObjects(int line, uint16_t dispcnt)
         memset(&sObj.win[sObjDirtyMin], 0, n);
     }
     sObjAny = sObjSemiAny = sObjWinAny = 0;
-    sObjMinX = W;
+    sObjMinX = sW;
     sObjMaxX = -1;
     sObjPrioMask = 0;
     if (!(dispcnt & 0x1000))
@@ -361,7 +428,8 @@ static void RenderObjects(int line, uint16_t dispcnt)
             continue;
         int x = a1 & 0x1FF;
         if (x >= 256) x -= 512;
-        if (x >= W || x + boundW <= 0)
+        x += sOx;
+        if (x >= sW || x + boundW <= 0)
             continue;
         int prio = (a2 >> 10) & 3;
         unsigned palBank = (a2 >> 12) & 0xF;
@@ -376,10 +444,10 @@ static void RenderObjects(int line, uint16_t dispcnt)
             int16_t pd = (int16_t)(gPortOam[p + 30] | (gPortOam[p + 31] << 8));
             for (int bx = 0; bx < boundW; bx++) {
                 int sx = x + bx;
-                if (sx < 0 || sx >= W)
+                if (sx < 0 || sx >= sW)
                     continue;
                 int col = bx;
-                if (objMosaic) col -= (sx % mosH);
+                if (objMosaic) col -= ((sx - sOx) % mosH + mosH) % mosH;
                 int cx = col - boundW / 2, cy = row - boundH / 2;
                 int tx = ((pa * cx + pb * cy) >> 8) + w / 2;
                 int ty = ((pc * cx + pd * cy) >> 8) + h / 2;
@@ -398,11 +466,11 @@ static void RenderObjects(int line, uint16_t dispcnt)
         int ty = vflip ? h - 1 - row : row;
         unsigned rowTile = tileNum + (ty >> 3) * rowStride;
         int bx0 = x < 0 ? -x : 0;
-        int bx1 = (x + boundW > W) ? W - x : boundW;
+        int bx1 = (x + boundW > sW) ? sW - x : boundW;
         if (objMosaic) {
             for (int bx = bx0; bx < bx1; bx++) {
                 int sx = x + bx;
-                int col = bx - (sx % mosH);
+                int col = bx - (((sx - sOx) % mosH + mosH) % mosH);
                 int tx = hflip ? w - 1 - col : col;
                 if (tx < 0 || tx >= w) continue;
                 unsigned idx = ObjTexel(rowTile + (tx >> 3) * tileStep, tx, ty, color256);
@@ -451,6 +519,15 @@ static inline uint16_t Darken(uint16_t c, int evy)
     return (uint16_t)(r | (g << 5) | (b << 10));
 }
 
+// Wide view: window edges in GBA coordinates to screen coordinates. Edges at
+// the GBA screen's edges move to the wide screen's edges.
+static void WideWindowX(int *lo, int *hi)
+{
+    if (*lo == 1 && *hi == 0) { *lo = 0; *hi = sW; return; } // "x >= 1 or x < 0": whole line
+    *lo = (*lo == 0) ? 0 : (*lo >= GBA_W) ? sW : *lo + sOx;
+    *hi = (*hi == 0) ? 0 : (*hi >= GBA_W) ? sW : *hi + sOx;
+}
+
 static int InWindowRange(int v, int lo, int hi, int limit)
 {
     if (hi > limit || lo > hi) {
@@ -465,16 +542,23 @@ static int InWindowRange(int v, int lo, int hi, int limit)
 // (same as InWindowRange, but for a whole line at once).
 static void FillSpan(uint8_t *wm, int lo, int hi, uint8_t value)
 {
-    if (hi > W || lo > hi) {
-        if (hi > W && lo <= hi) hi = W;
+    if (sWide)
+        WideWindowX(&lo, &hi);
+    if (hi > sW || lo > hi) {
+        if (hi > sW && lo <= hi) hi = sW;
         else { // wrapped: x >= lo or x < hi
-            for (int x = 0; x < W; x++)
+            for (int x = 0; x < sW; x++)
                 if (x >= lo || x < hi) wm[x] = value;
             return;
         }
     }
     for (int x = lo; x < hi; x++) wm[x] = value;
 }
+
+// Lines a window can reach: 160, or the wide view's height. A window that
+// reaches the GBA screen's bottom reaches the wide screen's bottom.
+static int sVLimit = GBA_H;
+static inline int WinBottom(int hi) { return (sWide && hi >= GBA_H) ? SCREEN_H : hi; }
 
 // Composites one line. Layers are painted back to front through the window
 // mask, tracking each pixel's top two layers; then the colour effect (alpha,
@@ -509,23 +593,23 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
         }
         if (win1) {
             uint16_t h = R16(0x42), v = R16(0x46);
-            if (InWindowRange(line, v >> 8, v & 0xFF, 160))
+            if (InWindowRange(line, v >> 8, WinBottom(v & 0xFF), sVLimit))
                 FillSpan(wm, h >> 8, h & 0xFF, (winin >> 8) & 0x3F);
         }
         if (win0) { // window 0 has priority over window 1
             uint16_t h = R16(0x40), v = R16(0x44);
-            if (InWindowRange(line, v >> 8, v & 0xFF, 160))
+            if (InWindowRange(line, v >> 8, WinBottom(v & 0xFF), sVLimit))
                 FillSpan(wm, h >> 8, h & 0xFF, winin & 0x3F);
         }
     }
 
     uint16_t backdrop = Pal(0);
-    for (int x = 0; x < W; x++) dst[x] = backdrop;
+    for (int x = 0; x < sW; x++) dst[x] = backdrop;
     memset(topL, L_BD, sizeof(topL));
     int needSec = (effect == 1) || sObjSemiAny;
     if (needSec) {
         memset(secL, L_BD, sizeof(secL));
-        for (int x = 0; x < W; x++) secC[x] = backdrop;
+        for (int x = 0; x < sW; x++) secC[x] = backdrop;
     }
 
     // Back to front: within a priority, BG3..BG0, then sprites (a sprite beats
@@ -537,7 +621,7 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
             const uint16_t *src = sBg[b];
             uint8_t bit = (uint8_t)(1u << b);
             if (needSec) {
-                for (int x = 0; x < W; x++) {
+                for (int x = 0; x < sW; x++) {
                     if (!(src[x] & TRANSPARENT) && (wm[x] & bit)) {
                         secC[x] = dst[x]; secL[x] = topL[x];
                         dst[x] = src[x]; topL[x] = (uint8_t)b;
@@ -545,7 +629,7 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
                 }
             }
             else {
-                for (int x = 0; x < W; x++) {
+                for (int x = 0; x < sW; x++) {
                     if (!(src[x] & TRANSPARENT) && (wm[x] & bit)) {
                         dst[x] = src[x]; topL[x] = (uint8_t)b;
                     }
@@ -565,7 +649,7 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
     // Colour effects.
     if (effect == 0 && !sObjSemiAny)
         return;
-    for (int x = 0; x < W; x++) {
+    for (int x = 0; x < sW; x++) {
         int t = topL[x];
         if (needSec && t == L_OBJ && sObj.semi[x] && ((bldcnt >> (8 + secL[x])) & 1)) {
             dst[x] = Blend(dst[x], secC[x], eva, evb); // semi-transparent sprites always alpha blend
@@ -587,8 +671,10 @@ void Ppu_RenderLine(int line, uint16_t *dst)
     uint16_t dispcnt = R16(0x00);
     int mode = dispcnt & 7;
 
+    sVLimit = sWide ? SCREEN_H : GBA_H;
+
     if (dispcnt & 0x80) { // forced blank: white
-        for (int x = 0; x < W; x++) dst[x] = 0x7FFF;
+        for (int x = 0; x < sW; x++) dst[x] = 0x7FFF;
         for (int i = 0; i < 2; i++) { AffineReloadIfWritten(i); AffineAdvance(i); }
         return;
     }

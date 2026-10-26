@@ -90,7 +90,7 @@ def where(syms, addr):
     return f'{best[1]}+{addr - best[0]:#x}' if best else hex(addr)
 
 
-def write_png(path, frame_bytes, width=240, height=160):
+def write_png(path, frame_bytes, width=256, height=192):
     rows = []
     for y in range(height):
         row = bytearray(b'\0')
@@ -237,7 +237,7 @@ class Harness:
             else:
                 self.line.append(value & 0xFF)
         elif reg == 1:  # present
-            self.last_frame = bytes(uc.mem_read(value, 240 * 160 * 2))
+            self.last_frame = bytes(uc.mem_read(value, 256 * 192 * 2))
             if getattr(self, 'pending_capture_png', None):
                 open(self.pending_capture_png[:-4] + '.frame', 'wb').write(self.last_frame)
                 self.pending_capture_png = None

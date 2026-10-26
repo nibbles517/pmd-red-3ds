@@ -19,7 +19,7 @@ enum {
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
 
-const int Backend_Version5_UpdateRepoIfMissing = 5;
+const int Backend_Version6_UpdateRepoIfMissing = 6;
 
 void AgbMain(void);
 

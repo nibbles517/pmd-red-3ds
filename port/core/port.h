@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "port_view.h"
 
 #define GBA_W 240
 #define GBA_H 160
@@ -31,6 +32,7 @@ extern void (*gPortLineHook)(int line);
 // ppu.c
 void Ppu_BeginFrame(void);
 void Ppu_RenderLine(int line, uint16_t *dst);
+void Ppu_SetView(int wide); // wide: SCREEN_W-pixel lines, lines past 159 too (port_view.h)
 
 // dma.c
 void Dma_HBlank(void);
@@ -40,7 +42,7 @@ void Dma_Reset(void);
 // frame.c
 void Port_Init(void);
 uint64_t Port_FrameCount(void);
-const uint16_t *Port_Framebuffer(void); // 240x160 BGR555, last completed frame
+const uint16_t *Port_Framebuffer(void); // SCREEN_W x SCREEN_H BGR555, last completed frame
 
 // sound.c
 void Sound_EndFrame(void);
@@ -56,7 +58,7 @@ void Port_LoadConfig(void);
 bool Port_RenderSubScreen(uint16_t *out);
 
 // Backend: implemented once per platform.
-void Backend_Present(const uint16_t *frame);   // 240x160 BGR555
+void Backend_Present(const uint16_t *frame);   // SCREEN_W x SCREEN_H BGR555
 uint16_t Backend_PollKeys(void);               // active-high GBA key bits
 void Backend_EndFrame(void);                   // pacing; may also service the OS
 void Backend_Log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -64,7 +66,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version5_UpdateRepoIfMissing;
+extern const int Backend_Version6_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
