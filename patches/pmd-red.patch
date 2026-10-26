@@ -1765,10 +1765,10 @@ index 86f582c2..8135b283 100644
  {
      s32 menuAction;
 diff --git a/src/options_menu2.c b/src/options_menu2.c
-index 03531690..8d65d723 100644
+index 03531690..e5ca5ad0 100644
 --- a/src/options_menu2.c
 +++ b/src/options_menu2.c
-@@ -10,9 +10,27 @@
+@@ -10,9 +10,29 @@
  #include "text_1.h"
  #include "text_2.h"
  #include "text_3.h"
@@ -1783,8 +1783,10 @@ index 03531690..8d65d723 100644
 +// game's own entry.
 +static bool8 Port_ToggleWindowsOption(s32 entry)
 +{
-+    if (entry == 1)
++    if (entry == 1) {
 +        gPortConfig.windowShading ^= 1;
++        UpdateFadeInTile(sub_80063B0()); // takes effect at once
++    }
 +    else if (entry == 2)
 +        gPortConfig.windowBorder ^= 1;
 +    else
@@ -1796,7 +1798,7 @@ index 03531690..8d65d723 100644
  #include "data/options_menu2.h"
  
  static void CreateOptionsMenu(void);
-@@ -27,10 +45,10 @@ bool8 sub_801E198(GameOptions *optionsMenu)
+@@ -27,10 +47,10 @@ bool8 sub_801E198(GameOptions *optionsMenu)
      sUnknown_203B260->unk48 = &sUnknown_203B260->unk4C.id[0];
      RestoreSavedWindows(&sUnknown_203B260->unk4C);
      sUnknown_203B260->unk4C.id[sUnknown_203B260->unk44] = sUnknown_80DC03C;
@@ -1809,7 +1811,7 @@ index 03531690..8d65d723 100644
      nullsub_38();
      CreateOptionsMenu();
      return TRUE;
-@@ -50,6 +68,13 @@ u32 sub_801E218(void)
+@@ -50,6 +70,13 @@ u32 sub_801E218(void)
              PlayMenuSoundEffect(MENU_SFX_ACCEPT);
              return 3;
          case INPUT_DPAD_LEFT:
@@ -1823,7 +1825,7 @@ index 03531690..8d65d723 100644
              if (sUnknown_203B260->input.menuIndex == 0) {
                  if (sUnknown_203B260->optionsMenu->windowColor == WINDOW_COLOR_BLUE)
                      sUnknown_203B260->optionsMenu->windowColor = WINDOW_COLOR_GREEN;
-@@ -61,6 +86,13 @@ u32 sub_801E218(void)
+@@ -61,6 +88,13 @@ u32 sub_801E218(void)
              }
              break;
          case INPUT_DPAD_RIGHT:
@@ -1837,7 +1839,7 @@ index 03531690..8d65d723 100644
              if (sUnknown_203B260->input.menuIndex == 0) {
                  if (sUnknown_203B260->optionsMenu->windowColor > WINDOW_COLOR_RED)
                      sUnknown_203B260->optionsMenu->windowColor = WINDOW_COLOR_BLUE;
-@@ -124,5 +156,22 @@ static void CreateOptionsMenu(void)
+@@ -124,5 +158,22 @@ static void CreateOptionsMenu(void)
              break;
      }
  
@@ -2287,7 +2289,7 @@ index 812df38d..e3029ee1 100644
          // Set size to 1
          *oam++ = 0x4000;
 diff --git a/src/text_1.c b/src/text_1.c
-index e6612f2c..3eb5c085 100644
+index e6612f2c..df47c93b 100644
 --- a/src/text_1.c
 +++ b/src/text_1.c
 @@ -1,4 +1,10 @@
@@ -2328,7 +2330,24 @@ index e6612f2c..3eb5c085 100644
      UpdateFadeInTile(0);
  }
  
-@@ -258,6 +264,15 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+@@ -178,6 +184,16 @@ u32 UpdateFadeInTile(u32 a0)
+     if (a0 == 0 || a0 == 2) {
+         sub_800CDA8(2);
+         r2 = sFadeInNone;
++#ifdef PLATFORM_3DS
++        // Windows Options > BG Shading: Translucent gives the windows the
++        // dungeon's translucent backgrounds (its fill tile, blended) outside
++        // dungeons too, keeping the maps' own blending of BG2 (table 5:
++        // BG1 and BG2 blended).
++        if (gPortConfig.windowShading) {
++            sub_800CDA8(5);
++            r2 = sFadeInDungeon;
++        }
++#endif
+     }
+     else {
+         sub_800CDA8(1);
+@@ -258,6 +274,15 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
          winTemplates = &sDummyWindows;
      if (a2)
          sub_8009388();
@@ -2344,7 +2363,7 @@ index e6612f2c..3eb5c085 100644
  
      ResetWindowBgData();
  
-@@ -320,6 +335,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
+@@ -320,6 +345,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
      newWindow = &windows[windowId];
      x = winTemplate->pos.x + positionModifier->x;
      y =  winTemplate->pos.y + positionModifier->y;
