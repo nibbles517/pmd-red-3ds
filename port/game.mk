@@ -68,5 +68,13 @@ $(GAME_OBJ)/%.o: $(UPSTREAM)/src/%.c
 # which the linker turns into `blx`.
 $(GAME_OBJ)/m4a.o: GAME_CFLAGS += -fno-optimize-sibling-calls
 
+# Game data tables in C. Some code reads past the end of one array into the
+# next one defined after it in the same file (effect animations keep each
+# frame's header and its tilemap as two arrays), so these keep their variables
+# in source order (GCC otherwise emits them reversed) and in one section, so
+# the linker can neither reorder nor drop the "unused" second halves.
+GAME_DATA_C_OBJS := $(filter $(GAME_OBJ)/data/%,$(GAME_OBJS))
+$(GAME_DATA_C_OBJS): GAME_CFLAGS := $(filter-out -fdata-sections,$(GAME_CFLAGS)) -fno-toplevel-reorder
+
 # Header dependencies, so edits to patched headers rebuild what uses them.
 -include $(GAME_OBJS:.o=.d)

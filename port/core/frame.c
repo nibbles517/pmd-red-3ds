@@ -100,18 +100,18 @@ static void UpdateKeys(void)
     W16(REG_KEYINPUT, (uint16_t)(~Backend_PollKeys() & 0x3FF));
 }
 
-// One full frame of hardware, starting at the beginning of VBlank.
+// One full frame of hardware: the visible lines, then VBlank.
+//
+// On the GBA, VBlankIntrWait returns at the start of VBlank and the game's
+// main loop then runs while the next frame is drawn, mostly before the
+// scanlines reach the screen areas it changes. So what the main loop writes
+// (tilemaps copied from buffers, scroll values) shows in the very next frame.
+// Drawing the visible lines here, when the game next waits, keeps that
+// ordering; drawing them before returning would delay those writes by a frame
+// while palettes and OAM (copied in the VBlank handler) stay on time.
 static void RunFrame(void)
 {
     sInFrame = 1;
-
-    // Lines 160-227: VBlank.
-    SetLine(160);
-    if (R16(REG_DISPSTAT) & STAT_VBLANK_IE)
-        Raise(INTR_VBLANK, 1);
-    Dma_VBlank();
-    for (int line = 161; line < LINES; line++)
-        SetLine(line);
 
     // Lines 0-159: visible.
     Ppu_BeginFrame();
@@ -122,11 +122,19 @@ static void RunFrame(void)
         Ppu_RenderLine(line, &sFrame[line * GBA_W]);
         Dma_HBlank();
     }
-
-    sInFrame = 0;
-    sVirtualLine = 160; // the game resumes "during" the next frame's display
     memcpy(sShown, sFrame, sizeof(sShown));
     Backend_Present(sShown);
+
+    // Lines 160-227: VBlank.
+    SetLine(160);
+    if (R16(REG_DISPSTAT) & STAT_VBLANK_IE)
+        Raise(INTR_VBLANK, 1);
+    Dma_VBlank();
+    for (int line = 161; line < LINES; line++)
+        SetLine(line);
+
+    sInFrame = 0;
+    sVirtualLine = 160; // the game resumes at the start of the next VBlank
     Sound_EndFrame();
     Backend_EndFrame();
     UpdateKeys();

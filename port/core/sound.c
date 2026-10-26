@@ -39,11 +39,20 @@ void Sound_EndFrame(void)
         return; // the mixer did not run this frame
     sLastCounter = (u8)counter;
 
-    // m4aSoundVSync counts pcmDmaCounter down from pcmDmaPeriod to 1; SoundMain
-    // then mixes into chunk (period - (counter - 1)), or chunk 0 when counter is 1.
-    chunk = (counter > 1) ? info->pcmDmaPeriod - (counter - 1) : 0;
-    if (chunk < 0 || chunk >= info->pcmDmaPeriod)
+    // Which chunk to play. pmd-red runs the mixer (SoundMain) in its main loop,
+    // just after the VBlank handler's m4aSoundVSync has counted pcmDmaCounter
+    // down (from pcmDmaPeriod to 1, restarting the DMA at chunk 0 when it
+    // wraps). With the counter at c, SoundMain mixes chunk (period - c + 1),
+    // or 0 for c = 1, and the hardware plays chunk (period - c) meanwhile.
+    // This runs at VBlank, after the counter moved on: the last mix went into
+    // chunk (period - counter). The GBA plays that chunk only from the next
+    // frame on, while the Game Boy channels follow the driver's register writes
+    // at once, so they lead the mixed sound by a frame. Keep that offset by
+    // playing the chunk mixed the time before, together with the Game Boy
+    // channels as the last SoundMain left them.
+    if (counter < 1 || counter > info->pcmDmaPeriod)
         return;
+    chunk = (2 * info->pcmDmaPeriod - counter - 1) % info->pcmDmaPeriod;
 
     // Direct Sound: FIFO A gets the first half of pcmBuffer, FIFO B the second
     // (SoundInit). SOUNDCNT_H routes each to left/right at 50% or 100%.
@@ -53,6 +62,9 @@ void Sound_EndFrame(void)
     {
         int volA = (cnt & 0x0004) ? 4 : 2, volB = (cnt & 0x0008) ? 4 : 2;
         int aR = (cnt >> 8) & 1, aL = (cnt >> 9) & 1, bR = (cnt >> 12) & 1, bL = (cnt >> 13) & 1;
+#ifdef SOUND_MUTE_PCM_FOR_TEST
+        aL = aR = bL = bR = 0;
+#endif
         for (i = 0; i < spv; i++) {
             left[i] = (aL ? a[i] * volA : 0) + (bL ? b[i] * volB : 0);
             right[i] = (aR ? a[i] * volA : 0) + (bR ? b[i] * volB : 0);

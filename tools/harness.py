@@ -20,7 +20,7 @@ needs: libunicorn (LIBUNICORN_PATH) and its Python bindings on PYTHONPATH
 import argparse, os, struct, sys, time, wave, zlib
 
 from unicorn import Uc, UcError, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_MEM_WRITE, UC_HOOK_MEM_READ, \
-    UC_HOOK_MEM_UNMAPPED, UC_PROT_ALL
+    UC_HOOK_MEM_UNMAPPED, UC_PROT_ALL, UC_HOOK_CODE
 from unicorn.arm_const import UC_ARM_REG_PC, UC_ARM_REG_LR, UC_ARM_REG_SP, UC_CPU_ARM_1176
 
 IO_BASE = 0xF0000000
@@ -135,6 +135,21 @@ class Harness:
         self.audio = bytearray()
         self.audio_rate = 0
         os.makedirs(args.out, exist_ok=True)
+        self.watch_base = {}
+        for w in args.watch:
+            spec, _, ln = w.partition(':')
+            name, _, off = spec.partition('+')
+            addrs = [v for v, _, n in self.syms if n == name]
+            a = addrs[0] + (int(off, 0) if off else 0)
+            self.watch_base[w] = a
+            self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_watch, user_data=w, begin=a, end=a + int(ln or '4', 0) - 1)
+        for name in args.trace:
+            addrs = [v for v, _, n in self.syms if n == name]
+            if not addrs:
+                print(f'--trace: no symbol {name}')
+                continue
+            a = addrs[0] & ~1
+            self.uc.hook_add(UC_HOOK_CODE, self.on_trace, user_data=name, begin=a, end=a)
 
     REG_NAMES = None
 
@@ -174,6 +189,19 @@ class Harness:
         self.frame = st['frame']
         self.regs = st['io']
         return self.uc.reg_read(UC_ARM_REG_PC)
+
+    def on_watch(self, uc, access, addr, size, value, user):
+        import unicorn.arm_const as c
+        pc = uc.reg_read(UC_ARM_REG_PC); lr = uc.reg_read(UC_ARM_REG_LR)
+        n = self.watch_count = getattr(self, 'watch_count', 0) + 1
+        if n < 4000:
+            print(f'[watch] f{self.frame} {user}+{addr - self.watch_base[user]:#x} <- {value:#x} ({size}) pc={where(self.syms, pc)} lr={where(self.syms, lr & ~1)}', flush=True)
+
+    def on_trace(self, uc, addr, size, name):
+        import unicorn.arm_const as c
+        r = [uc.reg_read(getattr(c, f'UC_ARM_REG_R{i}')) for i in range(4)]
+        lr = uc.reg_read(UC_ARM_REG_LR)
+        print(f'[trace] f{self.frame} {name}(' + ', '.join(f'{v:#x}' for v in r) + f') <- {where(self.syms, lr & ~1)}', flush=True)
 
     def keys(self):
         m = 0
@@ -333,6 +361,8 @@ def main():
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')
     ap.add_argument('--capture', type=int, action='append', default=[], help='capture this frame for renderer tests')
+    ap.add_argument('--trace', action='append', default=[], help='log calls to this function (frame, r0-r3, lr)')
+    ap.add_argument('--watch', action='append', default=[], help='log writes to SYMBOL+OFFSET[:LEN]')
     ap.add_argument('--profile', type=int, default=0, help='sample the PC every N instructions')
     return Harness(ap.parse_args()).run()
 
