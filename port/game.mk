@@ -52,5 +52,11 @@ $(GAME_OBJ)/%.o: $(UPSTREAM)/src/%.c
 	@$(GAME_AS) -march=armv6k -mfloat-abi=hard -o $@ $(GAME_OBJ)/$*.s
 	@echo "  CC   $*.c"
 
+# m4a.c calls into the Thumb sound driver (m4a_1.s). An ARM tail call (`b`)
+# cannot switch to Thumb, so the linker would add stubs whose relocations the
+# .3dsx loaders reject. Without sibling-call optimisation these become `bl`,
+# which the linker turns into `blx`.
+$(GAME_OBJ)/m4a.o: GAME_CFLAGS += -fno-optimize-sibling-calls
+
 # Header dependencies, so edits to patched headers rebuild what uses them.
 -include $(GAME_OBJS:.o=.d)

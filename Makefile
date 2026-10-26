@@ -40,7 +40,8 @@ $(CORE_OBJ)/%.o: port/core/%.c port/core/port.h
 # sound.c reads the m4a driver's structures, so it builds like game code.
 $(CORE_OBJ)/sound.o: port/core/sound.c port/core/port.h
 	@mkdir -p $(dir $@)
-	@$(GAME_CC) $(ARCH_FLAGS) $(GAME_ABI_FLAGS) -O2 -g -w $(GAME_CPPFLAGS) -c $< -o $@
+	@# No tail calls: it calls the Thumb sound driver (see port/game.mk).
+	@$(GAME_CC) $(ARCH_FLAGS) $(GAME_ABI_FLAGS) -O2 -g -w -fno-optimize-sibling-calls $(GAME_CPPFLAGS) -c $< -o $@
 	@echo "  CC   $<"
 
 # The m4a mixer stays in its original ARM/Thumb assembly, which the 3DS CPU runs natively.
