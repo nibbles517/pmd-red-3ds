@@ -999,6 +999,8 @@ static int TransitionBrightness(void)
                 return PlaceOnMap() ? Port_TitleBrightness() * 0x100 / 32 : -1; // the title menu's fades
             else if (gDungeon == NULL && gPortGroundRunning && Port_GroundIsDemo())
                 return PlaceOnMap() ? GroundLevel() : -1; // intro scenes: follow their fades
+            else if (gDungeon == NULL && !gPortGroundRunning && PlaceOnMap())
+                return 0; // between modes (the messages after quicksaving): black
             else
                 return -1;
             break;

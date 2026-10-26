@@ -1329,7 +1329,7 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..89703715 100644
+index 372641a7..de69a01f 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
 @@ -1,4 +1,7 @@
@@ -1340,7 +1340,7 @@ index 372641a7..89703715 100644
  #include "globaldata.h"
  #include "constants/bg_music.h"
  #include "constants/friend_area.h"
-@@ -60,6 +63,17 @@ typedef struct unkTalkTable
+@@ -60,6 +63,18 @@ typedef struct unkTalkTable
  } unkTalkTable;
  
  static EWRAM_DATA s32 sTitleBrightness = 0; // NDS=210FAC0
@@ -1350,6 +1350,7 @@ index 372641a7..89703715 100644
 +// (0-32, as the menu fades in and out).
 +extern bool8 gPortTitleMenu;
 +extern s32 gPortTitleQuickSave;
++bool8 gPortQuickSaved;
 +s32 Port_TitleBrightness(void)
 +{
 +    return sTitleBrightness;
@@ -1358,7 +1359,7 @@ index 372641a7..89703715 100644
  // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
  
  static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
-@@ -166,6 +180,15 @@ void GameLoop_Async(void)
+@@ -166,6 +181,17 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
@@ -1367,14 +1368,16 @@ index 372641a7..89703715 100644
 +        // ... which shows where the adventure goes on: the dungeon of a
 +        // quicksave, as the Continue screen does (load_screen.c)
 +        gPortTitleQuickSave = -1;
++        // (a quicksave made since the game started: the save says so, not
++        // sub_8011C1C(), which is read from the save at boot only)
 +        if (sub_8011FA8() == 0xF1207
-+            && (sub_8011C1C() == 2 || CountMailType(WONDER_MAIL_TYPE_SOS) != 0 || CountMailType(WONDER_MAIL_TYPE_OKD) != 0))
++            && (sub_8011C1C() == 2 || gPortQuickSaved || CountMailType(WONDER_MAIL_TYPE_SOS) != 0 || CountMailType(WONDER_MAIL_TYPE_OKD) != 0))
 +            gPortTitleQuickSave = GetDungeonLocationInfo()->id;
 +#endif
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -241,6 +264,9 @@ void GameLoop_Async(void)
+@@ -241,6 +267,9 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
@@ -1384,44 +1387,7 @@ index 372641a7..89703715 100644
  
          switch (nextMenu) {
              case 2: {
-@@ -270,8 +296,25 @@ void GameLoop_Async(void)
- }
- 
- // arm9.bin::0200E02C
-+#ifdef PLATFORM_3DS
-+// The title menu's picture, wide (DS size, port_view.h): its two 32x32 maps
-+// are DS-sized pictures, drawn whole from the screen's top left.
-+static u16 sTitleWide[2][32 * 64];
-+#endif
-+
- static void MainLoops_RunFrameActions(u32 unused)
- {
-+#ifdef PLATFORM_3DS
-+    if (gPortTitleMenu && PORT_DS_SIZE) {
-+        s32 bg;
-+        for (bg = 2; bg <= 3; bg++) {
-+            gPortWideBg[bg].map = sTitleWide[bg - 2];
-+            gPortWideBg[bg].scrollX = WIDE_OX;
-+            gPortWideBg[bg].scrollY = 0;
-+        }
-+        gPortWideView = 2;
-+    }
-+#endif
-     DrawDialogueBoxString_Async();
-     CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
-     nullsub_8(gGameOptionsRef->touchScreen);
-@@ -321,6 +364,10 @@ static void LoadTitleScreen(void)
-             u16 *ptr = stru->tilemap;
-             gBgTilemaps[2][i][j] = ptr[i * 32 + j];
-             gBgTilemaps[3][i][j] = ptr[i * 32 + j + (32 * 32)];
-+#ifdef PLATFORM_3DS
-+            sTitleWide[0][i * 64 + j] = ptr[i * 32 + j];
-+            sTitleWide[1][i * 64 + j] = ptr[i * 32 + j + (32 * 32)];
-+#endif
-         }
-     }
- 
-@@ -1095,7 +1142,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -1095,7 +1124,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
@@ -1992,6 +1958,25 @@ index 00000000..abba2877
 +}
 +
 +#endif // PLATFORM_3DS
+diff --git a/src/quick_save_write.c b/src/quick_save_write.c
+index e93308d7..05987253 100644
+--- a/src/quick_save_write.c
++++ b/src/quick_save_write.c
+@@ -48,6 +48,14 @@ u32 WriteQuickSave(void)
+             switch (sQuickSaveWrite->quickSaveStatus) {
+                 case SAVE_COMPLETED:
+                     sub_80121E0(987655);
++#ifdef PLATFORM_3DS
++                    {
++                        // for the port's second screen on the title menu
++                        // (main_loops.c): the adventure goes on from here
++                        extern bool8 gPortQuickSaved;
++                        gPortQuickSaved = TRUE;
++                    }
++#endif
+ 
+                     if (sQuickSaveWrite->unkC != 0)
+                         CreateDialogueBoxAndPortrait(sUnknown_80D45F4, 0, 0, 0x301);
 diff --git a/src/reg_control.c b/src/reg_control.c
 index e6872a26..c6368b99 100644
 --- a/src/reg_control.c

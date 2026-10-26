@@ -265,16 +265,34 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
     if (sWide && bg < 2) {
         // BG0/BG1 hold the text windows, made for the GBA screen; what the
         // maps hold outside it is left over (old windows), so not drawn.
-        if (line >= GBA_H) {
-            for (int x = 0; x < sW; x++) out[x] = TRANSPARENT;
-            return 0;
+        // Column 0 of BG1 is always the text system's fill tile, which in
+        // dungeons is the darkness (blended over the floor): outside the GBA
+        // screen BG1 is that tile, so the darkness reaches the edges.
+        int any = 0;
+        if (line < GBA_H) {
+            sW = sOx + GBA_W;
+            any = RenderTextBgVram(bg, line, out, cnt);
+            sW = SCREEN_W;
         }
-        sW = sOx + GBA_W;
-        int any = RenderTextBgVram(bg, line, out, cnt);
-        sW = SCREEN_W;
-        for (int x = 0; x < sOx; x++) out[x] = TRANSPARENT;
-        for (int x = sOx + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
-        return any;
+        if (bg == 0) {
+            int from = line < GBA_H ? sOx : 0;
+            for (int x = 0; x < from; x++) out[x] = TRANSPARENT;
+            for (int x = line < GBA_H ? sOx + GBA_W : 0; x < sW; x++) out[x] = TRANSPARENT;
+            return any;
+        }
+        int hofs = R16(0x14) & 0x1FF, vofs = R16(0x16) & 0x1FF;
+        int gy = (line < GBA_H ? line : GBA_H - 1) + vofs;
+        unsigned screenBase = ((cnt >> 8) & 0x1F) * 0x800;
+        unsigned mapOff = screenBase + ((gy >> 3) & 31) * 64 + ((hofs >> 3) & 31) * 2;
+        uint16_t e = *(const uint16_t *)&gPortVram[mapOff];
+        uint16_t px[8];
+        int fill = DecodeTileRow(e, ((cnt >> 2) & 3) * 0x4000, (line + vofs) & 7, (cnt >> 7) & 1, px);
+        for (int x = 0; x < sW; x++) {
+            if (line < GBA_H && x >= sOx && x < sOx + GBA_W)
+                continue;
+            out[x] = px[(x - sOx + hofs) & 7];
+        }
+        return any | fill;
     }
     return RenderTextBgVram(bg, line, out, cnt);
 }
