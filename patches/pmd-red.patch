@@ -717,7 +717,7 @@ index 4a9a72ad..05f95b09 100644
      gDungeon->unk181e8.unk1821A = 0;
  }
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..9925c91d 100644
+index 0680f301..3ac178b5 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,11 @@
@@ -732,7 +732,7 @@ index 0680f301..9925c91d 100644
  
  static void PrintOthersMenuOptions(void);
  static void ShowGameOptionsMenu(void);
-@@ -147,9 +152,225 @@ void ShowDungeonOthersMenu(void)
+@@ -147,9 +152,251 @@ void ShowDungeonOthersMenu(void)
  enum {
      GAME_OPTION_DUNGEON,
      GAME_OPTION_OTHERS,
@@ -768,6 +768,11 @@ index 0680f301..9925c91d 100644
 +static const u8 sTextLog[] = _("Log");
 +static const u8 sTextMT[] = _("M+T");
 +static const u8 sTextAdditionalInfo[] = _("Additional Info");
++static const u8 sTextMainScreenMap[] = _("Main Screen Map");
++static const u8 sTextClear[] = _("Clear");
++static const u8 sTextShade[] = _("Shade");
++// Text in red: settings that do nothing yet (placeholders)
++static const u8 sTextColorRed[] = _("{COLOR RED}");
 +static const u8 sTextOn[] = _("On");
 +static const u8 sTextOff[] = _("Off");
 +
@@ -775,6 +780,7 @@ index 0680f301..9925c91d 100644
 +    const u8 *label;
 +    u8 count, x0, step;
 +    const u8 *choices[4];
++    bool8 placeholder; // shown in red
 +} sPortRows[2][3] = {
 +    [PAGE_WINDOWS] = {
 +        { sTextBgColor, 3, 80, 40, { sTextBlue, sTextRed, sTextGreen } },
@@ -782,17 +788,19 @@ index 0680f301..9925c91d 100644
 +        { sTextBorderColor, 2, 80, 40, { sTextBlue, sTextPink } },
 +    },
 +    [PAGE_LAYOUT] = {
-+        { sTextSubScreen, 4, 80, 28, { sTextBlue, sTextSky, sTextLog, sTextMT } },
-+        { sTextAdditionalInfo, 2, 80, 40, { sTextOn, sTextOff } },
++        { sTextSubScreen, 4, 96, 24, { sTextBlue, sTextSky, sTextLog, sTextMT }, TRUE },
++        { sTextMainScreenMap, MAP_OPTION_SHADE + 1, 96, 32, { sTextOff, sTextClear, sTextShade } }, // the game's Map option
++        { sTextAdditionalInfo, 2, 96, 40, { sTextOn, sTextOff }, TRUE },
 +    },
 +};
-+static const u8 sPortRowCount[2] = { 3, 2 };
++static const u8 sPortRowCount[2] = { 3, 3 };
 +
 +static void PortLoadValues(void)
 +{
 +    Port_GetDungeonWindows(&sPortValues[PAGE_WINDOWS][0], &sPortValues[PAGE_WINDOWS][1], &sPortValues[PAGE_WINDOWS][2]);
 +    sPortValues[PAGE_LAYOUT][0] = gPortConfig.layoutSubScreen & 3;
-+    sPortValues[PAGE_LAYOUT][1] = gPortConfig.layoutInfo ? 0 : 1; // On, Off
++    sPortValues[PAGE_LAYOUT][1] = sChangedGameOptions.mapOption <= MAP_OPTION_SHADE ? sChangedGameOptions.mapOption : 0;
++    sPortValues[PAGE_LAYOUT][2] = gPortConfig.layoutInfo ? 0 : 1; // On, Off
 +    memcpy(sPortOpened, sPortValues, sizeof(sPortValues));
 +}
 +
@@ -806,6 +814,8 @@ index 0680f301..9925c91d 100644
 +
 +static void PortApplyNow(void)
 +{
++    if (sPortValues[PAGE_LAYOUT][1] != sPortOpened[PAGE_LAYOUT][1] || sPortPage == PAGE_LAYOUT)
++        sChangedGameOptions.mapOption = sPortValues[PAGE_LAYOUT][1];
 +    *gGameOptionsRef = sChangedGameOptions;
 +    if (memcmp(sPortValues[PAGE_WINDOWS], sPortOpened[PAGE_WINDOWS], 3) != 0) {
 +        gPortConfig.dungeonWindowsSet = TRUE;
@@ -814,7 +824,7 @@ index 0680f301..9925c91d 100644
 +        gPortConfig.dungeonBorder = sPortValues[PAGE_WINDOWS][2];
 +    }
 +    gPortConfig.layoutSubScreen = sPortValues[PAGE_LAYOUT][0];
-+    gPortConfig.layoutInfo = sPortValues[PAGE_LAYOUT][1] == 0;
++    gPortConfig.layoutInfo = sPortValues[PAGE_LAYOUT][2] == 0;
 +    sub_803E13C();
 +    LoadDungeonMapPalette();
 +}
@@ -839,6 +849,22 @@ index 0680f301..9925c91d 100644
 +{
 +    s32 n = sPortRows[sPortPage][row].count;
 +    sPortValues[sPortPage][row] = (sPortValues[sPortPage][row] + n + step) % n;
++}
++
++static void PrintPortText(s32 x, s32 y, const u8 *str, bool8 red)
++{
++    u8 buf[64];
++    if (red) {
++        // "{COLOR RED}" and the text
++        s32 n = 0, i;
++        for (i = 0; sTextColorRed[i] != 0 && n < (s32)sizeof(buf) - 1; i++)
++            buf[n++] = sTextColorRed[i];
++        for (i = 0; str[i] != 0 && n < (s32)sizeof(buf) - 1; i++)
++            buf[n++] = str[i];
++        buf[n] = 0;
++        str = buf;
++    }
++    PrintFormattedStringOnWindow(x, y, str, 0, '\0');
 +}
 +
 +static void PrintPortPage(void)
@@ -888,9 +914,9 @@ index 0680f301..9925c91d 100644
 +        const struct PortRow *row = &sPortRows[sPortPage][i];
 +        s32 y = GetMenuEntryYCoord(&gDungeonMenu, i);
 +        s32 v = sPortValues[sPortPage][i];
-+        PrintFormattedStringOnWindow(8, y, row->label, 0, '\0');
++        PrintPortText(8, y, row->label, row->placeholder);
 +        for (c = 0; c < row->count; c++)
-+            PrintFormattedStringOnWindow(row->x0 + c * row->step, y, row->choices[c], 0, '\0');
++            PrintPortText(row->x0 + c * row->step, y, row->choices[c], row->placeholder);
 +        AddDoubleUnderScoreHighlight(0, row->x0 + v * row->step, y + 10, GetStringLineWidth(row->choices[v]), 7);
 +    }
 +    sub_80073E0(0);
@@ -958,7 +984,7 @@ index 0680f301..9925c91d 100644
  static void ShowGameOptionsMenu(void)
  {
      while (TRUE) {
-@@ -185,6 +406,22 @@ static void ShowGameOptionsMenu(void)
+@@ -185,6 +432,22 @@ static void ShowGameOptionsMenu(void)
              break;
  
          sChangedGameOptions = *gGameOptionsRef;
@@ -981,7 +1007,7 @@ index 0680f301..9925c91d 100644
          if (gDungeonMenu.menuIndex == GAME_OPTION_DUNGEON) {
              bPress = ShowDungeonOptions();
              TrySetNewGameOptions(bPress);
-@@ -193,6 +430,7 @@ static void ShowGameOptionsMenu(void)
+@@ -193,6 +456,7 @@ static void ShowGameOptionsMenu(void)
              bPress = ShowOthersOptions();
              TrySetNewGameOptions(bPress);
          }
@@ -989,7 +1015,19 @@ index 0680f301..9925c91d 100644
          else if (gDungeonMenu.menuIndex == GAME_OPTION_DEFAULT) {
              AskToResetToDefault();
          }
-@@ -240,12 +478,18 @@ static bool8 ShowDungeonOptions(void)
+@@ -211,7 +475,11 @@ enum {
+     OPTION_COUNT
+ };
+ 
++#ifdef PLATFORM_3DS
++#define DUNGEON_OPTIONS_COUNT OPTION_MAP // 3DS port: Map is in Layout Options (Main Screen Map)
++#else
+ #define DUNGEON_OPTIONS_COUNT OPTION_WINDOWS
++#endif
+ #define OTHERS_OPTIONS_COUNT (OPTION_COUNT - DUNGEON_OPTIONS_COUNT)
+ 
+ static bool8 ShowDungeonOptions(void)
+@@ -240,12 +508,18 @@ static bool8 ShowDungeonOptions(void)
              if (gRealInputs.repeated & DPAD_LEFT) {
                  PlayDungeonCursorSE(FALSE);
                  ChangeGameOptionLeft(gDungeonMenu.menuIndex);
@@ -1008,7 +1046,7 @@ index 0680f301..9925c91d 100644
                  dpadMoved = TRUE;
                  break;
              }
-@@ -361,6 +605,13 @@ static void AskToResetToDefault(void)
+@@ -361,6 +635,13 @@ static void AskToResetToDefault(void)
  {
      if (DisplayDungeonYesNoMessage_Async(0, gUnknown_80FEC28, FALSE) == 1) {
          InitializeGameOptions(FALSE);
@@ -1022,7 +1060,7 @@ index 0680f301..9925c91d 100644
          sub_803E13C();
      }
  }
-@@ -562,7 +813,7 @@ static void PrintQuickSaveMenuOptions(void)
+@@ -562,7 +843,7 @@ static void PrintQuickSaveMenuOptions(void)
  static void PrintGameOptions(void)
  {
      s32 optionsCount;
@@ -1031,7 +1069,7 @@ index 0680f301..9925c91d 100644
      WindowHeader header;
      WindowTemplates windows = {
          .id = {
-@@ -585,7 +836,7 @@ static void PrintGameOptions(void)
+@@ -585,7 +866,7 @@ static void PrintGameOptions(void)
      header.currId = 0;
      header.f3 = 0;
      gDungeonMenu.menuIndex = 0;
@@ -1040,7 +1078,7 @@ index 0680f301..9925c91d 100644
      gDungeonMenu.currPageEntries = optionsCount;
      gDungeonMenu.entriesPerPage = optionsCount;
      gDungeonMenu.currPage = 0;
-@@ -611,7 +862,11 @@ static void PrintGameOptions(void)
+@@ -611,7 +892,11 @@ static void PrintGameOptions(void)
      PrintFormattedStringOnWindow(16, 0, gGameOptionsTextPtr, 0, '\0');
      PrintFormattedStringOnWindow(8, y[0], gOptionsDungeonTextPtr, 0, '\0');
      PrintFormattedStringOnWindow(8, y[1], gOptionsOthersTextPtr, 0, '\0');
@@ -1053,7 +1091,7 @@ index 0680f301..9925c91d 100644
      sub_80073E0(0);
  }
  
-@@ -654,7 +909,11 @@ static void PrintDungeonOptions(void)
+@@ -654,7 +939,11 @@ static void PrintDungeonOptions(void)
      ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
      windows.id[0].width = 24;
      windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(DUNGEON_OPTIONS_COUNT, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
@@ -1065,6 +1103,37 @@ index 0680f301..9925c91d 100644
      windows.id[0].pos.x = 2;
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
+@@ -663,14 +952,18 @@ static void PrintDungeonOptions(void)
+     y[1] = GetMenuEntryYCoord(&gDungeonMenu, 1);
+     y[2] = GetMenuEntryYCoord(&gDungeonMenu, 2);
+     y[3] = GetMenuEntryYCoord(&gDungeonMenu, 3);
++#ifndef PLATFORM_3DS
+     y[4] = GetMenuEntryYCoord(&gDungeonMenu, 4);
++#endif
+     sub_80073B8(0);
+     PrintFormattedStringOnWindow(16, 0, gOptionsDungeonTextPtr, 0, '\0');
+     PrintFormattedStringOnWindow(8, y[0], gUnknown_80FE764, 0, '\0');
+     PrintFormattedStringOnWindow(8, y[1], gUnknown_80FE788, 0, '\0');
+     PrintFormattedStringOnWindow(8, y[2], gUnknown_80FE7A8, 0, '\0');
+     PrintFormattedStringOnWindow(8, y[3], gUnknown_80FE7C0, 0, '\0');
++#ifndef PLATFORM_3DS
+     PrintFormattedStringOnWindow(8, y[4], gUnknown_80FE7E4, 0, '\0');
++#endif
+ 
+     if (sChangedGameOptions.dungeonSpeed != DUNGEON_SPEED_SLOW) {
+         AddDoubleUnderScoreHighlight(0, 136, y[0] + 10, 21, 7);
+@@ -700,7 +993,11 @@ static void PrintDungeonOptions(void)
+         AddDoubleUnderScoreHighlight(0, 80, y[3] + 10, 16, 7);
+     }
+ 
++#ifndef PLATFORM_3DS
+     AddDoubleUnderScoreHighlight(0, 80 + (sChangedGameOptions.mapOption * 40), y[4] + 10, mapOptionUnderscoreWidths[sChangedGameOptions.mapOption], 7);
++#else
++    (void)mapOptionUnderscoreWidths;
++#endif
+ 
+     sub_80073E0(0);
+ }
 diff --git a/src/dungeon_pokemon_sprites.c b/src/dungeon_pokemon_sprites.c
 index b965ec4a..26a31bcd 100644
 --- a/src/dungeon_pokemon_sprites.c
@@ -2386,10 +2455,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..8402baa6
+index 00000000..b8ebcb1c
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,242 @@
+@@ -0,0 +1,270 @@
 +// 3DS port: Others > Screen Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -2499,6 +2568,34 @@ index 00000000..8402baa6
 +    return &gPortConfig.layout[screen][setting - SETTING_SIZE];
 +}
 +
++// Settings (setting, or one of its choices) that do nothing yet are shown in
++// red: Scale; the second screen's Size; the 3DS size.
++static bool8 IsPlaceholder(s32 setting, s32 choice)
++{
++    if (setting == SETTING_SCALE)
++        return TRUE;
++    if (setting == SETTING_SIZE)
++        return sMenu.page == PAGE_SUB_SCREEN || choice == 2;
++    return FALSE;
++}
++
++ALIGNED(4) static const u8 sRed[] = _("{COLOR RED}");
++
++static void PrintText(s32 x, s32 y, const u8 *str, u32 win, bool8 red)
++{
++    u8 buf[64];
++    if (red) {
++        s32 n = 0, i;
++        for (i = 0; sRed[i] != 0 && n < (s32)sizeof(buf) - 1; i++)
++            buf[n++] = sRed[i];
++        for (i = 0; str[i] != 0 && n < (s32)sizeof(buf) - 1; i++)
++            buf[n++] = str[i];
++        buf[n] = 0;
++        str = buf;
++    }
++    PrintStringOnWindow(x, y, str, win, 0);
++}
++
 +static void Draw(void)
 +{
 +    u32 win = sMenu.windowId;
@@ -2526,9 +2623,9 @@ index 00000000..8402baa6
 +            if (value >= sSettings[setting].count)
 +                value = 0;
 +            y = GetMenuEntryYCoord(&sMenu.input, i);
-+            PrintStringOnWindow(8, y, sSettings[setting].name, win, 0);
++            PrintText(8, y, sSettings[setting].name, win, IsPlaceholder(setting, -1));
 +            for (c = 0; c < sSettings[setting].count; c++)
-+                PrintStringOnWindow(CHOICE_X(c), y, sSettings[setting].choices[c], win, 0);
++                PrintText(CHOICE_X(c), y, sSettings[setting].choices[c], win, IsPlaceholder(setting, c));
 +            AddDoubleUnderScoreHighlight(win, CHOICE_X(value), y + 10, GetStringLineWidth(sSettings[setting].choices[value]), COLOR_WHITE_2);
 +        }
 +    }
