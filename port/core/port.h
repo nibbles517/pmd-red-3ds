@@ -25,6 +25,9 @@ enum {
     KEY_BIT_R = 1 << 8, KEY_BIT_L = 1 << 9,
 };
 
+// Called before each visible scanline is rendered, if set (test tooling).
+extern void (*gPortLineHook)(int line);
+
 // ppu.c
 void Ppu_BeginFrame(void);
 void Ppu_RenderLine(int line, uint16_t *dst);

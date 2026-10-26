@@ -32,6 +32,10 @@ enum {
     LINES = 228,
 };
 
+// Optional per-scanline hook (test tooling: the harness uses it to capture
+// frames for renderer regression tests). NULL in normal builds.
+void (*gPortLineHook)(int line);
+
 static uint16_t sFrame[GBA_W * GBA_H];
 static uint16_t sShown[GBA_W * GBA_H];
 static uint64_t sFrames;
@@ -113,6 +117,8 @@ static void RunFrame(void)
     Ppu_BeginFrame();
     for (int line = 0; line < GBA_H; line++) {
         SetLine(line);
+        if (gPortLineHook)
+            gPortLineHook(line);
         Ppu_RenderLine(line, &sFrame[line * GBA_W]);
         Dma_HBlank();
     }

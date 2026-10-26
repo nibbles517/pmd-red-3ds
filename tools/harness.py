@@ -131,6 +131,7 @@ class Harness:
                 mask |= 1 << KEYS[k.upper()]
             self.presses.append((int(f), int(f) + int(dur), mask))
         self.shots = set(args.shot)
+        self.captures = set(args.capture)
         self.audio = bytearray()
         self.audio_rate = 0
         os.makedirs(args.out, exist_ok=True)
@@ -183,7 +184,12 @@ class Harness:
 
     def on_read(self, uc, access, addr, size, value, user):
         reg = (addr - IO_BASE) // 4
-        val = self.keys() if reg == 2 else self.regs[reg]
+        if reg == 2:
+            val = self.keys()
+        elif reg == 13:  # capture this frame?
+            val = 1 if self.frame in self.captures else 0
+        else:
+            val = self.regs[reg]
         uc.mem_write(addr, struct.pack('<I', val)[:size])
 
     def on_write(self, uc, access, addr, size, value, user):
@@ -197,6 +203,9 @@ class Harness:
                 self.line.append(value & 0xFF)
         elif reg == 1:  # present
             self.last_frame = bytes(uc.mem_read(value, 240 * 160 * 2))
+            if getattr(self, 'pending_capture_png', None):
+                open(self.pending_capture_png[:-4] + '.frame', 'wb').write(self.last_frame)
+                self.pending_capture_png = None
             if self.frame in self.shots or (self.args.shot_every and self.frame % self.args.shot_every == 0):
                 write_png(os.path.join(self.args.out, f'frame_{self.frame:05d}.png'), self.last_frame)
         elif reg == 3:  # end of frame
@@ -217,6 +226,12 @@ class Harness:
                     uc.mem_write(buf, d)
                     ok = 1
                 self.regs[8] = ok
+        elif reg == 13:  # capture finished: dump regs[160][0x400], vram, pltt, oam
+            size = 160 * 0x400 + 0x18000 + 0x400 + 0x400
+            path = os.path.join(self.args.out, f'capture_{self.frame:05d}.bin')
+            open(path, 'wb').write(bytes(uc.mem_read(value, size)))
+            # the PNG of the same frame is the reference output
+            self.pending_capture_png = path[:-4] + '.png'
         elif reg == 12:  # audio chunk
             left = bytes(uc.mem_read(self.regs[9], value))
             right = bytes(uc.mem_read(self.regs[10], value))
@@ -320,6 +335,7 @@ def main():
     ap.add_argument('--wav')
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')
+    ap.add_argument('--capture', type=int, action='append', default=[], help='capture this frame for renderer tests')
     ap.add_argument('--profile', type=int, default=0, help='sample the PC every N instructions')
     return Harness(ap.parse_args()).run()
 

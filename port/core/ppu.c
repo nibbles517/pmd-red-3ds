@@ -7,6 +7,13 @@
 // Output is GBA BGR555 (bit 15 clear). Covers modes 0-2 (text and affine
 // backgrounds), mode 3, regular and affine sprites, windows 0/1 and the object
 // window, alpha blending, brighten/darken, and mosaic.
+//
+// Speed matters here: this runs 160 times a frame on a 268 MHz CPU. Common
+// cases take fast paths (whole tile rows decoded at once, layers painted back
+// to front when no windows or alpha blending are active); everything else goes
+// through the general per-pixel path. port/test/ppu_ref.c is the original
+// straightforward version, and tools/test_ppu checks this file against it,
+// byte for byte, on frames captured from the game.
 
 #include <stdint.h>
 #include <string.h>
@@ -26,7 +33,12 @@ typedef struct {
 } ObjLine;
 
 static uint16_t sBg[4][W];
+static int sBgAny[4];               // layer has an opaque pixel on this line
 static ObjLine sObj;
+static int sObjAny, sObjSemiAny, sObjWinAny;
+static int sObjMinX = W, sObjMaxX = -1; // span sprites touched (this line)
+static int sObjDirtyMin = 0, sObjDirtyMax = W - 1; // span to clear (last line)
+static unsigned sObjPrioMask;       // priorities present among sprite pixels
 
 // Affine backgrounds keep internal reference points that advance each line.
 static int32_t sAffX[2], sAffY[2];
@@ -35,6 +47,7 @@ static uint32_t sAffLatchX[2], sAffLatchY[2];
 static inline uint16_t R16(unsigned off) { return (uint16_t)(gPortRegs[off] | (gPortRegs[off + 1] << 8)); }
 static inline uint32_t R32(unsigned off) { return R16(off) | ((uint32_t)R16(off + 2) << 16); }
 static inline uint16_t Pal(unsigned index) { return (uint16_t)((gPortPltt[index * 2] | (gPortPltt[index * 2 + 1] << 8)) & 0x7FFF); }
+#define PAL16 ((const uint16_t *)gPortPltt)
 
 static int32_t Sext28(uint32_t v) { return (int32_t)(v << 4) >> 4; }
 
@@ -62,7 +75,10 @@ static void AffineAdvance(int i)
     sAffY[i] += (int16_t)R16(0x26 + i * 0x10); // PD
 }
 
-static void RenderTextBg(int bg, int line, uint16_t *out)
+// --- Text backgrounds -------------------------------------------------------
+
+// General per-pixel path, used only with mosaic.
+static void RenderTextBgMosaic(int bg, int line, uint16_t *out)
 {
     uint16_t cnt = R16(0x08 + bg * 2);
     unsigned charBase = ((cnt >> 2) & 3) * 0x4000;
@@ -73,14 +89,10 @@ static void RenderTextBg(int bg, int line, uint16_t *out)
     int heightPx = (size & 2) ? 512 : 256;
     int hofs = R16(0x10 + bg * 4) & 0x1FF;
     int vofs = R16(0x12 + bg * 4) & 0x1FF;
-    int mosaicH = 1, y = line;
-
-    if (cnt & 0x40) {
-        uint16_t m = R16(0x4C);
-        mosaicH = (m & 0xF) + 1;
-        int mv = ((m >> 4) & 0xF) + 1;
-        y -= y % mv;
-    }
+    uint16_t m = R16(0x4C);
+    int mosaicH = (m & 0xF) + 1;
+    int mv = ((m >> 4) & 0xF) + 1;
+    int y = line - line % mv;
     y = (y + vofs) & (heightPx - 1);
 
     int tileRow = y >> 3, inY = y & 7;
@@ -111,6 +123,112 @@ static void RenderTextBg(int bg, int line, uint16_t *out)
         }
     }
 }
+
+// Decodes one 8-pixel row of the tile named by map entry `e` into px[0..7].
+// Returns nonzero if any pixel is opaque.
+static inline int DecodeTileRow(uint16_t e, unsigned charBase, int inY, int color256, uint16_t *px)
+{
+    int ty = (e & 0x800) ? 7 - inY : inY;
+    unsigned tile = e & 0x3FF;
+    int any = 0;
+    if (color256) {
+        unsigned a = charBase + tile * 64 + ty * 8;
+        uint32_t lo = 0, hi = 0;
+        if (a < 0x10000) {
+            lo = *(const uint32_t *)&gPortVram[a];
+            hi = *(const uint32_t *)&gPortVram[a + 4];
+        }
+        if ((lo | hi) == 0) {
+            for (int i = 0; i < 8; i++) px[i] = TRANSPARENT;
+            return 0;
+        }
+        for (int i = 0; i < 8; i++) {
+            unsigned idx = (i < 4) ? (lo >> (8 * i)) & 0xFF : (hi >> (8 * (i - 4))) & 0xFF;
+            px[i] = idx ? (PAL16[idx] & 0x7FFF) : TRANSPARENT;
+        }
+        any = 1;
+    }
+    else {
+        unsigned a = charBase + tile * 32 + ty * 4;
+        uint32_t row = (a < 0x10000) ? *(const uint32_t *)&gPortVram[a] : 0; // 4-byte aligned by construction
+        if (row == 0) {
+            for (int i = 0; i < 8; i++) px[i] = TRANSPARENT;
+            return 0;
+        }
+        const uint16_t *pal = &PAL16[(e >> 12) * 16];
+        for (int i = 0; i < 8; i++, row >>= 4) {
+            unsigned idx = row & 0xF;
+            px[i] = idx ? (pal[idx] & 0x7FFF) : TRANSPARENT;
+        }
+        any = 1;
+    }
+    if (e & 0x400) { // horizontal flip
+        for (int i = 0; i < 4; i++) {
+            uint16_t t = px[i];
+            px[i] = px[7 - i];
+            px[7 - i] = t;
+        }
+    }
+    return any;
+}
+
+// Returns nonzero if the line has any opaque pixel.
+static int RenderTextBg(int bg, int line, uint16_t *out)
+{
+    uint16_t cnt = R16(0x08 + bg * 2);
+    if (cnt & 0x40) {
+        RenderTextBgMosaic(bg, line, out);
+        return 1;
+    }
+    unsigned charBase = ((cnt >> 2) & 3) * 0x4000;
+    unsigned screenBase = ((cnt >> 8) & 0x1F) * 0x800;
+    int color256 = (cnt >> 7) & 1;
+    int size = (cnt >> 14) & 3;
+    int widthPx = (size & 1) ? 512 : 256;
+    int heightPx = (size & 2) ? 512 : 256;
+    int hofs = R16(0x10 + bg * 4) & 0x1FF;
+    int vofs = R16(0x12 + bg * 4) & 0x1FF;
+    int y = (line + vofs) & (heightPx - 1);
+    int inY = y & 7;
+    unsigned rowBlock = (y >= 256) ? ((widthPx == 512) ? 2 : 1) : 0;
+    unsigned rowOff = screenBase + rowBlock * 0x800 + ((y >> 3) & 31) * 64;
+    int any = 0;
+
+    int sx = 0;
+    int x = hofs & (widthPx - 1);
+    while (sx < W) {
+        unsigned mapOff = rowOff + ((x >= 256) ? 0x800 : 0) + ((x >> 3) & 31) * 2;
+        int skip = x & 7;
+        int n = 8 - skip;
+        if (n > W - sx) n = W - sx;
+        if (mapOff + 1 >= 0x10000) {
+            for (int i = 0; i < n; i++) out[sx + i] = TRANSPARENT;
+        }
+        else {
+            uint16_t e = *(const uint16_t *)&gPortVram[mapOff]; // map entries are 2-byte aligned
+            if (n == 8) {
+                any |= DecodeTileRow(e, charBase, inY, color256, &out[sx]);
+            }
+            else {
+                uint16_t px[8];
+                if (DecodeTileRow(e, charBase, inY, color256, px)) {
+                    for (int i = 0; i < n; i++) {
+                        out[sx + i] = px[skip + i];
+                        any |= !(px[skip + i] & TRANSPARENT);
+                    }
+                }
+                else {
+                    for (int i = 0; i < n; i++) out[sx + i] = TRANSPARENT;
+                }
+            }
+        }
+        sx += n;
+        x = (x + n) & (widthPx - 1);
+    }
+    return any;
+}
+
+// --- Affine backgrounds and mode 3 (rare: per-pixel) -----------------------
 
 static void RenderAffineBg(int bg, uint16_t *out)
 {
@@ -151,8 +269,40 @@ static void RenderMode3(int line, uint16_t *out)
     }
 }
 
+// --- Objects ---------------------------------------------------------------
+
 static const uint8_t sObjW[3][4] = { { 8, 16, 32, 64 }, { 16, 32, 32, 64 }, { 8, 8, 16, 32 } };
 static const uint8_t sObjH[3][4] = { { 8, 16, 32, 64 }, { 8, 8, 16, 32 }, { 16, 32, 32, 64 } };
+
+static inline unsigned ObjTexel(unsigned tile, int tx, int ty, int color256)
+{
+    if (color256) {
+        unsigned a = 0x10000 + ((tile & 0x3FF) * 32) + (ty & 7) * 8 + (tx & 7);
+        return a < 0x18000 ? gPortVram[a] : 0;
+    }
+    unsigned a = 0x10000 + ((tile & 0x3FF) * 32) + (ty & 7) * 4 + ((tx & 7) >> 1);
+    unsigned idx = a < 0x18000 ? gPortVram[a] : 0;
+    return (tx & 1) ? (idx >> 4) : (idx & 0xF);
+}
+
+static inline void ObjPlot(int sx, unsigned idx, int mode, int prio, int color256, unsigned palBank)
+{
+    if (sx < sObjMinX) sObjMinX = sx;
+    if (sx > sObjMaxX) sObjMaxX = sx;
+    if (mode == 2) { // object window: shape only
+        sObj.win[sx] = 1;
+        sObjWinAny = 1;
+        return;
+    }
+    if (prio < sObj.prio[sx]) {
+        sObj.color[sx] = PAL16[256 + (color256 ? idx : palBank * 16 + idx)] & 0x7FFF;
+        sObj.prio[sx] = (uint8_t)prio;
+        sObj.semi[sx] = (mode == 1);
+        sObjAny = 1;
+        sObjPrioMask |= 1u << prio;
+        if (mode == 1) sObjSemiAny = 1;
+    }
+}
 
 static void RenderObjects(int line, uint16_t dispcnt)
 {
@@ -161,26 +311,30 @@ static void RenderObjects(int line, uint16_t dispcnt)
     uint16_t mosaic = R16(0x4C);
     int mosH = ((mosaic >> 8) & 0xF) + 1, mosV = ((mosaic >> 12) & 0xF) + 1;
 
-    for (int x = 0; x < W; x++) {
-        sObj.color[x] = TRANSPARENT;
-        sObj.prio[x] = 4;
-        sObj.semi[x] = 0;
-        sObj.win[x] = 0;
+    if (sObjDirtyMax >= sObjDirtyMin) {
+        int n = sObjDirtyMax - sObjDirtyMin + 1;
+        memset(&sObj.color[sObjDirtyMin], 0x80, n * sizeof(uint16_t)); // 0x8080: TRANSPARENT bit set
+        memset(&sObj.prio[sObjDirtyMin], 4, n);
+        memset(&sObj.semi[sObjDirtyMin], 0, n);
+        memset(&sObj.win[sObjDirtyMin], 0, n);
     }
+    sObjAny = sObjSemiAny = sObjWinAny = 0;
+    sObjMinX = W;
+    sObjMaxX = -1;
+    sObjPrioMask = 0;
     if (!(dispcnt & 0x1000))
         return;
 
     for (int n = 0; n < 128; n++) {
         const uint8_t *o = &gPortOam[n * 8];
         uint16_t a0 = (uint16_t)(o[0] | (o[1] << 8));
-        uint16_t a1 = (uint16_t)(o[2] | (o[3] << 8));
-        uint16_t a2 = (uint16_t)(o[4] | (o[5] << 8));
         int affine = (a0 >> 8) & 1;
         if (!affine && (a0 & 0x200))
             continue; // disabled
         int shape = (a0 >> 14) & 3;
         if (shape == 3)
             continue;
+        uint16_t a1 = (uint16_t)(o[2] | (o[3] << 8));
         int size = (a1 >> 14) & 3;
         int w = sObjW[shape][size], h = sObjH[shape][size];
         int boundW = w, boundH = h;
@@ -188,87 +342,85 @@ static void RenderObjects(int line, uint16_t dispcnt)
 
         int y = a0 & 0xFF;
         if (y + boundH > 256) y -= 256;
-        int x = a1 & 0x1FF;
-        if (x >= 256) x -= 512;
-
+        if (line < y || line >= y + boundH)
+            continue;
         int ly = line;
         int objMosaic = (a0 >> 12) & 1;
         if (objMosaic) ly -= ly % mosV;
         int row = ly - y;
-        if (line < y || line >= y + boundH || row < 0)
+        if (row < 0)
             continue;
 
         int mode = (a0 >> 10) & 3;
         if (mode == 3)
             continue;
+        uint16_t a2 = (uint16_t)(o[4] | (o[5] << 8));
         int color256 = (a0 >> 13) & 1;
         unsigned tileNum = a2 & 0x3FF;
         if (bitmapMode && tileNum < 512)
             continue;
+        int x = a1 & 0x1FF;
+        if (x >= 256) x -= 512;
+        if (x >= W || x + boundW <= 0)
+            continue;
         int prio = (a2 >> 10) & 3;
         unsigned palBank = (a2 >> 12) & 0xF;
         unsigned rowStride = oneD ? (unsigned)(w >> 3) * (color256 ? 2 : 1) : 32;
+        unsigned tileStep = color256 ? 2 : 1;
 
-        int16_t pa = 0x100, pb = 0, pc = 0, pd = 0x100;
-        int hflip = 0, vflip = 0;
         if (affine) {
             unsigned p = ((a1 >> 9) & 0x1F) * 32;
-            pa = (int16_t)(gPortOam[p + 6] | (gPortOam[p + 7] << 8));
-            pb = (int16_t)(gPortOam[p + 14] | (gPortOam[p + 15] << 8));
-            pc = (int16_t)(gPortOam[p + 22] | (gPortOam[p + 23] << 8));
-            pd = (int16_t)(gPortOam[p + 30] | (gPortOam[p + 31] << 8));
-        }
-        else {
-            hflip = (a1 >> 12) & 1;
-            vflip = (a1 >> 13) & 1;
-        }
-
-        for (int bx = 0; bx < boundW; bx++) {
-            int sx = x + bx;
-            if (sx < 0 || sx >= W)
-                continue;
-            int col = bx;
-            if (objMosaic) col -= (sx % mosH);
-            int tx, ty;
-            if (affine) {
+            int16_t pa = (int16_t)(gPortOam[p + 6] | (gPortOam[p + 7] << 8));
+            int16_t pb = (int16_t)(gPortOam[p + 14] | (gPortOam[p + 15] << 8));
+            int16_t pc = (int16_t)(gPortOam[p + 22] | (gPortOam[p + 23] << 8));
+            int16_t pd = (int16_t)(gPortOam[p + 30] | (gPortOam[p + 31] << 8));
+            for (int bx = 0; bx < boundW; bx++) {
+                int sx = x + bx;
+                if (sx < 0 || sx >= W)
+                    continue;
+                int col = bx;
+                if (objMosaic) col -= (sx % mosH);
                 int cx = col - boundW / 2, cy = row - boundH / 2;
-                tx = ((pa * cx + pb * cy) >> 8) + w / 2;
-                ty = ((pc * cx + pd * cy) >> 8) + h / 2;
+                int tx = ((pa * cx + pb * cy) >> 8) + w / 2;
+                int ty = ((pc * cx + pd * cy) >> 8) + h / 2;
                 if (tx < 0 || ty < 0 || tx >= w || ty >= h)
                     continue;
+                unsigned tile = tileNum + (ty >> 3) * rowStride + (tx >> 3) * tileStep;
+                unsigned idx = ObjTexel(tile, tx, ty, color256);
+                if (idx)
+                    ObjPlot(sx, idx, mode, prio, color256, palBank);
             }
-            else {
-                tx = hflip ? w - 1 - col : col;
-                ty = vflip ? h - 1 - row : row;
+            continue;
+        }
+
+        int hflip = (a1 >> 12) & 1;
+        int vflip = (a1 >> 13) & 1;
+        int ty = vflip ? h - 1 - row : row;
+        unsigned rowTile = tileNum + (ty >> 3) * rowStride;
+        int bx0 = x < 0 ? -x : 0;
+        int bx1 = (x + boundW > W) ? W - x : boundW;
+        if (objMosaic) {
+            for (int bx = bx0; bx < bx1; bx++) {
+                int sx = x + bx;
+                int col = bx - (sx % mosH);
+                int tx = hflip ? w - 1 - col : col;
                 if (tx < 0 || tx >= w) continue;
+                unsigned idx = ObjTexel(rowTile + (tx >> 3) * tileStep, tx, ty, color256);
+                if (idx)
+                    ObjPlot(sx, idx, mode, prio, color256, palBank);
             }
-
-            unsigned tile = tileNum + (ty >> 3) * rowStride + (tx >> 3) * (color256 ? 2 : 1);
-            unsigned idx;
-            if (color256) {
-                unsigned a = 0x10000 + ((tile & 0x3FF) * 32) + (ty & 7) * 8 + (tx & 7);
-                idx = a < 0x18000 ? gPortVram[a] : 0;
-            }
-            else {
-                unsigned a = 0x10000 + ((tile & 0x3FF) * 32) + (ty & 7) * 4 + ((tx & 7) >> 1);
-                idx = a < 0x18000 ? gPortVram[a] : 0;
-                idx = (tx & 1) ? (idx >> 4) : (idx & 0xF);
-            }
-            if (!idx)
-                continue;
-
-            if (mode == 2) { // object window: shape only
-                sObj.win[sx] = 1;
-                continue;
-            }
-            if (prio < sObj.prio[sx]) {
-                sObj.color[sx] = Pal(256 + (color256 ? idx : palBank * 16 + idx));
-                sObj.prio[sx] = (uint8_t)prio;
-                sObj.semi[sx] = (mode == 1);
-            }
+            continue;
+        }
+        for (int bx = bx0; bx < bx1; bx++) {
+            int tx = hflip ? w - 1 - bx : bx;
+            unsigned idx = ObjTexel(rowTile + (tx >> 3) * tileStep, tx, ty, color256);
+            if (idx)
+                ObjPlot(x + bx, idx, mode, prio, color256, palBank);
         }
     }
 }
+
+// --- Compositing -----------------------------------------------------------
 
 static inline uint16_t Blend(uint16_t a, uint16_t b, int eva, int evb)
 {
@@ -309,6 +461,127 @@ static int InWindowRange(int v, int lo, int hi, int limit)
     return v >= lo && v < hi;
 }
 
+// Fills [lo, hi) of a window span, with the hardware's wrap-around rules
+// (same as InWindowRange, but for a whole line at once).
+static void FillSpan(uint8_t *wm, int lo, int hi, uint8_t value)
+{
+    if (hi > W || lo > hi) {
+        if (hi > W && lo <= hi) hi = W;
+        else { // wrapped: x >= lo or x < hi
+            for (int x = 0; x < W; x++)
+                if (x >= lo || x < hi) wm[x] = value;
+            return;
+        }
+    }
+    for (int x = lo; x < hi; x++) wm[x] = value;
+}
+
+// Composites one line. Layers are painted back to front through the window
+// mask, tracking each pixel's top two layers; then the colour effect (alpha,
+// brighten or darken) is applied in one pass. Equivalent to the reference's
+// per-pixel search for the top two visible layers, without the per-pixel work.
+static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio[4], uint16_t dispcnt)
+{
+    static uint8_t wm[W], topL[W], secL[W];
+    static uint16_t secC[W];
+
+    uint16_t bldcnt = R16(0x50);
+    uint16_t bldalpha = R16(0x52);
+    int eva = bldalpha & 0x1F, evb = (bldalpha >> 8) & 0x1F;
+    int evy = R16(0x54) & 0x1F;
+    if (eva > 16) eva = 16;
+    if (evb > 16) evb = 16;
+    if (evy > 16) evy = 16;
+    int effect = (bldcnt >> 6) & 3;
+
+    // Window mask per pixel: bits 0-3 BG0-3, bit 4 OBJ, bit 5 colour effects.
+    int win0 = (dispcnt >> 13) & 1, win1 = (dispcnt >> 14) & 1, winObj = (dispcnt >> 15) & 1;
+    if (!(win0 | win1 | winObj)) {
+        memset(wm, 0x3F, sizeof(wm));
+    }
+    else {
+        uint16_t winin = R16(0x48), winout = R16(0x4A);
+        memset(wm, winout & 0x3F, sizeof(wm));
+        if (winObj && sObjWinAny) {
+            uint8_t v = (winout >> 8) & 0x3F;
+            for (int x = sObjMinX; x <= sObjMaxX; x++)
+                if (sObj.win[x]) wm[x] = v;
+        }
+        if (win1) {
+            uint16_t h = R16(0x42), v = R16(0x46);
+            if (InWindowRange(line, v >> 8, v & 0xFF, 160))
+                FillSpan(wm, h >> 8, h & 0xFF, (winin >> 8) & 0x3F);
+        }
+        if (win0) { // window 0 has priority over window 1
+            uint16_t h = R16(0x40), v = R16(0x44);
+            if (InWindowRange(line, v >> 8, v & 0xFF, 160))
+                FillSpan(wm, h >> 8, h & 0xFF, winin & 0x3F);
+        }
+    }
+
+    uint16_t backdrop = Pal(0);
+    for (int x = 0; x < W; x++) dst[x] = backdrop;
+    memset(topL, L_BD, sizeof(topL));
+    int needSec = (effect == 1) || sObjSemiAny;
+    if (needSec) {
+        memset(secL, L_BD, sizeof(secL));
+        for (int x = 0; x < W; x++) secC[x] = backdrop;
+    }
+
+    // Back to front: within a priority, BG3..BG0, then sprites (a sprite beats
+    // a background of the same priority, a lower BG index beats a higher one).
+    for (int p = 3; p >= 0; p--) {
+        for (int b = 3; b >= 0; b--) {
+            if (!bgOn[b] || bgPrio[b] != p || !sBgAny[b])
+                continue;
+            const uint16_t *src = sBg[b];
+            uint8_t bit = (uint8_t)(1u << b);
+            if (needSec) {
+                for (int x = 0; x < W; x++) {
+                    if (!(src[x] & TRANSPARENT) && (wm[x] & bit)) {
+                        secC[x] = dst[x]; secL[x] = topL[x];
+                        dst[x] = src[x]; topL[x] = (uint8_t)b;
+                    }
+                }
+            }
+            else {
+                for (int x = 0; x < W; x++) {
+                    if (!(src[x] & TRANSPARENT) && (wm[x] & bit)) {
+                        dst[x] = src[x]; topL[x] = (uint8_t)b;
+                    }
+                }
+            }
+        }
+        if (sObjAny && (sObjPrioMask & (1u << p))) {
+            for (int x = sObjMinX; x <= sObjMaxX; x++) {
+                if (sObj.prio[x] == p && !(sObj.color[x] & TRANSPARENT) && (wm[x] & 0x10)) {
+                    if (needSec) { secC[x] = dst[x]; secL[x] = topL[x]; }
+                    dst[x] = sObj.color[x]; topL[x] = L_OBJ;
+                }
+            }
+        }
+    }
+
+    // Colour effects.
+    if (effect == 0 && !sObjSemiAny)
+        return;
+    for (int x = 0; x < W; x++) {
+        int t = topL[x];
+        if (needSec && t == L_OBJ && sObj.semi[x] && ((bldcnt >> (8 + secL[x])) & 1)) {
+            dst[x] = Blend(dst[x], secC[x], eva, evb); // semi-transparent sprites always alpha blend
+            continue;
+        }
+        if (!(wm[x] & 0x20) || !((bldcnt >> t) & 1))
+            continue;
+        if (effect == 1) {
+            if ((bldcnt >> (8 + secL[x])) & 1)
+                dst[x] = Blend(dst[x], secC[x], eva, evb);
+        }
+        else if (effect == 2) dst[x] = Brighten(dst[x], evy);
+        else if (effect == 3) dst[x] = Darken(dst[x], evy);
+    }
+}
+
 void Ppu_RenderLine(int line, uint16_t *dst)
 {
     uint16_t dispcnt = R16(0x00);
@@ -327,92 +600,32 @@ void Ppu_RenderLine(int line, uint16_t *dst)
     switch (mode) {
     case 0:
         for (int b = 0; b < 4; b++)
-            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; RenderTextBg(b, line, sBg[b]); }
+            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); }
         break;
     case 1:
         for (int b = 0; b < 2; b++)
-            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; RenderTextBg(b, line, sBg[b]); }
-        if (dispcnt & 0x400) { bgOn[2] = 1; RenderAffineBg(2, sBg[2]); }
+            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; RenderAffineBg(2, sBg[2]); }
         break;
     case 2:
-        if (dispcnt & 0x400) { bgOn[2] = 1; RenderAffineBg(2, sBg[2]); }
-        if (dispcnt & 0x800) { bgOn[3] = 1; RenderAffineBg(3, sBg[3]); }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; RenderAffineBg(2, sBg[2]); }
+        if (dispcnt & 0x800) { bgOn[3] = 1; sBgAny[3] = 1; RenderAffineBg(3, sBg[3]); }
         break;
     case 3:
-        if (dispcnt & 0x400) { bgOn[2] = 1; RenderMode3(line, sBg[2]); }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; RenderMode3(line, sBg[2]); }
         break;
     default:
         break; // modes 4/5 are not used by pmd-red
     }
 
     RenderObjects(line, dispcnt);
+    sObjDirtyMin = sObjMinX;
+    sObjDirtyMax = sObjMaxX;
 
     int bgPrio[4];
     for (int b = 0; b < 4; b++)
         bgPrio[b] = R16(0x08 + b * 2) & 3;
-
-    uint16_t bldcnt = R16(0x50);
-    uint16_t bldalpha = R16(0x52);
-    int eva = bldalpha & 0x1F, evb = (bldalpha >> 8) & 0x1F;
-    int evy = R16(0x54) & 0x1F;
-    if (eva > 16) eva = 16;
-    if (evb > 16) evb = 16;
-    if (evy > 16) evy = 16;
-    int effect = (bldcnt >> 6) & 3;
-
-    int win0 = (dispcnt >> 13) & 1, win1 = (dispcnt >> 14) & 1, winObj = (dispcnt >> 15) & 1;
-    int anyWin = win0 | win1 | winObj;
-    uint16_t win0h = R16(0x40), win1h = R16(0x42), win0v = R16(0x44), win1v = R16(0x46);
-    uint16_t winin = R16(0x48), winout = R16(0x4A);
-    int in0V = win0 && InWindowRange(line, win0v >> 8, win0v & 0xFF, 160);
-    int in1V = win1 && InWindowRange(line, win1v >> 8, win1v & 0xFF, 160);
-
-    uint16_t backdrop = Pal(0);
-
-    for (int x = 0; x < W; x++) {
-        unsigned winMask = 0x3F; // BG0-3, OBJ, effects
-        if (anyWin) {
-            if (in0V && InWindowRange(x, win0h >> 8, win0h & 0xFF, 240)) winMask = winin & 0x3F;
-            else if (in1V && InWindowRange(x, win1h >> 8, win1h & 0xFF, 240)) winMask = (winin >> 8) & 0x3F;
-            else if (winObj && sObj.win[x]) winMask = (winout >> 8) & 0x3F;
-            else winMask = winout & 0x3F;
-        }
-
-        // Find the top two visible layers.
-        int topL = L_BD, secL = L_BD;
-        uint16_t topC = backdrop, secC = backdrop;
-        int topP = 5, secP = 5;
-        for (int p = 0; p < 4; p++) {
-            if ((winMask & 0x10) && sObj.prio[x] == p && sObj.color[x] != TRANSPARENT) {
-                if (topL == L_BD) { topL = L_OBJ; topC = sObj.color[x]; topP = p; }
-                else if (secL == L_BD) { secL = L_OBJ; secC = sObj.color[x]; secP = p; }
-            }
-            for (int b = 0; b < 4; b++) {
-                if (!bgOn[b] || bgPrio[b] != p || !(winMask & (1u << b)) || sBg[b][x] == TRANSPARENT)
-                    continue;
-                if (topL == L_BD) { topL = b; topC = sBg[b][x]; topP = p; }
-                else if (secL == L_BD) { secL = b; secC = sBg[b][x]; secP = p; }
-            }
-            if (secL != L_BD)
-                break;
-        }
-        (void)topP; (void)secP;
-
-        uint16_t c = topC;
-        int effectsOn = (winMask & 0x20) != 0;
-        int topIsTarget1 = (bldcnt >> topL) & 1;
-        int secIsTarget2 = (bldcnt >> (8 + secL)) & 1;
-
-        if (topL == L_OBJ && sObj.semi[x] && secIsTarget2) {
-            c = Blend(topC, secC, eva, evb); // semi-transparent sprites always alpha blend
-        }
-        else if (effectsOn && topIsTarget1) {
-            if (effect == 1 && secIsTarget2) c = Blend(topC, secC, eva, evb);
-            else if (effect == 2) c = Brighten(topC, evy);
-            else if (effect == 3) c = Darken(topC, evy);
-        }
-        dst[x] = c;
-    }
+    Compose(line, dst, bgOn, bgPrio, dispcnt);
 
     for (int i = 0; i < 2; i++)
         AffineAdvance(i);

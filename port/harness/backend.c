@@ -13,6 +13,7 @@ enum {
     IO_PUTCHAR = 0, IO_PRESENT = 1, IO_KEYS = 2, IO_ENDFRAME = 3, IO_EXIT = 4,
     IO_BUF = 5, IO_LEN = 6, IO_CMD = 7, IO_RESULT = 8,
     IO_AUDIO_L = 9, IO_AUDIO_R = 10, IO_AUDIO_RATE = 11, IO_AUDIO_COUNT = 12,
+    IO_CAPTURE = 13, // read: nonzero = capture the next frame; write: buffer address when done
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
 
@@ -71,9 +72,39 @@ void Backend_StoreSave(const uint8_t *data, uint32_t size)
     IO[IO_CMD] = CMD_SAVE_STORE;
 }
 
+// Frame capture for renderer regression tests: the registers at the start of
+// every visible line, plus VRAM, palette and OAM at line 0.
+static struct {
+    uint8_t regs[GBA_H][0x400];
+    uint8_t vram[0x18000];
+    uint8_t pltt[0x400];
+    uint8_t oam[0x400];
+} sCapture;
+static int sCapturing;
+
+static void CaptureLine(int line)
+{
+    if (line == 0) {
+        sCapturing = IO[IO_CAPTURE] != 0;
+        if (sCapturing) {
+            memcpy(sCapture.vram, gPortVram, sizeof(sCapture.vram));
+            memcpy(sCapture.pltt, gPortPltt, sizeof(sCapture.pltt));
+            memcpy(sCapture.oam, gPortOam, sizeof(sCapture.oam));
+        }
+    }
+    if (!sCapturing)
+        return;
+    memcpy(sCapture.regs[line], gPortRegs, 0x400);
+    if (line == GBA_H - 1) {
+        IO[IO_CAPTURE] = (uint32_t)(uintptr_t)&sCapture;
+        sCapturing = 0;
+    }
+}
+
 void HarnessMain(void)
 {
     Port_Init();
+    gPortLineHook = CaptureLine;
     Backend_Log("pmd-red-3ds harness: entering AgbMain");
     AgbMain();
     Backend_Fatal("AgbMain returned");
