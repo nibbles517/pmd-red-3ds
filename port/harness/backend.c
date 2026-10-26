@@ -49,10 +49,9 @@ void Backend_Present(const uint16_t *frame) { IO[IO_PRESENT] = (uint32_t)(uintpt
 uint16_t Backend_PollKeys(void) { return (uint16_t)IO[IO_KEYS]; }
 void Backend_EndFrame(void) { IO[IO_ENDFRAME] = (uint32_t)Port_FrameCount(); }
 
-void Backend_QueueAudio(const int8_t *left, const int8_t *right, int count, int rate)
+void Backend_QueueAudio(const int16_t *stereo, int count, int rate)
 {
-    IO[IO_AUDIO_L] = (uint32_t)(uintptr_t)left;
-    IO[IO_AUDIO_R] = (uint32_t)(uintptr_t)right;
+    IO[IO_AUDIO_L] = (uint32_t)(uintptr_t)stereo;
     IO[IO_AUDIO_RATE] = (uint32_t)rate;
     IO[IO_AUDIO_COUNT] = (uint32_t)count; // the write triggers the copy
 }

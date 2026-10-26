@@ -121,7 +121,7 @@ static void AudioInit(void)
     sAudioOn = 1;
 }
 
-void Backend_QueueAudio(const int8_t *left, const int8_t *right, int count, int rate)
+void Backend_QueueAudio(const int16_t *stereo, int count, int rate)
 {
     if (!sAudioOn || count <= 0)
         return;
@@ -135,13 +135,9 @@ void Backend_QueueAudio(const int8_t *left, const int8_t *right, int count, int 
         ndspWaveBuf *wb = &sWave[i];
         if (wb->status != NDSP_WBUF_DONE && wb->status != NDSP_WBUF_FREE)
             continue;
-        int16_t *d = wb->data_pcm16;
-        for (int s = 0; s < count; s++) {
-            d[s * 2] = (int16_t)(left[s] * 256);
-            d[s * 2 + 1] = (int16_t)(right[s] * 256);
-        }
+        memcpy(wb->data_pcm16, stereo, (size_t)count * 4);
         wb->nsamples = (u32)count;
-        DSP_FlushDataCache(d, (u32)count * 4);
+        DSP_FlushDataCache(wb->data_pcm16, (u32)count * 4);
         ndspChnWaveBufAdd(0, wb);
         return;
     }

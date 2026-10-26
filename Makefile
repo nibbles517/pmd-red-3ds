@@ -29,7 +29,7 @@ clean:
 # Platform core and the test-harness build
 
 CORE_CFLAGS := $(ARCH_FLAGS) -O2 -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections
-CORE_SRCS   := port/core/frame.c port/core/ppu.c port/core/dma.c port/core/save.c
+CORE_SRCS   := port/core/frame.c port/core/ppu.c port/core/dma.c port/core/save.c port/core/cgb.c
 CORE_OBJ    := $(BUILD)/core
 
 $(CORE_OBJ)/%.o: port/core/%.c port/core/port.h

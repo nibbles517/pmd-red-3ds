@@ -51,8 +51,8 @@ uint16_t Backend_PollKeys(void);               // active-high GBA key bits
 void Backend_EndFrame(void);                   // pacing; may also service the OS
 void Backend_Log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void Backend_Fatal(const char *msg) __attribute__((noreturn));
-// PCM from the game's sound mixer: interleaved signed 8-bit stereo at `rate` Hz.
-void Backend_QueueAudio(const int8_t *left, const int8_t *right, int count, int rate);
+// One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
+void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
 bool Backend_LoadSave(uint8_t *data, uint32_t size);
 void Backend_StoreSave(const uint8_t *data, uint32_t size);

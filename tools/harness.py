@@ -232,12 +232,9 @@ class Harness:
             open(path, 'wb').write(bytes(uc.mem_read(value, size)))
             # the PNG of the same frame is the reference output
             self.pending_capture_png = path[:-4] + '.png'
-        elif reg == 12:  # audio chunk
-            left = bytes(uc.mem_read(self.regs[9], value))
-            right = bytes(uc.mem_read(self.regs[10], value))
+        elif reg == 12:  # audio chunk: `value` interleaved 16-bit stereo samples
+            self.audio += bytes(uc.mem_read(self.regs[9], value * 4))
             self.audio_rate = self.regs[11]
-            for l, r in zip(left, right):
-                self.audio += bytes(((l + 128) & 0xFF, (r + 128) & 0xFF))
 
     def run_profiled(self, start):
         """Statistical profiler: run in slices of N instructions, sample the PC
@@ -317,7 +314,7 @@ class Harness:
         if self.args.wav and self.audio:
             with wave.open(self.args.wav, 'wb') as w:
                 w.setnchannels(2)
-                w.setsampwidth(1)
+                w.setsampwidth(2)
                 w.setframerate(self.audio_rate or 13379)
                 w.writeframes(bytes(self.audio))
         return self.exit_code or 0
