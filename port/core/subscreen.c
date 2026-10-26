@@ -1013,8 +1013,7 @@ static void DrawMapAndTeam(void)
 
 // The dungeon's message log (Others > Message Log), always shown, as the DS
 // version's "Log" screen: the latest lines over the M+T grid, in a window,
-// with the game's colours and its double line over the first line of each
-// message.
+// with the game's colours and a line over the first line of each message.
 
 #define LOG_WIN_X 16
 #define LOG_WIN_Y 16
@@ -1106,9 +1105,10 @@ static void DrawMessageLog(void)
         const struct MessageLogString *line = lines[count - 1 - i];
         int y = LOG_WIN_Y + 11 + i * LOG_LINE_H;
         if (line->unk1) { // a new message: the game's double underline
-            for (int r = 0; r < 4; r++) // (kept inside the window)
-                if (y - 5 + r >= LOG_WIN_Y + 8)
-                    Fill(LOG_WIN_X + 8, y - 5 + r, LOG_WIN_W * 8 + 1, 1, r & 1 ? Rgb(0, 0, 0) : COLOR_TEXT);
+            // a single line (white over its shadow), clear of the text
+            // above and below
+            Fill(LOG_WIN_X + 8, y - 1, LOG_WIN_W * 8 + 1, 1, COLOR_TEXT);
+            Fill(LOG_WIN_X + 8, y, LOG_WIN_W * 8 + 1, 1, Rgb(0, 0, 0));
         }
         DrawLogText(LOG_WIN_X + 16, y, line->str);
     }
