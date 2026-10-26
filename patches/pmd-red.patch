@@ -2116,6 +2116,85 @@ index 812df38d..e3029ee1 100644
          // Set x/matrixNum to 0
          // Set size to 1
          *oam++ = 0x4000;
+diff --git a/src/text_1.c b/src/text_1.c
+index e6612f2c..2b4eb33c 100644
+--- a/src/text_1.c
++++ b/src/text_1.c
+@@ -1,4 +1,9 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#else
++#define TEXT_ROWS 20
++#endif
+ #include "globaldata.h"
+ #include "structs/str_text.h"
+ #include "bg_palette_buffer.h"
+@@ -148,7 +153,7 @@ void LoadCharmaps(void)
+ 
+     gCharacterSpacing = 0;
+ 
+-    for (i = 0; i < 20; i++) {
++    for (i = 0; i < TEXT_ROWS; i++) {
+         gBgTilemaps[0][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x279);
+         gBgTilemaps[1][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x27A);
+ 
+@@ -163,7 +168,7 @@ void LoadCharmaps(void)
+     gWindowBgCopy = NULL;
+     gUnknown_20274A5 = FALSE;
+     gUnknown_202B020 = 1;
+-    gUnknown_202B024 = 20;
++    gUnknown_202B024 = TEXT_ROWS;
+     UpdateFadeInTile(0);
+ }
+ 
+@@ -320,6 +325,12 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
+     newWindow = &windows[windowId];
+     x = winTemplate->pos.x + positionModifier->x;
+     y =  winTemplate->pos.y + positionModifier->y;
++#ifdef PLATFORM_3DS
++    // DS size, wide view (port_view.h): the windows keep their distance from
++    // the bottom of the screen, which is 32 lines further down.
++    if (PORT_DS_SIZE && gPortWideView)
++        y += WINDOW_SHIFT_TILES;
++#endif
+     newWindow->x = x;
+     newWindow->y = y;
+     newWindow->width = winTemplate->width;
+diff --git a/src/text_3.c b/src/text_3.c
+index dc4d10d1..a0b23c26 100644
+--- a/src/text_3.c
++++ b/src/text_3.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "text_1.h"
+ #include "text_2.h"
+ #include "text_3.h"
+@@ -414,6 +417,10 @@ void sub_8009408(s32 from, s32 to)
+ 
+     gBgTilemaps[0][0][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x279);
+     gBgTilemaps[1][0][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x27A);
++#ifdef PLATFORM_3DS
++    if (to == 20)
++        to = TEXT_ROWS;
++#endif
+     for (i = from; i < to; i++) {
+         gBgTilemaps[0][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x279);
+         gBgTilemaps[1][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x27A);
+@@ -476,6 +483,10 @@ UNUSED static void nullsub_173(void)
+ // arm9.bin::020032C0
+ void sub_80095CC(s32 a0, s32 a1)
+ {
++#ifdef PLATFORM_3DS
++    if (a1 == 20)
++        a1 = TEXT_ROWS; // also the rows the wide view's windows reach
++#endif
+     gUnknown_202B020 = a0;
+     gUnknown_202B024 = a1;
+ }
 diff --git a/src/text_4.c b/src/text_4.c
 index f20880c5..b44ac671 100644
 --- a/src/text_4.c
