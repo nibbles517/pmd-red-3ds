@@ -990,18 +990,21 @@ static void DrawMapAndTeam(void)
     DrawSubMap();
     LoadWindowPalette();
     DrawGameWindow(TEAM_WIN_X, TEAM_WIN_Y, TEAM_WIN_W, TEAM_WIN_H);
-    y = TEAM_WIN_Y + 8 + 1;
+    // Positions as on the DS: names at 28, "Level" at 96, and HP as
+    // "hp/max" in three-digit cells ending at 197.
+    y = TEAM_WIN_Y + 8;
     for (int i = 0; i < MAX_TEAM_MEMBERS; i++, y += 12) {
         const PanelRow *row = &sRows[i];
+        int maxRight = TEAM_WIN_X + 181, slashX = maxRight - 3 * GlyphWidth('0') - TextWidth(sSlash);
         if (!row->used)
             continue;
         DrawText(TEAM_WIN_X + 12, y, row->name, COLOR_NAME);
-        x = DrawText(TEAM_WIN_X + 100, y, sLevel, COLOR_TEXT);
+        x = DrawText(TEAM_WIN_X + 80, y, sLevel, COLOR_TEXT);
         FormatInt(buf, row->level);
         DrawText(x, y, buf, COLOR_TEXT);
-        DrawNumberRight(TEAM_WIN_X + 188, y, row->hp);
-        DrawText(TEAM_WIN_X + 188, y, sSlash, COLOR_TEXT);
-        DrawNumberRight(TEAM_WIN_X + 212, y, row->maxHp);
+        DrawNumberRight(slashX, y, row->hp);
+        DrawText(slashX, y, sSlash, COLOR_TEXT);
+        DrawNumberRight(maxRight, y, row->maxHp);
     }
 }
 
