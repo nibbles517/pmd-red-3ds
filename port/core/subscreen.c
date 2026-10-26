@@ -357,7 +357,7 @@ static void DrawMember(int y0, Entity *entity)
 
     DrawSpriteBox(y0, FALSE);
     DrawInfoPanel(y0);
-    DrawMonSprite(entity, 23, y0 + 46);
+    DrawMonSprite(entity, 23, y0 + 41); // feet on the middle of the floor
 
     // Name (team members' own names; the game's StrncpyCustom stops at 0 too)
     if (info->teamIndex < MAX_TEAM_MEMBERS) {
