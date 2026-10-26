@@ -112,9 +112,19 @@ $(GAME_PRELINK):
 	@echo "Missing $(GAME_PRELINK). Put pmd-red-game.o in the build folder (or run make prelink)."
 	@false
 
-$(3DS_ELF): $(3DS_OBJ)/main.o $(GAME_PRELINK) port/3ds/game_sections.ld
-	@$(CC_3DS) -specs=3dsx.specs -g -marm -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft \
-		-Wl,-T,port/3ds/game_sections.ld -L port -Wl,-Map,$(BUILD)/pmd-red-3ds.map -Wl,--no-warn-rwx-segments \
+# devkitARM's 3dsx.specs, with port/3ds/game_sections.ld listed before
+# 3dsx.ld so its INSERT commands can find their anchors. The path is relative:
+# devkitARM's linker is a native Windows program and cannot read /c/... paths.
+3DS_SPECS := $(BUILD)/pmd-red-3ds.specs
+$(3DS_SPECS): Makefile
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '%include <sync-dmb.specs>' '' '*link:' \
+		'+ -T port/3ds/game_sections.ld -T 3dsx.ld%s -d --emit-relocs --use-blx --gc-sections' '' \
+		'*startfile:' '3dsx_crt0%O%s crti%O%s crtbegin%O%s' > $@
+
+$(3DS_ELF): $(3DS_OBJ)/main.o $(GAME_PRELINK) port/3ds/game_sections.ld $(3DS_SPECS)
+	@$(CC_3DS) -specs=$(3DS_SPECS) -g -marm -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft \
+		-Wl,-Map,$(BUILD)/pmd-red-3ds.map -Wl,--no-warn-rwx-segments \
 		-o $@ $(3DS_OBJ)/main.o $(GAME_PRELINK) -L$(CTRU)/lib -lctru -lm
 	@echo "  LD   $@"
 
