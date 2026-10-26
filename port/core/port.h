@@ -54,6 +54,10 @@ uint16_t Backend_PollKeys(void);               // active-high GBA key bits
 void Backend_EndFrame(void);                   // pacing; may also service the OS
 void Backend_Log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void Backend_Fatal(const char *msg) __attribute__((noreturn));
+// Renamed whenever a backend must change together with the core: linking an
+// older backend (port/3ds/main.c from an old copy of the repo) with a newer
+// pmd-red-game.o then fails with an undefined reference naming this symbol.
+extern const int Backend_Version3_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

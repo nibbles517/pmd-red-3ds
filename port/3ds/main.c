@@ -22,6 +22,8 @@
 
 void AgbMain(void);
 
+const int Backend_Version3_UpdateRepoIfMissing = 3;
+
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
 static int sScaled;
 static int sBottom; // picture on the bottom screen

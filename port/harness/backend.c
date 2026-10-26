@@ -17,6 +17,8 @@ enum {
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
 
+const int Backend_Version3_UpdateRepoIfMissing = 3;
+
 void AgbMain(void);
 
 static void Puts(const char *s)
