@@ -326,6 +326,59 @@ index 4a9a72ad..9b88378e 100644
    CloseFile(file);
  
    sprintf(fileName,"b%02dpal",gDungeon->tileset);
+diff --git a/src/dungeon_pokemon_sprites.c b/src/dungeon_pokemon_sprites.c
+index b965ec4a..78ce9e9e 100644
+--- a/src/dungeon_pokemon_sprites.c
++++ b/src/dungeon_pokemon_sprites.c
+@@ -502,6 +502,48 @@ void DeletePokemonDungeonSprite(s32 dungeonSpriteId)
+     MemoryClear8(dSprite, sizeof(*dSprite));
+ }
+ 
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++
++// For the port's second screen: the status symbols showing over a Pokémon,
++// with the graphics and placement DrawStatusSprite uses.
++s32 Port_GetStatusSymbols(s32 dungeonSpriteId, struct PortStatusSymbol *out)
++{
++    DungeonPokemonSprite *sprite;
++    s32 i, n = 0;
++
++    if (sDungeonPokemonSprites == NULL)
++        return 0;
++    sprite = GetSpriteById(dungeonSpriteId);
++    if (sprite == NULL || !sprite->visible || sprite->status == 0)
++        return 0;
++
++    for (i = 0; i < 2; i++) {
++        u32 status = sprite->statusSprites[i].status;
++        struct StatusSprite spriteInfo;
++        const struct StatusGraphicsInfo *gfxInfo;
++        s32 size;
++
++        if (status == 0)
++            continue;
++        spriteInfo = sStatusSpritesInfo[StatusSymbolBitToIndex(status)];
++        if (spriteInfo.gfxIndex == STATUS_GFX_NONE)
++            continue;
++        gfxInfo = &sStatusGfxInfo[spriteInfo.gfxIndex];
++        size = gfxInfo->width * gfxInfo->height * 32;
++        out[n].gfx = sStatusGfx + gfxInfo->offsetIntoGraphic + ((sDungeonPokemonSprites->frame / 4) % gfxInfo->graphicsCount) * size;
++        out[n].width = gfxInfo->width;
++        out[n].height = gfxInfo->height;
++        out[n].palNum = spriteInfo.palIndex;
++        out[n].anchor = i == 0 ? 0 : 3;
++        out[n].dx = -gfxInfo->width * 4 + (spriteInfo.gfxIndex == STATUS_GFX_SLEEP ? 8 : 0);
++        out[n].dy = -gfxInfo->height * 4 - (spriteInfo.gfxIndex == STATUS_GFX_FROZEN ? 0 : 16);
++        n++;
++    }
++    return n;
++}
++#endif
++
+ void UpdateDungeonPokemonSprite2(s32 dungeonSpriteId, DungeonPos *pos, DungeonPos *statusOffsets, u32 priority)
+ {
+     if (sDungeonPokemonSprites != NULL) {
 diff --git a/src/flash.c b/src/flash.c
 index 172f2be9..c3dfe0d5 100644
 --- a/src/flash.c

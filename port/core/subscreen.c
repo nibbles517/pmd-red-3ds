@@ -36,6 +36,7 @@
 #include "structs/axdata.h"
 #include "structs/str_dungeon.h"
 #include "../core/port.h"
+#include "port_game.h"
 
 extern Dungeon *gDungeon;
 extern const DungeonPos gDungeonCoordinates[64]; // world_map.c
@@ -356,6 +357,8 @@ typedef struct {
     const axmain *sprite;
     u8 anim, palNum;
     s16 frame, frameLeft; // position in the down-left animation
+    struct PortStatusSymbol symbols[2]; // status symbols over the sprite
+    u8 symbolCount;
 } PanelRow;
 
 static PanelRow sRows[MAX_TEAM_MEMBERS];
@@ -429,6 +432,31 @@ static void AdvanceSprite(PanelRow *row)
     }
 }
 
+// A status symbol, placed like DrawStatusSprite places it on the main screen:
+// from the pose's position set (the head, for the first symbol).
+static void DrawStatusSymbol(const PanelRow *row, const struct PortStatusSymbol *sym,
+                             const ax_anim *frame, int ax, int ay)
+{
+    DungeonPos at = { 0, 0 };
+    const u16 *pal = &sPalet[sym->palNum * 16];
+
+    if (row->sprite->positions != NULL) {
+        at = row->sprite->positions[frame->poseId].set[sym->anchor];
+        if (at.x == 99 && at.y == 99)
+            return; // no such point in this pose: the game draws it off screen
+    }
+    ax += frame->offset.x + at.x + sym->dx;
+    ay += frame->offset.y + at.y + sym->dy;
+    for (int y = 0; y < sym->height * 8; y++) {
+        for (int x = 0; x < sym->width * 8; x++) {
+            int t = (y / 8) * sym->width + x / 8;
+            int c = (sym->gfx[t * 32 + (y & 7) * 4 + (x & 7) / 2] >> ((x & 1) * 4)) & 0xF;
+            if (c)
+                Plot(ax + x, ay + y, pal[c] & 0x7FFF);
+        }
+    }
+}
+
 static void DrawRowSprite(const PanelRow *row, int ax, int ay)
 {
     int n;
@@ -439,6 +467,8 @@ static void DrawRowSprite(const PanelRow *row, int ax, int ay)
         return;
     DrawPose(row->sprite->poses[sw[row->frame].poseId], row->sprite->spriteData, NULL, 0,
              sPalet, row->palNum, ax + sw[row->frame].offset.x, ay + sw[row->frame].offset.y);
+    for (int i = 0; i < row->symbolCount; i++)
+        DrawStatusSymbol(row, &row->symbols[i], &sw[row->frame], ax, ay);
 }
 
 static void ReadMember(PanelRow *row, Entity *entity)
@@ -461,6 +491,7 @@ static void ReadMember(PanelRow *row, Entity *entity)
     row->maxHp = info->maxHPStat;
     row->item = ItemExists(&info->heldItem) ? gItemParametersData[info->heldItem.id].name : NULL;
     row->tactic = info->tactic < NUM_TACTICS ? gTacticsNames[info->tactic] : NULL;
+    row->symbolCount = Port_GetStatusSymbols(info->dungeonSpriteId, row->symbols);
 }
 
 // Updates the rows from the dungeon, unless the team's sprites are not loaded.
@@ -988,6 +1019,10 @@ static int TransitionBrightness(void)
     if (sTransition == TR_FRIEND_MAP)
         return 0;
     if (sTransition == TR_TOWN_IN) {
+        if (gPortTitleMenu) { // back to the title menu (after fainting, say)
+            sTransition = TR_NONE;
+            return PlaceOnMap() ? Port_TitleBrightness() * 0x100 / 32 : -1;
+        }
         if (gDungeon != NULL) { // straight into a dungeon
             sTransition = TR_NONE;
             return -1;
