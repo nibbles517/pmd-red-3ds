@@ -335,6 +335,41 @@ index 172f2be9..c3dfe0d5 100644
      return FALSE;
  }
 +#endif // PLATFORM_3DS
+diff --git a/src/friend_areas_map.c b/src/friend_areas_map.c
+index c2e99136..c062a0bf 100644
+--- a/src/friend_areas_map.c
++++ b/src/friend_areas_map.c
+@@ -79,6 +79,10 @@ void ShowFriendAreasMap_Async(struct FriendAreasMapSetupStruct *setupPtr)
+     FriendAreasMap_FadeOut_Async();
+     FriendAreasMap_CloseFiles();
+     nullsub_16();
++#ifdef PLATFORM_3DS
++    // The port's second screen checks this to know the map is showing.
++    gFriendAreasMapPtr = NULL;
++#endif
+ }
+ 
+ static s32 ChooseLocation_Async(s32 *newLocationId, s32 *newDirection)
+diff --git a/src/ground_main.c b/src/ground_main.c
+index 1dea7998..013bb40b 100644
+--- a/src/ground_main.c
++++ b/src/ground_main.c
+@@ -556,6 +556,15 @@ bool8 GroundMainGroundRequest(s32 r0, s32 r1, s32 r2)
+     return FALSE;
+ }
+ 
++#ifdef PLATFORM_3DS
++// For the port's second screen: whether the ground is fading out to the
++// friend areas map (requested by sub_8098D80).
++bool8 Port_GroundFriendAreasRequested(void)
++{
++    return sUnknown_20398A8 == Unk_20398A8_UNK3;
++}
++#endif
++
+ bool8 sub_8098D80(u32 speed)
+ {
+     if (sUnknown_20398A8 == Unk_20398A8_UNK0) {
 diff --git a/src/ground_map.c b/src/ground_map.c
 index ddf7d16b..6b7ba38f 100644
 --- a/src/ground_map.c
@@ -513,6 +548,26 @@ index 03531690..64627f53 100644
 +
      sub_80073E0(sUnknown_203B260->unk44);
  }
+diff --git a/src/palette_util.c b/src/palette_util.c
+index 926d28d1..684b3d20 100644
+--- a/src/palette_util.c
++++ b/src/palette_util.c
+@@ -49,6 +49,15 @@ static void sub_8099DD0(u16 a0);
+ static void sub_8099E58(u16 a0);
+ static void sub_8099E80(u16 a0, RGB_Array a1);
+ 
++#ifdef PLATFORM_3DS
++// For the port's second screen: the ground's screen brightness, 0 (black) to
++// 0x100, as its fades set it.
++u16 Port_GroundBrightness(void)
++{
++    return gUnknown_2039958.unkC;
++}
++#endif
++
+ void sub_8099744(void)
+ {
+     RunPaletteFadeFunctions();
 diff --git a/src/reg_control.c b/src/reg_control.c
 index e6872a26..c6368b99 100644
 --- a/src/reg_control.c

@@ -36,6 +36,9 @@
 
 extern Dungeon *gDungeon;
 extern const DungeonPos gDungeonCoordinates[64]; // world_map.c
+extern struct FriendAreasMap *gFriendAreasMapPtr; // friend_areas_map.c (NULL when not showing)
+bool8 Port_GroundFriendAreasRequested(void);     // ground_main.c
+u16 Port_GroundBrightness(void);                  // palette_util.c
 
 #define W SUBSCREEN_W
 #define H SUBSCREEN_H
@@ -863,13 +866,80 @@ static bool8 DrawWorldMap(void)
     return TRUE;
 }
 
+// --- Friend areas map ------------------------------------------------------------
+//
+// While the friend areas map is up, the second screen is black: it fades out
+// along with the town when the map is asked for, and back in along with the
+// town afterwards.
+
+enum { FA_NONE, FA_FADING_OUT, FA_MAP, FA_FADING_IN };
+static int sFriendAreasPhase;
+
+// The brightness (0-0x100) to show the second screen at, or -1 for normal.
+static int FriendAreasBrightness(void)
+{
+    bool8 mapUp = gFriendAreasMapPtr != NULL;
+    switch (sFriendAreasPhase) {
+        case FA_NONE:
+            if (mapUp)
+                sFriendAreasPhase = FA_MAP;
+            else if (Port_GroundFriendAreasRequested())
+                sFriendAreasPhase = FA_FADING_OUT;
+            else
+                return -1;
+            break;
+        case FA_FADING_OUT:
+            if (mapUp)
+                sFriendAreasPhase = FA_MAP;
+            else if (!Port_GroundFriendAreasRequested())
+                sFriendAreasPhase = FA_FADING_IN; // the ground went on without the map
+            break;
+        case FA_MAP:
+            if (!mapUp)
+                sFriendAreasPhase = FA_FADING_IN;
+            break;
+        case FA_FADING_IN:
+            if (mapUp) {
+                sFriendAreasPhase = FA_MAP;
+            } else if (Port_GroundBrightness() >= 0x100 && !Port_GroundFriendAreasRequested()) {
+                sFriendAreasPhase = FA_NONE;
+                return -1;
+            }
+            break;
+    }
+    if (sFriendAreasPhase == FA_MAP)
+        return 0;
+    return Port_GroundBrightness();
+}
+
+static void Darken(u16 *out, int brightness)
+{
+    for (int i = 0; i < W * H; i++) {
+        u16 c = out[i];
+        int r = (c & 31) * brightness >> 8, g = ((c >> 5) & 31) * brightness >> 8, b = ((c >> 10) & 31) * brightness >> 8;
+        out[i] = (u16)(r | (g << 5) | (b << 10));
+    }
+}
+
 bool Port_RenderSubScreen(u16 *out)
 {
+    int brightness;
+
     sOut = sOutFrame = out;
     if (gDungeon != NULL) {
         DrawTeamPanel();
         return TRUE;
     }
     sInDungeon = FALSE;
-    return DrawWorldMap();
+
+    brightness = FriendAreasBrightness();
+    if (brightness == 0) {
+        memset(out, 0, W * H * sizeof(u16));
+        return TRUE;
+    }
+    if (!DrawWorldMap())
+        return FALSE;
+    if (brightness >= 0 && brightness < 0x100)
+        Darken(out, brightness);
+    return TRUE;
 }
