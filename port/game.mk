@@ -35,7 +35,17 @@ GAME_OBJS    := $(patsubst $(UPSTREAM)/src/%.c,$(GAME_OBJ)/%.o,$(GAME_C_SRCS))
 # build assembled from your ROM's extracted assets.
 UP_BUILD     := $(UPSTREAM)/build/pmd_red_modern
 GAME_SONG_OBJS := $(patsubst $(UPSTREAM)/sound/songs/%.s,$(GAME_OBJ)/songs/%.o,$(wildcard $(UPSTREAM)/sound/songs/*.s))
-GAME_DATA_OBJS := $(wildcard $(UP_BUILD)/data/*.o) $(GAME_SONG_OBJS)
+GAME_UP_DATA   := $(patsubst $(UP_BUILD)/data/%.o,$(GAME_OBJ)/data/%.o,$(wildcard $(UP_BUILD)/data/*.o))
+GAME_DATA_OBJS := $(GAME_UP_DATA) $(GAME_SONG_OBJS)
+
+# Some data files switch sections without an .align, leaving them byte-aligned.
+# On the GBA they happen to land on aligned addresses; in the port they can end
+# up at odd ones, and the 3DS CPU faults on misaligned word and multi-word
+# accesses (the GBA's silently ignores the low bits). Align them all.
+$(GAME_OBJ)/data/%.o: $(UP_BUILD)/data/%.o
+	@mkdir -p $(dir $@)
+	@$(PREFIX)objcopy --set-section-alignment .rodata=4 --set-section-alignment .data=4 \
+		--set-section-alignment .bss=4 $< $@
 
 # Songs are reassembled with self-relative jump targets (see tools/port_song.py).
 $(GAME_OBJ)/songs/%.o: $(UPSTREAM)/sound/songs/%.s $(ROOT)/tools/port_song.py

@@ -11,6 +11,12 @@ _start:
     mcr p15, 0, r0, c1, c0, 2
     mov r0, #0x40000000
     vmsr fpexc, r0
+    @ Strict alignment checking (SCTLR.A), so misaligned accesses fault here as
+    @ multi-word ones do on the 3DS. Stricter than the 3DS, which allows
+    @ single unaligned LDR/STR: treat a trap as "look closer", not proof.
+    mrc p15, 0, r0, c1, c0, 0
+    orr r0, r0, #(1 << 1)
+    mcr p15, 0, r0, c1, c0, 0
     @ Zero .bss (including the game's EWRAM/IWRAM sections).
     ldr r0, =__bss_start
     ldr r1, =__bss_end

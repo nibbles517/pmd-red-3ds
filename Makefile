@@ -68,7 +68,7 @@ $(HARNESS_OBJ)/%.o: port/harness/%.S
 
 harness: $(HARNESS_ELF)
 
-$(HARNESS_ELF): $(GAME_OBJS) $(PORT_OBJS) $(GAME_SONG_OBJS) $(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/backend.o port/harness/harness.ld port/game_init_sections.ld port/game_bss_sections.ld
+$(HARNESS_ELF): $(GAME_OBJS) $(PORT_OBJS) $(GAME_DATA_OBJS) $(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/backend.o port/harness/harness.ld port/game_init_sections.ld port/game_bss_sections.ld
 	@# Link against newlib's ARM-mode hard-float build (armv5te+fp runs on the 3DS's ARMv6K).
 	@$(GAME_CC) -marm -march=armv5te+fp -mfloat-abi=hard -nostartfiles -T port/harness/harness.ld -L port \
 		-Wl,--no-warn-rwx-segments -Wl,-Map,$(BUILD)/pmd-red-harness.map -o $@ \
@@ -89,7 +89,7 @@ PRELINK := $(BUILD)/pmd-red-game.o
 
 # A plain target, not a file rule: `make 3ds` must use an existing
 # pmd-red-game.o as is, never try to rebuild it.
-prelink: $(GAME_OBJS) $(PORT_OBJS) $(GAME_SONG_OBJS)
+prelink: $(GAME_OBJS) $(PORT_OBJS) $(GAME_DATA_OBJS)
 	@$(PREFIX)ld -r -S -o $(PRELINK) $(PORT_OBJS) $(GAME_OBJS) $(GAME_DATA_OBJS)
 	@echo "  LD   $(PRELINK) (partial)"
 
