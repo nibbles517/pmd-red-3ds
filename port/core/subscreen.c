@@ -61,6 +61,14 @@ static inline u16 Rgb(int r, int g, int b)
     return (u16)((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10));
 }
 
+static inline u16 Blend50(u16 a, u16 b)
+{
+    int r = ((a & 31) + (b & 31)) >> 1;
+    int g = (((a >> 5) & 31) + ((b >> 5) & 31)) >> 1;
+    int bl = (((a >> 10) & 31) + ((b >> 10) & 31)) >> 1;
+    return (u16)(r | (g << 5) | (bl << 10));
+}
+
 static inline void Plot(int x, int y, u16 c)
 {
     if ((unsigned)x < W && (unsigned)y < H)
@@ -842,10 +850,19 @@ static void DrawGameWindow(int px, int py, int w, int h)
             for (int y = 0; y < 8; y++) {
                 for (int x = 0; x < 8; x++) {
                     int c = tile ? FontTilePixel(font, tile, hf, vf, x, y) : 0;
-                    if (c == 0)
+                    bool8 fill = c == 0;
+                    if (fill)
                         c = FontTilePixel(font, TILE_FILL, FALSE, FALSE, x, y);
-                    if (c != 0)
-                        Plot(px + tx * 8 + x, py + ty * 8 + y, sWindowPal[c] & 0x7FFF);
+                    if (c == 0)
+                        continue;
+                    int sx = px + tx * 8 + x, sy = py + ty * 8 + y;
+                    u16 color = sWindowPal[c] & 0x7FFF;
+                    // Windows Options > BG Shading: Translucent, as on the main
+                    // screen: the background blended half and half over what
+                    // is behind it (the game's alpha, 8/16 + 8/16)
+                    if (fill && gPortConfig.windowShading && (unsigned)sx < W && (unsigned)sy < H)
+                        color = Blend50(color, sOut[sy * W + sx]);
+                    Plot(sx, sy, color);
                 }
             }
         }
@@ -906,7 +923,9 @@ static bool8 DrawWorldMap(void)
         if (area == FRIEND_AREA_NONE || area >= FRIEND_AREA_COUNT || !Port_FriendAreaMapPos(area, &areaPos))
             area = FRIEND_AREA_NONE;
     }
-    bool8 newColors = LoadWindowPalette();
+    static u8 sCachedShading;
+    bool8 newColors = LoadWindowPalette() || sCachedShading != gPortConfig.windowShading;
+    sCachedShading = gPortConfig.windowShading;
     if (place != sCachedPlace || area != sCachedArea || newColors) {
         int set = dungeon == PLACE_TOWN ? 0 : 1;
         int x = dungeon == PLACE_TOWN ? TEAM_BASE_X : gDungeonCoordinates[dungeon].x;
