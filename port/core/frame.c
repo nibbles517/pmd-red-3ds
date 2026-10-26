@@ -39,7 +39,8 @@ void (*gPortLineHook)(int line);
 static uint16_t sFrame[SCREEN_W * SCREEN_H];
 static uint16_t sShown[SCREEN_W * SCREEN_H];
 static uint16_t sLine[SCREEN_W];
-static int sViewWide = -1; // view of the last frame
+enum { VIEW_GBA, VIEW_FRAMED, VIEW_WIDE };
+static int sViewMode = -1; // view of the last frame
 uint8_t gPortWideView;
 static uint64_t sFrames;
 static int sInFrame;     // inside the scanline loop: VCOUNT is the real line
@@ -84,7 +85,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version6_UpdateRepoIfMissing != 6)
+    if (Backend_Version7_UpdateRepoIfMissing != 7)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -117,19 +118,23 @@ static void UpdateKeys(void)
 // while palettes and OAM (copied in the VBlank handler) stay on time.
 static void RunFrame(void)
 {
-    // The wide view stays on while the game keeps asking for it (it sets
-    // gPortWideView every frame it draws a dungeon floor or a ground map).
-    int wide = gPortWideView != 0;
-    if (wide)
+    // Main Screen Settings > Size: GBA, the game's 240x160 picture as it is;
+    // DS, a 256x192 picture, the GBA one in the middle, or the wide view while
+    // the game keeps asking for it (it sets gPortWideView every frame it draws
+    // a dungeon floor or a ground map, which it does only in DS size).
+    int ds = Port_DsSize();
+    int wide = ds && gPortWideView != 0;
+    int mode = !ds ? VIEW_GBA : wide ? VIEW_WIDE : VIEW_FRAMED;
+    if (gPortWideView)
         gPortWideView--;
-    else
+    if (!wide)
         memset(gPortWideBg, 0, sizeof(gPortWideBg));
 
     sInFrame = 1;
-    if (wide != sViewWide) {
-        sViewWide = wide;
+    if (mode != sViewMode) {
+        sViewMode = mode;
         Ppu_SetView(wide);
-        memset(sFrame, 0, sizeof(sFrame)); // the narrow view's border is black
+        memset(sFrame, 0, sizeof(sFrame)); // the framed view's border is black
     }
 
     // Lines 0-159: visible. The wide view also draws lines below, as if the
@@ -141,7 +146,10 @@ static void RunFrame(void)
             if (gPortLineHook)
                 gPortLineHook(line);
         }
-        if (wide) {
+        if (mode == VIEW_GBA) {
+            Ppu_RenderLine(line, &sFrame[line * GBA_W]);
+        }
+        else if (wide) {
             Ppu_RenderLine(line, &sFrame[line * SCREEN_W]);
         }
         else {
@@ -151,7 +159,10 @@ static void RunFrame(void)
         Dma_HBlank();
     }
     memcpy(sShown, sFrame, sizeof(sShown));
-    Backend_Present(sShown);
+    if (mode == VIEW_GBA)
+        Backend_Present(sShown, GBA_W, GBA_H);
+    else
+        Backend_Present(sShown, SCREEN_W, SCREEN_H);
 
     // Lines 160-227: VBlank.
     SetLine(160);

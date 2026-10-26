@@ -30,6 +30,10 @@ struct PortConfig
     u8 layout[2][2];        // [main, sub][size, scale]: placeholders for now
 };
 extern struct PortConfig gPortConfig;
+enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_3DS };
+// Main Screen Settings > Size is DS: the 256x192 picture and the wide view
+// (port_view.h). Everything for it is off in the other sizes.
+#define PORT_DS_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS)
 
 extern bool8 gPortGroundNarrow; // ground_bg.c
 bool8 Port_GroundViewIsNarrow(void); // ground_map.c

@@ -19,7 +19,7 @@ enum {
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
 
-const int Backend_Version6_UpdateRepoIfMissing = 6;
+const int Backend_Version7_UpdateRepoIfMissing = 7;
 
 void AgbMain(void);
 
@@ -49,8 +49,16 @@ void Backend_Fatal(const char *msg)
     for (;;) {}
 }
 
-void Backend_Present(const uint16_t *frame)
+void Backend_Present(const uint16_t *frame, int width, int height)
 {
+    // the harness always takes 256x192: a GBA-size picture goes in the middle
+    static uint16_t ds[SCREEN_W * SCREEN_H];
+    if (width == GBA_W) {
+        memset(ds, 0, sizeof(ds));
+        for (int y = 0; y < height; y++)
+            memcpy(&ds[(y + NARROW_OY) * SCREEN_W + NARROW_OX], &frame[y * GBA_W], GBA_W * 2);
+        frame = ds;
+    }
     static uint16_t sub[SUBSCREEN_W * SUBSCREEN_H];
     if (IO[IO_SUBSCREEN])
         IO[IO_SUBSCREEN] = Port_RenderSubScreen(sub) ? (uint32_t)(uintptr_t)sub : 0;

@@ -42,13 +42,14 @@ void Dma_Reset(void);
 // frame.c
 void Port_Init(void);
 uint64_t Port_FrameCount(void);
-const uint16_t *Port_Framebuffer(void); // SCREEN_W x SCREEN_H BGR555, last completed frame
+const uint16_t *Port_Framebuffer(void); // last completed frame, as passed to Backend_Present
 
 // sound.c
 void Sound_EndFrame(void);
 
 // Port settings kept in the game's own options (port/core/options.c).
 bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Screen
+bool Port_DsSize(void);            // ... > Main Screen Settings > Size is DS (port_view.h)
 void Port_LoadConfig(void);
 
 // subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
@@ -58,7 +59,7 @@ void Port_LoadConfig(void);
 bool Port_RenderSubScreen(uint16_t *out);
 
 // Backend: implemented once per platform.
-void Backend_Present(const uint16_t *frame);   // SCREEN_W x SCREEN_H BGR555
+void Backend_Present(const uint16_t *frame, int width, int height); // BGR555: 240x160 (GBA size) or SCREEN_W x SCREEN_H (DS size)
 uint16_t Backend_PollKeys(void);               // active-high GBA key bits
 void Backend_EndFrame(void);                   // pacing; may also service the OS
 void Backend_Log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -66,7 +67,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version6_UpdateRepoIfMissing;
+extern const int Backend_Version7_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

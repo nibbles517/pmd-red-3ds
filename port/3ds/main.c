@@ -1,9 +1,11 @@
 // Nintendo 3DS backend (libctru).
 //
-// The game's 256x192 picture (its 240x160 one framed, or a wider view of
-// dungeons and ground maps) goes on the bottom screen by default, as on the DS,
-// or on the top screen, chosen in Others > Screen/Layout Options > Main Screen;
-// 1:1, or 1.25x to 320x240 (Y toggles the size). The other screen shows the
+// The game's picture goes on the bottom screen by default, as on the DS, or
+// on the top screen (Others > Screen/Layout Options > Main Screen). In GBA
+// size it is the 240x160 picture (1:1, 4/3x to 320x213 on the bottom screen,
+// or 1.5x to 360x240 on the top); in DS size (Main Screen Settings > Size),
+// 256x192 with a wider view of dungeons and ground maps (1:1, or 1.25x to
+// 320x240). Y toggles the scaling. The other screen shows the
 // DS-style second screen at 256x192 (team panel in dungeons, world map
 // elsewhere), or a short status text when there is none (title screen).
 // Sound goes through the DSP (needs sdmc:/3ds/dspfirm.cdc, which most custom
@@ -26,7 +28,7 @@
 
 void AgbMain(void);
 
-const int Backend_Version6_UpdateRepoIfMissing = 6;
+const int Backend_Version7_UpdateRepoIfMissing = 7;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -70,15 +72,47 @@ static void SetFadeLevel(int level)
     sPresentLut = sDimLut;
 }
 
-static void PresentMain(const uint16_t *frame)
-{
-    const uint16_t *lut = sPresentLut;
-    // Framebuffers are 240 pixels per column, columns left to right, each
-    // column stored bottom to top. Top: 400 columns; bottom: 320.
-    gfxScreen_t screen = sBottom ? GFX_BOTTOM : GFX_TOP;
-    const int width = sBottom ? 320 : 400;
-    uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
+static void ClearGameScreen(void);
 
+// GBA size: the 240x160 picture, 1:1 or scaled (4/3x to 320x213 on the
+// bottom screen, 1.5x to 360x240 on the top).
+static void PresentGba(const uint16_t *frame, uint16_t *fb, int width, const uint16_t *lut)
+{
+    if (!sScaled) {
+        const int ox = (width - GBA_W) / 2, oy = (240 - GBA_H) / 2;
+        for (int x = 0; x < GBA_W; x++) {
+            uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
+            for (int y = 0; y < GBA_H; y++)
+                col[-y] = lut[frame[y * GBA_W + x] & 0x7FFF];
+        }
+        return;
+    }
+
+    if (sBottom) {
+        // 4/3x to 320x213: every source pixel becomes 1 or 2 screen pixels.
+        const int oy = (240 - 213) / 2;
+        for (int sx = 0; sx < 320; sx++) {
+            int x = sx * 3 / 4;
+            uint16_t *col = fb + sx * 240 + (239 - oy);
+            for (int sy = 0; sy < 213; sy++)
+                col[-sy] = lut[frame[(sy * 3 / 4) * GBA_W + x] & 0x7FFF];
+        }
+        return;
+    }
+
+    // 1.5x: every source pixel becomes 1 or 2 screen pixels in each direction.
+    const int ox = (400 - 360) / 2;
+    for (int sx = 0; sx < 360; sx++) {
+        int x = sx * 2 / 3;
+        uint16_t *col = fb + (ox + sx) * 240 + 239;
+        for (int sy = 0; sy < 240; sy++)
+            col[-sy] = lut[frame[(sy * 2 / 3) * GBA_W + x] & 0x7FFF];
+    }
+}
+
+// DS size: the 256x192 picture, 1:1 or 1.25x to 320x240.
+static void PresentDs(const uint16_t *frame, uint16_t *fb, int width, const uint16_t *lut)
+{
     if (!sScaled) {
         const int ox = (width - SCREEN_W) / 2, oy = (240 - SCREEN_H) / 2;
         for (int x = 0; x < SCREEN_W; x++) {
@@ -89,7 +123,7 @@ static void PresentMain(const uint16_t *frame)
         return;
     }
 
-    // 1.25x to 320x240: every source pixel becomes 1 or 2 screen pixels.
+    // 1.25x: every source pixel becomes 1 or 2 screen pixels.
     const int ox = (width - 320) / 2;
     for (int sx = 0; sx < 320; sx++) {
         const uint16_t *src = frame + sx * 4 / 5;
@@ -97,6 +131,24 @@ static void PresentMain(const uint16_t *frame)
         for (int sy = 0; sy < 240; sy++)
             col[-sy] = lut[src[(sy * 4 / 5) * SCREEN_W] & 0x7FFF];
     }
+}
+
+static void PresentMain(const uint16_t *frame, int frameW)
+{
+    // Framebuffers are 240 pixels per column, columns left to right, each
+    // column stored bottom to top. Top: 400 columns; bottom: 320.
+    static int sLastW;
+    if (frameW != sLastW) { // size changed: clear what the old picture left
+        sLastW = frameW;
+        ClearGameScreen();
+    }
+    gfxScreen_t screen = sBottom ? GFX_BOTTOM : GFX_TOP;
+    const int width = sBottom ? 320 : 400;
+    uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
+    if (frameW == GBA_W)
+        PresentGba(frame, fb, width, sPresentLut);
+    else
+        PresentDs(frame, fb, width, sPresentLut);
 }
 
 // --- Second screen -------------------------------------------------------------
@@ -143,9 +195,10 @@ static void PresentSub(void)
     }
 }
 
-void Backend_Present(const uint16_t *frame)
+void Backend_Present(const uint16_t *frame, int width, int height)
 {
-    PresentMain(frame);
+    (void)height;
+    PresentMain(frame, width);
     PresentSub();
 }
 

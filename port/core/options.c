@@ -25,6 +25,12 @@ void Port_SaveConfig(void)
 // the DS version uses for its touch screen option, which the GBA game never
 // reads: clear (new games, saves from a GBA) means the bottom screen, as on
 // the DS; set means the top screen.
+// Main Screen Settings > Size: DS (port_view.h). GBA keeps the 240x160 picture.
+bool Port_DsSize(void)
+{
+    return PORT_DS_SIZE;
+}
+
 bool Port_WantsBottomScreen(void)
 {
     return gGameOptionsRef == NULL || !gGameOptionsRef->touchScreen;
