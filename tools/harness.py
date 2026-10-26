@@ -90,12 +90,12 @@ def where(syms, addr):
     return f'{best[1]}+{addr - best[0]:#x}' if best else hex(addr)
 
 
-def write_png(path, frame_bytes):
+def write_png(path, frame_bytes, width=240, height=160):
     rows = []
-    for y in range(160):
+    for y in range(height):
         row = bytearray(b'\0')
-        for x in range(240):
-            c, = struct.unpack_from('<H', frame_bytes, (y * 240 + x) * 2)
+        for x in range(width):
+            c, = struct.unpack_from('<H', frame_bytes, (y * width + x) * 2)
             r, g, b = c & 31, (c >> 5) & 31, (c >> 10) & 31
             row += bytes(((r << 3) | (r >> 2), (g << 3) | (g >> 2), (b << 3) | (b >> 2)))
         rows.append(bytes(row))
@@ -103,7 +103,7 @@ def write_png(path, frame_bytes):
 
     def chunk(t, d):
         return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xFFFFFFFF)
-    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 240, 160, 8, 2, 0, 0, 0)) + \
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)) + \
         chunk(b'IDAT', raw) + chunk(b'IEND', b'')
     open(path, 'wb').write(png)
 
@@ -203,6 +203,9 @@ class Harness:
         lr = uc.reg_read(UC_ARM_REG_LR)
         print(f'[trace] f{self.frame} {name}(' + ', '.join(f'{v:#x}' for v in r) + f') <- {where(self.syms, lr & ~1)}', flush=True)
 
+    def wants_shot(self):
+        return self.frame in self.shots or bool(self.args.shot_every and self.frame % self.args.shot_every == 0)
+
     def keys(self):
         m = 0
         for start, end, mask in self.presses:
@@ -216,6 +219,8 @@ class Harness:
             val = self.keys()
         elif reg == 13:  # capture this frame?
             val = 1 if self.frame in self.captures else 0
+        elif reg == 14:  # render the second screen this frame?
+            val = 1 if self.wants_shot() else 0
         else:
             val = self.regs[reg]
         uc.mem_write(addr, struct.pack('<I', val)[:size])
@@ -234,7 +239,7 @@ class Harness:
             if getattr(self, 'pending_capture_png', None):
                 open(self.pending_capture_png[:-4] + '.frame', 'wb').write(self.last_frame)
                 self.pending_capture_png = None
-            if self.frame in self.shots or (self.args.shot_every and self.frame % self.args.shot_every == 0):
+            if self.wants_shot():
                 write_png(os.path.join(self.args.out, f'frame_{self.frame:05d}.png'), self.last_frame)
         elif reg == 3:  # end of frame
             self.frame += 1
@@ -260,6 +265,8 @@ class Harness:
             open(path, 'wb').write(bytes(uc.mem_read(value, size)))
             # the PNG of the same frame is the reference output
             self.pending_capture_png = path[:-4] + '.png'
+        elif reg == 14 and value:  # second screen rendered (256x192)
+            write_png(os.path.join(self.args.out, f'sub_{self.frame:05d}.png'), bytes(uc.mem_read(value, 256 * 192 * 2)), 256, 192)
         elif reg == 12:  # audio chunk: `value` interleaved 16-bit stereo samples
             self.audio += bytes(uc.mem_read(self.regs[9], value * 4))
             self.audio_rate = self.regs[11]

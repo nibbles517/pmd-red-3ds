@@ -81,7 +81,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version3_UpdateRepoIfMissing != 3)
+    if (Backend_Version4_UpdateRepoIfMissing != 4)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));

@@ -48,6 +48,12 @@ void Sound_EndFrame(void);
 // Port settings kept in the game's own options (port/core/options.c).
 bool Port_WantsBottomScreen(void); // Others > Game Options > Main Screen
 
+// subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
+// true when there is something to show.
+#define SUBSCREEN_W 256
+#define SUBSCREEN_H 192
+bool Port_RenderSubScreen(uint16_t *out);
+
 // Backend: implemented once per platform.
 void Backend_Present(const uint16_t *frame);   // 240x160 BGR555
 uint16_t Backend_PollKeys(void);               // active-high GBA key bits
@@ -57,7 +63,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version3_UpdateRepoIfMissing;
+extern const int Backend_Version4_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

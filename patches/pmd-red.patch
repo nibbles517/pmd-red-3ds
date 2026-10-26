@@ -608,3 +608,20 @@ index f20880c5..b44ac671 100644
  {
      s32 i, j;
      Window *window = &windows[id];
+diff --git a/src/world_map.c b/src/world_map.c
+index 8c50130b..819cf298 100644
+--- a/src/world_map.c
++++ b/src/world_map.c
+@@ -126,7 +126,12 @@ void ShowWorldMap_Async(struct WorldMapSetupStruct *setupPtr)
+     nullsub_16();
+ }
+ 
++#ifdef PLATFORM_3DS
++// Also used by the 3DS port's second screen (port/core/subscreen.c).
++const DungeonPos gDungeonCoordinates[64] =
++#else
+ static const DungeonPos gDungeonCoordinates[] =
++#endif
+ {
+     [DUNGEON_TINY_WOODS] = {172, 174},
+     [DUNGEON_THUNDERWAVE_CAVE] = {171, 111},

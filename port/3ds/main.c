@@ -3,7 +3,9 @@
 // The game's 240x160 picture goes on the bottom screen by default, as on the
 // DS (1:1, or 4/3x to 320x213), or on the top screen (1:1, or 1.5x to
 // 360x240), chosen in Others > Game Options > Main Screen. Y toggles the
-// size. The other screen shows a short status text. Sound goes through the DSP (needs
+// size. The other screen shows the DS-style second screen at 256x192 (team
+// panel in dungeons, world map elsewhere), or a short status text when there
+// is none (title screen). Sound goes through the DSP (needs
 // sdmc:/3ds/dspfirm.cdc, which most custom firmware setups already have).
 // The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save.
 
@@ -22,7 +24,7 @@
 
 void AgbMain(void);
 
-const int Backend_Version3_UpdateRepoIfMissing = 3;
+const int Backend_Version4_UpdateRepoIfMissing = 4;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -66,7 +68,7 @@ static void SetFadeLevel(int level)
     sPresentLut = sDimLut;
 }
 
-void Backend_Present(const uint16_t *frame)
+static void PresentMain(const uint16_t *frame)
 {
     const uint16_t *lut = sPresentLut;
     // Framebuffers are 240 pixels per column, columns left to right, each
@@ -107,6 +109,56 @@ void Backend_Present(const uint16_t *frame)
     }
 }
 
+// --- Second screen -------------------------------------------------------------
+//
+// The screen without the game shows the DS-style second screen (team panel,
+// world map) when the game has one to show, else the status text.
+
+enum { SUB_UNSET, SUB_TEXT, SUB_PICTURE };
+static int sSubMode;
+static uint16_t sSubFrame[SUBSCREEN_W * SUBSCREEN_H];
+
+static void PrintStatus(void);
+
+static void PresentSub(void)
+{
+    gfxScreen_t screen = sBottom ? GFX_TOP : GFX_BOTTOM;
+    const int width = sBottom ? 400 : 320;
+
+    if (!Port_RenderSubScreen(sSubFrame)) {
+        if (sSubMode != SUB_TEXT) {
+            consoleInit(screen, &sConsole);
+            PrintStatus();
+            sSubMode = SUB_TEXT;
+        }
+        return;
+    }
+    if (sSubMode != SUB_PICTURE) {
+        gfxSetScreenFormat(screen, GSP_RGB565_OES);
+        gfxSetDoubleBuffering(screen, true);
+        for (int i = 0; i < 2; i++) { // both buffers, so the border stays black
+            memset(gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL), 0, width * 240 * 2);
+            gfxScreenSwapBuffers(screen, false);
+        }
+        sSubMode = SUB_PICTURE;
+    }
+
+    const uint16_t *lut = sPresentLut;
+    uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
+    const int ox = (width - SUBSCREEN_W) / 2, oy = (240 - SUBSCREEN_H) / 2;
+    for (int x = 0; x < SUBSCREEN_W; x++) {
+        uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
+        for (int y = 0; y < SUBSCREEN_H; y++)
+            col[-y] = lut[sSubFrame[y * SUBSCREEN_W + x] & 0x7FFF];
+    }
+}
+
+void Backend_Present(const uint16_t *frame)
+{
+    PresentMain(frame);
+    PresentSub();
+}
+
 static void ClearGameScreen(void)
 {
     gfxScreen_t screen = sBottom ? GFX_BOTTOM : GFX_TOP;
@@ -131,16 +183,15 @@ static void PrintStatus(void)
         printf("\n\x1b[33mNo sound: sdmc:/3ds/dspfirm.cdc missing.\x1b[0m\n");
 }
 
-// Puts the picture on one screen and the status text on the other.
+// Puts the game's picture on one screen; the other gets the second screen.
 static void SetGameScreen(int bottom)
 {
     sBottom = bottom;
     gfxScreen_t game = bottom ? GFX_BOTTOM : GFX_TOP;
-    consoleInit(bottom ? GFX_TOP : GFX_BOTTOM, &sConsole);
     gfxSetScreenFormat(game, GSP_RGB565_OES);
     gfxSetDoubleBuffering(game, true);
     ClearGameScreen();
-    PrintStatus();
+    sSubMode = SUB_UNSET; // the other screen is set up again on the next frame
 }
 
 // --- Input -------------------------------------------------------------------
@@ -310,6 +361,8 @@ void Backend_Log(const char *fmt, ...)
 void Backend_Fatal(const char *msg)
 {
     Backend_Log("FATAL: %s", msg);
+    if (sSubMode != SUB_TEXT)
+        consoleInit(sBottom ? GFX_TOP : GFX_BOTTOM, &sConsole);
     consoleClear();
     printf("\x1b[31mpmd-red-3ds stopped:\x1b[0m\n%s\n\nPress START to exit.\n", msg);
     while (aptMainLoop()) {

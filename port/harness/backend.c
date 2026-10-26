@@ -14,10 +14,11 @@ enum {
     IO_BUF = 5, IO_LEN = 6, IO_CMD = 7, IO_RESULT = 8,
     IO_AUDIO_L = 9, IO_AUDIO_R = 10, IO_AUDIO_RATE = 11, IO_AUDIO_COUNT = 12,
     IO_CAPTURE = 13, // read: nonzero = capture the next frame; write: buffer address when done
+    IO_SUBSCREEN = 14, // read: nonzero = render the second screen; write: its buffer (0 = nothing)
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
 
-const int Backend_Version3_UpdateRepoIfMissing = 3;
+const int Backend_Version4_UpdateRepoIfMissing = 4;
 
 void AgbMain(void);
 
@@ -47,7 +48,13 @@ void Backend_Fatal(const char *msg)
     for (;;) {}
 }
 
-void Backend_Present(const uint16_t *frame) { IO[IO_PRESENT] = (uint32_t)(uintptr_t)frame; }
+void Backend_Present(const uint16_t *frame)
+{
+    static uint16_t sub[SUBSCREEN_W * SUBSCREEN_H];
+    if (IO[IO_SUBSCREEN])
+        IO[IO_SUBSCREEN] = Port_RenderSubScreen(sub) ? (uint32_t)(uintptr_t)sub : 0;
+    IO[IO_PRESENT] = (uint32_t)(uintptr_t)frame;
+}
 uint16_t Backend_PollKeys(void) { return (uint16_t)IO[IO_KEYS]; }
 void Backend_EndFrame(void) { IO[IO_ENDFRAME] = (uint32_t)Port_FrameCount(); }
 
