@@ -224,6 +224,34 @@ class Harness:
             for l, r in zip(left, right):
                 self.audio += bytes(((l + 128) & 0xFF, (r + 128) & 0xFF))
 
+    def run_profiled(self, start):
+        """Statistical profiler: run in slices of N instructions, sample the PC
+        after each, and report where time goes per function."""
+        import collections
+        from unicorn.arm_const import UC_ARM_REG_CPSR
+        samples = collections.Counter()
+        callers = collections.Counter()
+        self.stopped_by_hook = False
+        pc = start
+        while self.exit_code is None and self.frame < self.args.frames:
+            frame_before = self.frame
+            self.uc.emu_start(pc, 0xFFFFFFFF, count=self.args.profile)
+            pc = self.uc.reg_read(UC_ARM_REG_PC)
+            if self.uc.reg_read(UC_ARM_REG_CPSR) & 0x20:
+                pc |= 1  # resume in Thumb state
+            if self.frame == frame_before or True:
+                name = where(self.syms, pc & ~1).split('+')[0]
+                samples[name] += 1
+                lr = self.uc.reg_read(UC_ARM_REG_LR)
+                callers[(name, where(self.syms, lr & ~1).split('+')[0])] += 1
+        total = sum(samples.values())
+        print(f'\nprofile: {total} samples, {self.args.profile} instructions each')
+        for name, n in samples.most_common(30):
+            print(f'  {100 * n / total:5.1f}%  {name}')
+        print('top (function <- caller):')
+        for (f, c), n in callers.most_common(15):
+            print(f'  {100 * n / total:5.1f}%  {f} <- {c}')
+
     def run(self):
         t0 = time.time()
         start = self.entry
@@ -233,7 +261,10 @@ class Harness:
             first = self.frame
             self.args.frames += self.frame  # --frames counts frames to run
         try:
-            self.uc.emu_start(start, 0xFFFFFFFF)
+            if self.args.profile:
+                self.run_profiled(start)
+            else:
+                self.uc.emu_start(start, 0xFFFFFFFF)
         except UcError as e:
             pc = self.uc.reg_read(UC_ARM_REG_PC)
             lr = self.uc.reg_read(UC_ARM_REG_LR)
@@ -289,6 +320,7 @@ def main():
     ap.add_argument('--wav')
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')
+    ap.add_argument('--profile', type=int, default=0, help='sample the PC every N instructions')
     return Harness(ap.parse_args()).run()
 
 
