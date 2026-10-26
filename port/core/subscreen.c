@@ -19,6 +19,8 @@
 #include "decompress_sir.h"
 #include "def_filearchives.h"
 #include "event_flag.h"
+#include "friend_area.h"
+#include "constants/friend_area.h"
 #include "game_options.h"
 #include "graphics_memory.h"
 #include "ground_place.h"
@@ -39,6 +41,7 @@ extern const DungeonPos gDungeonCoordinates[64]; // world_map.c
 extern struct FriendAreasMap *gFriendAreasMapPtr; // friend_areas_map.c (NULL when not showing)
 bool8 Port_GroundFriendAreasRequested(void);     // ground_main.c
 u16 Port_GroundBrightness(void);                  // palette_util.c
+bool8 Port_FriendAreaMapPos(u8 areaId, DungeonPos *pos); // friend_areas_map.c
 
 #define W SUBSCREEN_W
 #define H SUBSCREEN_H
@@ -830,20 +833,32 @@ static bool8 DrawWorldMap(void)
     // The map only changes with the place, so it is drawn once per place;
     // the marker goes on top every frame.
     static u16 sCache[W * H];
-    static s32 sCachedPlace = -1;
+    static s32 sCachedPlace = -1, sCachedArea = -1;
     static int sLoadedSet = -1, sDotX, sDotY;
     static bool8 sSpritesLoaded;
     s32 place = GetScriptVarValue(NULL, GROUND_PLACE);
     s32 dungeon = PlaceDungeon(place);
+    s32 area = FRIEND_AREA_NONE;
+    DungeonPos areaPos;
     u8 name[128];
 
     if (dungeon < 0)
         return FALSE;
+    // Inside a friend area: that area, where the friend areas map shows it.
+    if (place == GROUND_PLACE_FRIEND_AREAS) {
+        area = MapIdToFriendAreaId(GetScriptVarValue(NULL, GROUND_ENTER));
+        if (area == FRIEND_AREA_NONE || area >= FRIEND_AREA_COUNT || !Port_FriendAreaMapPos(area, &areaPos))
+            area = FRIEND_AREA_NONE;
+    }
     bool8 newColors = LoadWindowPalette();
-    if (place != sCachedPlace || newColors) {
+    if (place != sCachedPlace || area != sCachedArea || newColors) {
         int set = dungeon == PLACE_TOWN ? 0 : 1;
         int x = dungeon == PLACE_TOWN ? TEAM_BASE_X : gDungeonCoordinates[dungeon].x;
         int y = dungeon == PLACE_TOWN ? TEAM_BASE_Y : gDungeonCoordinates[dungeon].y;
+        if (area != FRIEND_AREA_NONE) {
+            x = areaPos.x;
+            y = areaPos.y;
+        }
         if (set != sLoadedSet) {
             if (!LoadMapSet(set))
                 return FALSE;
@@ -856,9 +871,13 @@ static bool8 DrawWorldMap(void)
         DrawMapArea(x, y);
         sDotX = x - sViewLeft;
         sDotY = y - sViewTop;
-        FormatString(GetGroundPlaceName(place), name, name + sizeof(name) - 1, 0);
+        if (area != FRIEND_AREA_NONE)
+            WriteFriendAreaName(name, area, FALSE);
+        else
+            FormatString(GetGroundPlaceName(place), name, name + sizeof(name) - 1, 0);
         DrawNameBox(name);
         sCachedPlace = place;
+        sCachedArea = area;
         sOut = sOutFrame;
     }
     memcpy(sOutFrame, sCache, sizeof(sCache));

@@ -336,10 +336,35 @@ index 172f2be9..c3dfe0d5 100644
  }
 +#endif // PLATFORM_3DS
 diff --git a/src/friend_areas_map.c b/src/friend_areas_map.c
-index c2e99136..c062a0bf 100644
+index c2e99136..e9c5336a 100644
 --- a/src/friend_areas_map.c
 +++ b/src/friend_areas_map.c
-@@ -79,6 +79,10 @@ void ShowFriendAreasMap_Async(struct FriendAreasMapSetupStruct *setupPtr)
+@@ -34,6 +34,24 @@ static bool8 ChooseAreaInLocation_Async(void);
+ static void FriendAreasMap_FadeOut_Async(void);
+ static u8 GetChosenDirection(void);
+ static void InitMapLocations(u8 startingFriendAreaId);
++
++#ifdef PLATFORM_3DS
++// For the port's second screen: where a friend area is on the friend areas
++// map (the location that lists it).
++bool8 Port_FriendAreaMapPos(u8 areaId, DungeonPos *pos)
++{
++    s32 i, j;
++    for (i = 0; i < NUM_FRIEND_AREA_LOCATIONS; i++) {
++        for (j = 0; j < MAX_AREAS_PER_LOCATION; j++) {
++            if (sFriendAreaLocations[0][i].areasIds[j] == areaId) {
++                *pos = sFriendAreaLocations[0][i].pos;
++                return TRUE;
++            }
++        }
++    }
++    return FALSE;
++}
++#endif
+ static void MoveToNewLocation_Async(s32 destLocationId, s32 direction, s32 nFrames);
+ 
+ void ShowFriendAreasMap_Async(struct FriendAreasMapSetupStruct *setupPtr)
+@@ -79,6 +97,10 @@ void ShowFriendAreasMap_Async(struct FriendAreasMapSetupStruct *setupPtr)
      FriendAreasMap_FadeOut_Async();
      FriendAreasMap_CloseFiles();
      nullsub_16();
