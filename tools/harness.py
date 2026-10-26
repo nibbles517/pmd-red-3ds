@@ -261,6 +261,16 @@ class Harness:
                     uc.mem_write(buf, d)
                     ok = 1
                 self.regs[8] = ok
+            elif value == 3 and self.args.config:
+                open(self.args.config, 'wb').write(bytes(uc.mem_read(buf, length)))
+            elif value == 4:
+                ok = 0
+                if self.args.config and os.path.exists(self.args.config):
+                    d = open(self.args.config, 'rb').read()[:length]
+                    if len(d) == length:
+                        uc.mem_write(buf, d)
+                        ok = 1
+                self.regs[8] = ok
         elif reg == 13:  # capture finished: dump regs[160][0x400], vram, pltt, oam
             size = 160 * 0x400 + 0x18000 + 0x400 + 0x400
             path = os.path.join(self.args.out, f'capture_{self.frame:05d}.bin')
@@ -369,6 +379,7 @@ def main():
     ap.add_argument('--press', action='append', default=[])
     ap.add_argument('--out', default='build/shots')
     ap.add_argument('--save')
+    ap.add_argument('--config', help='the port settings file (config.bin)')
     ap.add_argument('--wav')
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')

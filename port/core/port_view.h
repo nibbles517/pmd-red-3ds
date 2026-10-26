@@ -32,4 +32,8 @@ struct PortWideBg
 };
 extern struct PortWideBg gPortWideBg[4];
 
+// Backgrounds drawn from VRAM as a GBA-sized picture repeated over the wide
+// screen, one copy centred (full-screen move effects), while unscrolled.
+extern uint8_t gPortTileBg[4];
+
 #endif

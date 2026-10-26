@@ -127,8 +127,10 @@ static void RunFrame(void)
     int mode = !ds ? VIEW_GBA : wide ? VIEW_WIDE : VIEW_FRAMED;
     if (gPortWideView)
         gPortWideView--;
-    if (!wide)
+    if (!wide) {
         memset(gPortWideBg, 0, sizeof(gPortWideBg));
+        memset(gPortTileBg, 0, sizeof(gPortTileBg));
+    }
 
     sInFrame = 1;
     if (mode != sViewMode) {

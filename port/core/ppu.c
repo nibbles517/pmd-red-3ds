@@ -28,6 +28,9 @@
 #define W SCREEN_W // buffer size; the line drawn is sW pixels
 static int sW = GBA_W, sOx = 0, sWide = 0;
 struct PortWideBg gPortWideBg[4];
+uint8_t gPortTileBg[4];
+#define TILE_OY ((SCREEN_H - GBA_H) / 2)
+static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt);
 
 void Ppu_SetView(int wide)
 {
@@ -233,12 +236,51 @@ static int RenderWideBg(int bg, int line, uint16_t *out)
 // that edge, where the line would stand out: it is left out there.
 #define EDGE_TILE 0xF279
 
+static int RenderTextBg(int bg, int line, uint16_t *out);
+
+// Wide view, gPortTileBg: the background's GBA-sized picture repeated, with
+// one copy in the middle of the screen (full-screen move effects).
+static int RenderTiledBg(int bg, int line, uint16_t *out)
+{
+    static uint16_t gbaLine[GBA_W];
+    int gy = ((line - TILE_OY) % GBA_H + GBA_H) % GBA_H;
+    int any;
+
+    sWide = 0; sW = GBA_W; sOx = 0;
+    any = RenderTextBg(bg, gy, gbaLine);
+    sWide = 1; sW = SCREEN_W; sOx = WIDE_OX;
+    for (int sx = 0; sx < sW; sx++)
+        out[sx] = gbaLine[((sx - sOx) % GBA_W + GBA_W) % GBA_W];
+    return any;
+}
+
 // Returns nonzero if the line has any opaque pixel.
 static int RenderTextBg(int bg, int line, uint16_t *out)
 {
     uint16_t cnt = R16(0x08 + bg * 2);
     if (sWide && gPortWideBg[bg].map)
         return RenderWideBg(bg, line, out);
+    if (sWide && gPortTileBg[bg] && R16(0x10 + bg * 4) == 0 && R16(0x12 + bg * 4) == 0)
+        return RenderTiledBg(bg, line, out);
+    if (sWide && bg < 2) {
+        // BG0/BG1 hold the text windows, made for the GBA screen; what the
+        // maps hold outside it is left over (old windows), so not drawn.
+        if (line >= GBA_H) {
+            for (int x = 0; x < sW; x++) out[x] = TRANSPARENT;
+            return 0;
+        }
+        sW = sOx + GBA_W;
+        int any = RenderTextBgVram(bg, line, out, cnt);
+        sW = SCREEN_W;
+        for (int x = 0; x < sOx; x++) out[x] = TRANSPARENT;
+        for (int x = sOx + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
+        return any;
+    }
+    return RenderTextBgVram(bg, line, out, cnt);
+}
+
+static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt)
+{
     if (cnt & 0x40) {
         RenderTextBgMosaic(bg, line, out);
         return 1;

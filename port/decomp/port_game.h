@@ -37,6 +37,11 @@ enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_3DS };
 
 extern bool8 gPortGroundNarrow; // ground_bg.c
 bool8 Port_GroundViewIsNarrow(void); // ground_map.c
+// ground_bg.c: the friend areas map and the world map in the wide view
+struct DungeonPos;
+void Port_DrawWideMapArrays(const u16 (*bg2)[64], const u16 (*bg3)[64], s32 bgX, s32 bgY);
+void Port_ShowWideMapArrays(s32 bgX, s32 bgY);
+void Port_WideMapFollow(struct DungeonPos *bgPos, const struct DungeonPos *mon, s32 maxX, s32 maxY);
 void Port_SaveConfig(void);
 
 #endif

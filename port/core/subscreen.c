@@ -25,6 +25,7 @@
 #include "graphics_memory.h"
 #include "ground_place.h"
 #include "string_format.h"
+#include "dungeon_info.h"
 #include "dungeon_util.h"
 #include "dungeon_vram.h"
 #include "items.h"
@@ -864,6 +865,19 @@ static void DrawNameBox(const u8 *name)
 #define TEAM_BASE_Y 0xA1
 #define MARKER_YELLOW_DOT 1 // wmapspr animation
 
+// Set by main_loops.c when the title menu comes up: the dungeon of the
+// quicksave the adventure goes on from, or -1.
+s32 gPortTitleQuickSave = -1;
+extern bool8 gPortTitleMenu;
+
+// On the title menu after a quicksave: that dungeon, on the dungeon map.
+static s32 TitleQuickSaveDungeon(void)
+{
+    if (!gPortTitleMenu || gDungeon != NULL || gPortTitleQuickSave < 0 || gPortTitleQuickSave >= 64)
+        return -1;
+    return gPortTitleQuickSave;
+}
+
 static bool8 DrawWorldMap(void)
 {
     // The map only changes with the place, so it is drawn once per place;
@@ -875,13 +889,19 @@ static bool8 DrawWorldMap(void)
     s32 place = GetScriptVarValue(NULL, GROUND_PLACE);
     s32 dungeon = PlaceDungeon(place);
     s32 area = FRIEND_AREA_NONE;
+    s32 quickSave = TitleQuickSaveDungeon();
+
+    if (quickSave >= 0) {
+        dungeon = quickSave;
+        place = -2 - quickSave; // its own cache key
+    }
     DungeonPos areaPos;
     u8 name[128];
 
     if (dungeon < 0)
         return FALSE;
     // Inside a friend area: that area, where the friend areas map shows it.
-    if (place == GROUND_PLACE_FRIEND_AREAS) {
+    if (quickSave < 0 && place == GROUND_PLACE_FRIEND_AREAS) {
         area = MapIdToFriendAreaId(GetScriptVarValue(NULL, GROUND_ENTER));
         if (area == FRIEND_AREA_NONE || area >= FRIEND_AREA_COUNT || !Port_FriendAreaMapPos(area, &areaPos))
             area = FRIEND_AREA_NONE;
@@ -909,6 +929,8 @@ static bool8 DrawWorldMap(void)
         sDotY = y - sViewTop;
         if (area != FRIEND_AREA_NONE)
             WriteFriendAreaName(name, area, FALSE);
+        else if (quickSave >= 0)
+            FormatString(GetDungeonName1(quickSave), name, name + sizeof(name) - 1, 0);
         else
             FormatString(GetGroundPlaceName(place), name, name + sizeof(name) - 1, 0);
         DrawNameBox(name);
@@ -952,7 +974,8 @@ void Port_SubScreenCutToBlack(void)
 static int GroundLevel(void) { return Port_GroundBrightness(); } // 0-0x100
 
 static s32 PlaceDungeon(s32 place);
-static bool8 PlaceOnMap(void) { return PlaceDungeon(GetScriptVarValue(NULL, GROUND_PLACE)) >= 0; }
+static s32 TitleQuickSaveDungeon(void);
+static bool8 PlaceOnMap(void) { return TitleQuickSaveDungeon() >= 0 || PlaceDungeon(GetScriptVarValue(NULL, GROUND_PLACE)) >= 0; }
 
 // Set by the game (main_loops.c) for the port: the ground is running; the
 // title menu is up.

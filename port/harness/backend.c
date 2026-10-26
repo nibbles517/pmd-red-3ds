@@ -17,7 +17,7 @@ enum {
     IO_DUMPMAPS = 15, // read at start: nonzero = render both world maps (written back at IO_SUBSCREEN... see HarnessMain)
     IO_SUBSCREEN = 14, // read: nonzero = render the second screen; write: its buffer (0 = nothing)
 };
-enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
+enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4 };
 
 const int Backend_Version7_UpdateRepoIfMissing = 7;
 
@@ -82,8 +82,21 @@ bool Backend_LoadSave(uint8_t *data, uint32_t size)
     return IO[IO_RESULT] != 0;
 }
 
-bool Backend_LoadConfig(uint8_t *data, uint32_t size) { (void)data; (void)size; return false; }
-void Backend_StoreConfig(const uint8_t *data, uint32_t size) { (void)data; (void)size; }
+// The port's settings: harness.py --config FILE.
+bool Backend_LoadConfig(uint8_t *data, uint32_t size)
+{
+    IO[IO_BUF] = (uint32_t)(uintptr_t)data;
+    IO[IO_LEN] = size;
+    IO[IO_CMD] = CMD_CONFIG_LOAD;
+    return IO[IO_RESULT] != 0;
+}
+
+void Backend_StoreConfig(const uint8_t *data, uint32_t size)
+{
+    IO[IO_BUF] = (uint32_t)(uintptr_t)data;
+    IO[IO_LEN] = size;
+    IO[IO_CMD] = CMD_CONFIG_STORE;
+}
 
 void Backend_StoreSave(const uint8_t *data, uint32_t size)
 {

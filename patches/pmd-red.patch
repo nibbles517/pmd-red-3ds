@@ -698,7 +698,7 @@ index 60311546..dc2b1bf5 100644
  
              switch (GetEntityType(ent)) {
 diff --git a/src/dungeon_vram.c b/src/dungeon_vram.c
-index 99689873..eb6b930e 100644
+index 99689873..f2efd6fd 100644
 --- a/src/dungeon_vram.c
 +++ b/src/dungeon_vram.c
 @@ -1,4 +1,7 @@
@@ -709,7 +709,7 @@ index 99689873..eb6b930e 100644
  #include "globaldata.h"
  #include "dungeon_vram.h"
  #include "structs/str_dungeon.h"
-@@ -182,6 +185,20 @@ static void sub_803E490(u32 unused)
+@@ -182,6 +185,22 @@ static void sub_803E490(u32 unused)
          SetBG2RegOffsets(0, 0);
      }
      SetBG3RegOffsets(gDungeon->unk181e8.cameraPixelPos.x, gDungeon->unk181e8.cameraPixelPos.y - gDungeon->unk181e8.unk181FC);
@@ -725,12 +725,14 @@ index 99689873..eb6b930e 100644
 +        gPortWideBg[2].map = gDungeon->unk181e8.unk1821A ? gPortDungeonBg2 : NULL;
 +        gPortWideBg[2].scrollX = gDungeon->unk181e8.cameraPixelPos.x;
 +        gPortWideBg[2].scrollY = gDungeon->unk181e8.cameraPixelPos.y;
++        // otherwise BG2 is the move effects' (Psychic's picture...)
++        gPortTileBg[2] = !gDungeon->unk181e8.unk1821A;
 +    }
 +#endif
      sub_806CC10();
      sub_804522C();
      sub_803F9CC();
-@@ -730,7 +747,11 @@ static void sub_803EDF0(void)
+@@ -730,7 +749,11 @@ static void sub_803EDF0(void)
      y2 = (gDungeon->unk181e8.cameraPixelPos.y + 24);
      y = y1 - y2;
  
@@ -806,10 +808,18 @@ index 172f2be9..c3dfe0d5 100644
  }
 +#endif // PLATFORM_3DS
 diff --git a/src/friend_areas_map.c b/src/friend_areas_map.c
-index c2e99136..e9c5336a 100644
+index c2e99136..77460008 100644
 --- a/src/friend_areas_map.c
 +++ b/src/friend_areas_map.c
-@@ -34,6 +34,24 @@ static bool8 ChooseAreaInLocation_Async(void);
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/friend_area.h"
+ #include "bg_control.h"
+@@ -34,6 +37,24 @@ static bool8 ChooseAreaInLocation_Async(void);
  static void FriendAreasMap_FadeOut_Async(void);
  static u8 GetChosenDirection(void);
  static void InitMapLocations(u8 startingFriendAreaId);
@@ -834,7 +844,7 @@ index c2e99136..e9c5336a 100644
  static void MoveToNewLocation_Async(s32 destLocationId, s32 direction, s32 nFrames);
  
  void ShowFriendAreasMap_Async(struct FriendAreasMapSetupStruct *setupPtr)
-@@ -79,6 +97,10 @@ void ShowFriendAreasMap_Async(struct FriendAreasMapSetupStruct *setupPtr)
+@@ -79,6 +100,10 @@ void ShowFriendAreasMap_Async(struct FriendAreasMapSetupStruct *setupPtr)
      FriendAreasMap_FadeOut_Async();
      FriendAreasMap_CloseFiles();
      nullsub_16();
@@ -845,6 +855,67 @@ index c2e99136..e9c5336a 100644
  }
  
  static s32 ChooseLocation_Async(s32 *newLocationId, s32 *newDirection)
+@@ -327,7 +352,11 @@ static void InitMapLocations(u8 startingFriendAreaId)
+     gFriendAreasMapPtr->currLocationId = startingLocationId;
+     gFriendAreasMapPtr->monSpritePos = gFriendAreasMapPtr->locationsInfo[startingLocationId].pos;
+     gFriendAreasMapPtr->bgPos.x = gFriendAreasMapPtr->monSpritePos.x - 120;
++#ifdef PLATFORM_3DS
++    gFriendAreasMapPtr->bgPos.y = gFriendAreasMapPtr->monSpritePos.y - (PORT_DS_SIZE ? SCREEN_H / 2 : 80);
++#else
+     gFriendAreasMapPtr->bgPos.y = gFriendAreasMapPtr->monSpritePos.y - 80;
++#endif
+     FriendAreasMap_UpdateMonSpritePosition();
+     FriendAreasMap_UpdateBg();
+ }
+diff --git a/src/friend_areas_map_util.c b/src/friend_areas_map_util.c
+index f3807983..f02e58a2 100644
+--- a/src/friend_areas_map_util.c
++++ b/src/friend_areas_map_util.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/direction.h"
+ #include "bg_control.h"
+@@ -139,6 +142,12 @@ void FriendAreasMap_UpdateBg(void)
+     s32 y1 = gFriendAreasMapPtr->bgPos.y >> 3;
+     s32 y2 = y1;
+ 
++#ifdef PLATFORM_3DS
++    if (PORT_DS_SIZE) {
++        Port_DrawWideMapArrays(gFriendAreasMapPtr->unk2014, gFriendAreasMapPtr->unk14, gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
++        return;
++    }
++#endif
+     for (i = 0; i < 21; i++) {
+         s32 x1 = gFriendAreasMapPtr->bgPos.x >> 3;
+         s32 x2 = x1;
+@@ -203,6 +212,12 @@ static bool8 FadeScreen(void)
+ 
+ void FriendAreasMap_UpdateMonSpritePosition(void)
+ {
++#ifdef PLATFORM_3DS
++    if (PORT_DS_SIZE) { // wide view (port_view.h)
++        Port_WideMapFollow(&gFriendAreasMapPtr->bgPos, &gFriendAreasMapPtr->monSpritePos, 239, 151);
++        return;
++    }
++#endif
+     if (gFriendAreasMapPtr->monSpritePos.x - gFriendAreasMapPtr->bgPos.x < 48) {
+         gFriendAreasMapPtr->bgPos.x = gFriendAreasMapPtr->monSpritePos.x - 48;
+     }
+@@ -371,6 +386,10 @@ void FriendAreasMap_RunFrameActions(void)
+ {
+     SetBG2RegOffsets(gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
+     SetBG3RegOffsets(gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
++#ifdef PLATFORM_3DS
++    if (PORT_DS_SIZE)
++        Port_ShowWideMapArrays(gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
++#endif
+     AnimateSprites();
+     UpdateAnimatedColors(FadeScreen(), gFriendAreasMapPtr->unk4C4C, 0xB0, 16, gFriendAreasMapPtr->brightness, NULL);
+     CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
 diff --git a/src/graphics_memory.c b/src/graphics_memory.c
 index 1179e657..13c8e87f 100644
 --- a/src/graphics_memory.c
@@ -862,7 +933,7 @@ index 1179e657..13c8e87f 100644
  // arm9.bin::0200A178
  void InitGraphics(void)
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..ebcda90e 100644
+index 069cfc94..d89393fd 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -873,7 +944,7 @@ index 069cfc94..ebcda90e 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,75 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,132 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -937,6 +1008,63 @@ index 069cfc94..ebcda90e 100644
 +        gPortWideBg[bg].scrollY = mapRender->cameraPos.y;
 +    }
 +    gPortWideView = 2;
++}
++
++// The friend areas map and the world map (on the way to a dungeon), wide:
++// their two layers, kept whole as 64x64-tile arrays, drawn into the wide maps
++// around bgPos (the GBA screen's top left on the map).
++void Port_DrawWideMapArrays(const u16 (*bg2)[64], const u16 (*bg3)[64], s32 bgX, s32 bgY)
++{
++    s32 tx, ty;
++    s32 tx0 = (bgX - WIDE_OX) >> 3, ty0 = bgY >> 3;
++
++    for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++) {
++        for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++) {
++            s32 i = (ty & 31) * 64 + (tx & 63);
++            bool8 in = tx >= 0 && ty >= 0 && tx < 64 && ty < 64;
++            sPortWideMaps[0][i] = in ? bg2[ty][tx] : 0;
++            sPortWideMaps[1][i] = in ? bg3[ty][tx] : PORT_WIDE_BLACK;
++        }
++    }
++}
++
++void Port_ShowWideMapArrays(s32 bgX, s32 bgY)
++{
++    s32 bg;
++    for (bg = 2; bg <= 3; bg++) {
++        gPortWideBg[bg].map = sPortWideMaps[bg - 2];
++        gPortWideBg[bg].scrollX = bgX;
++        gPortWideBg[bg].scrollY = bgY;
++    }
++    gPortWideView = 2;
++}
++
++// ... and where to keep bgPos: the GBA's rules (the Pokémon at least 48
++// pixels from the edges, the map's edges not passed), for the wide screen.
++// maxX/maxY: the GBA's largest bgPos.
++void Port_WideMapFollow(DungeonPos *bgPos, const DungeonPos *mon, s32 maxX, s32 maxY)
++{
++    s32 left = -WIDE_OX, right = SCREEN_W - WIDE_OX; // the screen in GBA x
++
++    if (mon->x - bgPos->x < left + 48)
++        bgPos->x = mon->x - (left + 48);
++    else if (mon->x - bgPos->x > right - 48)
++        bgPos->x = mon->x - (right - 48);
++    if (mon->y - bgPos->y < 48)
++        bgPos->y = mon->y - 48;
++    else if (mon->y - bgPos->y > SCREEN_H - 48)
++        bgPos->y = mon->y - (SCREEN_H - 48);
++
++    maxX -= SCREEN_W - DISPLAY_WIDTH - WIDE_OX; // the map's right edge stays at the screen's
++    maxY -= SCREEN_H - DISPLAY_HEIGHT;
++    if (bgPos->x < WIDE_OX)
++        bgPos->x = WIDE_OX;
++    if (bgPos->y < 0)
++        bgPos->y = 0;
++    if (bgPos->x > maxX)
++        bgPos->x = maxX;
++    if (bgPos->y > maxY)
++        bgPos->y = maxY;
 +}
 +#endif
 +
@@ -1201,10 +1329,18 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..97c3fbad 100644
+index 372641a7..89703715 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
-@@ -60,6 +60,16 @@ typedef struct unkTalkTable
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/bg_music.h"
+ #include "constants/friend_area.h"
+@@ -60,6 +63,17 @@ typedef struct unkTalkTable
  } unkTalkTable;
  
  static EWRAM_DATA s32 sTitleBrightness = 0; // NDS=210FAC0
@@ -1213,6 +1349,7 @@ index 372641a7..97c3fbad 100644
 +// For the port's second screen: the title menu is up, and its brightness
 +// (0-32, as the menu fades in and out).
 +extern bool8 gPortTitleMenu;
++extern s32 gPortTitleQuickSave;
 +s32 Port_TitleBrightness(void)
 +{
 +    return sTitleBrightness;
@@ -1221,17 +1358,23 @@ index 372641a7..97c3fbad 100644
  // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
  
  static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
-@@ -166,6 +176,9 @@ void GameLoop_Async(void)
+@@ -166,6 +180,15 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
 +#ifdef PLATFORM_3DS
 +        gPortTitleMenu = TRUE; // for the port's second screen
++        // ... which shows where the adventure goes on: the dungeon of a
++        // quicksave, as the Continue screen does (load_screen.c)
++        gPortTitleQuickSave = -1;
++        if (sub_8011FA8() == 0xF1207
++            && (sub_8011C1C() == 2 || CountMailType(WONDER_MAIL_TYPE_SOS) != 0 || CountMailType(WONDER_MAIL_TYPE_OKD) != 0))
++            gPortTitleQuickSave = GetDungeonLocationInfo()->id;
 +#endif
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -241,6 +254,9 @@ void GameLoop_Async(void)
+@@ -241,6 +264,9 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
@@ -1241,7 +1384,44 @@ index 372641a7..97c3fbad 100644
  
          switch (nextMenu) {
              case 2: {
-@@ -1095,7 +1111,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -270,8 +296,25 @@ void GameLoop_Async(void)
+ }
+ 
+ // arm9.bin::0200E02C
++#ifdef PLATFORM_3DS
++// The title menu's picture, wide (DS size, port_view.h): its two 32x32 maps
++// are DS-sized pictures, drawn whole from the screen's top left.
++static u16 sTitleWide[2][32 * 64];
++#endif
++
+ static void MainLoops_RunFrameActions(u32 unused)
+ {
++#ifdef PLATFORM_3DS
++    if (gPortTitleMenu && PORT_DS_SIZE) {
++        s32 bg;
++        for (bg = 2; bg <= 3; bg++) {
++            gPortWideBg[bg].map = sTitleWide[bg - 2];
++            gPortWideBg[bg].scrollX = WIDE_OX;
++            gPortWideBg[bg].scrollY = 0;
++        }
++        gPortWideView = 2;
++    }
++#endif
+     DrawDialogueBoxString_Async();
+     CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
+     nullsub_8(gGameOptionsRef->touchScreen);
+@@ -321,6 +364,10 @@ static void LoadTitleScreen(void)
+             u16 *ptr = stru->tilemap;
+             gBgTilemaps[2][i][j] = ptr[i * 32 + j];
+             gBgTilemaps[3][i][j] = ptr[i * 32 + j + (32 * 32)];
++#ifdef PLATFORM_3DS
++            sTitleWide[0][i * 64 + j] = ptr[i * 32 + j];
++            sTitleWide[1][i * 64 + j] = ptr[i * 32 + j + (32 * 32)];
++#endif
+         }
+     }
+ 
+@@ -1095,7 +1142,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
@@ -2158,10 +2338,18 @@ index 90053fbc..942a7f61 100644
                          *dst++ = *src1++;
                          *dst++ = 256;
 diff --git a/src/world_map.c b/src/world_map.c
-index 8c50130b..819cf298 100644
+index 8c50130b..f3e49f9c 100644
 --- a/src/world_map.c
 +++ b/src/world_map.c
-@@ -126,7 +126,12 @@ void ShowWorldMap_Async(struct WorldMapSetupStruct *setupPtr)
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "bg_control.h"
+ #include "bg_palette_buffer.h"
+@@ -126,7 +129,12 @@ void ShowWorldMap_Async(struct WorldMapSetupStruct *setupPtr)
      nullsub_16();
  }
  
@@ -2174,3 +2362,52 @@ index 8c50130b..819cf298 100644
  {
      [DUNGEON_TINY_WOODS] = {172, 174},
      [DUNGEON_THUNDERWAVE_CAVE] = {171, 111},
+@@ -260,7 +268,11 @@ static void sub_8010494(struct WorldMapInfo *info)
+     AxResInitFile(&sWorldMapPtr->monAxSprite, sWorldMapPtr->unk1100[3], 0, 0, 0, 0, TRUE);
+     sWorldMapPtr->monSpritePos = gDungeonCoordinates[info->startLocation.id];
+     sWorldMapPtr->bgPos.x = sWorldMapPtr->monSpritePos.x - 120;
++#ifdef PLATFORM_3DS
++    sWorldMapPtr->bgPos.y = sWorldMapPtr->monSpritePos.y - (PORT_DS_SIZE ? SCREEN_H / 2 : 80);
++#else
+     sWorldMapPtr->bgPos.y = sWorldMapPtr->monSpritePos.y - 80;
++#endif
+     UpdateMonSpritePosition();
+     UpdateBg();
+ }
+@@ -323,6 +335,12 @@ static void CloseFiles(void)
+ 
+ static void UpdateMonSpritePosition(void)
+ {
++#ifdef PLATFORM_3DS
++    if (PORT_DS_SIZE) { // wide view (port_view.h)
++        Port_WideMapFollow(&sWorldMapPtr->bgPos, &sWorldMapPtr->monSpritePos, 240, 160);
++        return;
++    }
++#endif
+     if (sWorldMapPtr->monSpritePos.x - sWorldMapPtr->bgPos.x < 48) {
+         sWorldMapPtr->bgPos.x = sWorldMapPtr->monSpritePos.x - 48;
+     }
+@@ -357,6 +375,12 @@ static void UpdateBg(void)
+     s32 y1 = sWorldMapPtr->bgPos.y >> 3;
+     s32 y2 = y1;
+ 
++#ifdef PLATFORM_3DS
++    if (PORT_DS_SIZE) {
++        Port_DrawWideMapArrays(sWorldMapPtr->unk3114, sWorldMapPtr->unk1114, sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
++        return;
++    }
++#endif
+     for (i = 0; i < 21; i++) {
+         s32 x1 = sWorldMapPtr->bgPos.x >> 3;
+         s32 x2 = x1;
+@@ -404,6 +428,10 @@ static void WorldMap_RunFrameActions(void)
+ {
+     SetBG2RegOffsets(sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
+     SetBG3RegOffsets(sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
++#ifdef PLATFORM_3DS
++    if (PORT_DS_SIZE)
++        Port_ShowWideMapArrays(sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
++#endif
+     AnimateSprites(TRUE);
+     FadeScreen();
+     CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
