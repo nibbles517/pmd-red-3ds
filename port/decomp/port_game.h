@@ -30,7 +30,25 @@ struct PortConfig
     u8 layout[2][2];        // [main, sub][size, scale]
     u8 windowShading;       // Windows Options > BG Shading: 0 Solid, 1 Translucent
     u8 unused;              // (was Border Color, now the game's own player gender option)
+    // In dungeons, Others > Game Options > Windows Options: the same three
+    // settings, for dungeons only. Until first changed (dungeonWindowsSet),
+    // dungeons look as in the game: the BG Color and Border Color chosen
+    // outside, translucent.
+    u8 dungeonWindowsSet;
+    u8 dungeonBgColor;      // WINDOW_COLOR_*
+    u8 dungeonShading;      // 0 Solid, 1 Translucent
+    u8 dungeonBorder;       // 0 Blue, 1 Pink
+    // ... > Layout Options (placeholders for now)
+    u8 layoutSubScreen;     // 0 Blue, 1 Sky, 2 Log, 3 M+T
+    u8 layoutInfo;          // Additional Info: 0 Off, 1 On
 };
+
+// The window settings in effect: in dungeons, the dungeon's (options.c)
+u8 Port_WindowColor(void);
+bool8 Port_PinkBorders(void);       // the border colors of a girl player
+bool8 Port_SolidDungeonWindows(void);
+// The dungeon's settings as they are now (whether set or not)
+void Port_GetDungeonWindows(u8 *bgColor, u8 *shading, u8 *border);
 extern struct PortConfig gPortConfig;
 enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_3DS };
 // Main Screen Settings > Size is DS: the 256x192 picture and the wide view

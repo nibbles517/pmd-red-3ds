@@ -3,6 +3,7 @@
 
 #include "global.h"
 #include "game_options.h"
+#include "structs/str_dungeon.h"
 #include "../core/port.h"
 #include "port_game.h"
 
@@ -11,9 +12,49 @@ struct PortConfig gPortConfig = { PORT_CONFIG_VERSION };
 
 void Port_LoadConfig(void)
 {
+    // An older, shorter file loads too (the backend fills the rest with 0).
     struct PortConfig c;
     if (Backend_LoadConfig((uint8_t *)&c, sizeof(c)) && c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
+}
+
+void Port_GetDungeonWindows(u8 *bgColor, u8 *shading, u8 *border)
+{
+    if (gPortConfig.dungeonWindowsSet) {
+        *bgColor = gPortConfig.dungeonBgColor;
+        *shading = gPortConfig.dungeonShading & 1;
+        *border = gPortConfig.dungeonBorder & 1;
+    }
+    else {
+        *bgColor = gGameOptionsRef->windowColor;
+        *shading = 1;
+        *border = gGameOptionsRef->playerGender != MALE;
+    }
+}
+
+u8 Port_WindowColor(void)
+{
+    u8 c, s, b;
+    if (gDungeon == NULL)
+        return gGameOptionsRef->windowColor;
+    Port_GetDungeonWindows(&c, &s, &b);
+    return c;
+}
+
+bool8 Port_PinkBorders(void)
+{
+    u8 c, s, b;
+    if (gDungeon == NULL)
+        return gGameOptionsRef->playerGender != MALE;
+    Port_GetDungeonWindows(&c, &s, &b);
+    return b;
+}
+
+bool8 Port_SolidDungeonWindows(void)
+{
+    u8 c, s, b;
+    Port_GetDungeonWindows(&c, &s, &b);
+    return !s;
 }
 
 void Port_SaveConfig(void)

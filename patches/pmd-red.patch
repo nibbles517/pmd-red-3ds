@@ -321,6 +321,54 @@ index 002fa3c7..406bee8e 100644
      u32 *spAsU32 = (u32 *)sp0;
  
      *spAsU32 = func();
+diff --git a/src/code_803DA7C_2.c b/src/code_803DA7C_2.c
+index 465c9139..7a2ff94f 100644
+--- a/src/code_803DA7C_2.c
++++ b/src/code_803DA7C_2.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/dungeon.h"
+ #include "bg_palette_buffer.h"
+@@ -124,7 +127,11 @@ void sub_803E13C(void)
+     RGB_Struct *pal;
+ 
+     SetWindowBGColor();
++#ifdef PLATFORM_3DS
++    if (Port_PinkBorders()) // dungeons: their own Border Color
++#else
+     if (gGameOptionsRef->playerGender != 0)
++#endif
+         pal = &gFontPalette[16 * 4];
+     else
+         pal = &gFontPalette[0];
+diff --git a/src/code_8099360.c b/src/code_8099360.c
+index e3abdfcc..9fcdc31e 100644
+--- a/src/code_8099360.c
++++ b/src/code_8099360.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "code_8099360.h"
+ #include "bg_palette_buffer.h"
+@@ -43,7 +46,11 @@ void sub_8099690(u32 param_1)
+ 
+     switch (param_1) {
+         default: {
++#ifdef PLATFORM_3DS
++            gender = Port_PinkBorders() ? FEMALE : MALE; // dungeons: their own Border Color
++#else
+             gender = gGameOptionsRef->playerGender;
++#endif
+             pal = &gFontPalette[0x10];
+             if (gender != MALE)
+                 pal += 0x40;
 diff --git a/src/code_809D148.c b/src/code_809D148.c
 index cf978c03..3c9a4dab 100644
 --- a/src/code_809D148.c
@@ -349,10 +397,22 @@ index cf978c03..3c9a4dab 100644
      }
  }
 diff --git a/src/cpu.c b/src/cpu.c
-index 000bd33a..0517662f 100644
+index 000bd33a..f074d340 100644
 --- a/src/cpu.c
 +++ b/src/cpu.c
-@@ -65,6 +65,11 @@ void CpuFill(void *dest, void *value, s32 size)
+@@ -1,7 +1,11 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "bg_control.h"
+ #include "window_buffer.h"
+ #include "cpu.h"
++#include "text_1.h"
+ 
+ EWRAM_DATA u32 gUnknown_202D800 = {0};
+ 
+@@ -65,6 +69,11 @@ void CpuFill(void *dest, void *value, s32 size)
  
  void VBlank_CB(void)
  {
@@ -364,14 +424,23 @@ index 000bd33a..0517662f 100644
      // Looks like a macro?
      u16 cnt = REG_DMA0CNT_H;
      cnt |= DMA_ENABLE;
-@@ -75,6 +80,7 @@ void VBlank_CB(void)
+@@ -75,7 +84,16 @@ void VBlank_CB(void)
      asm("mov \tr8, r8");
      asm("mov \tr8, r8");
      REG_DMA0CNT_H = cnt & ~(DMA_ENABLE);
 +#endif
  
++#ifdef PLATFORM_3DS
++    // Windows Options in dungeons > BG Shading: Solid. The windows' background
++    // (BG1, inside window 0) is left out of the blending that makes it, and
++    // the darkness, translucent.
++    if (sub_80063B0() == 1 && Port_SolidDungeonWindows())
++        REG_WININ = (WININ_WIN0_ALL & ~WININ_WIN0_CLR) | WININ_WIN1_ALL;
++    else
++#endif
      REG_WININ = WININ_WIN0_ALL | WININ_WIN1_ALL;
      REG_WINOUT = WINOUT_WIN01_OBJ | WINOUT_WIN01_CLR | WINOUT_WIN01_BG3 | WINOUT_WIN01_BG2 | WINOUT_WIN01_BG0;
+     REG_BLDCNT = gBldCnt;
 diff --git a/src/data/options_menu1.h b/src/data/options_menu1.h
 index d7099dca..985c92a9 100644
 --- a/src/data/options_menu1.h
@@ -647,6 +716,355 @@ index 4a9a72ad..05f95b09 100644
      ScheduleBgTilemapCopy(2);
      gDungeon->unk181e8.unk1821A = 0;
  }
+diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
+index 0680f301..9925c91d 100644
+--- a/src/dungeon_menu_others.c
++++ b/src/dungeon_menu_others.c
+@@ -31,6 +31,11 @@
+ #include "text_2.h"
+ #include "text_3.h"
+ #include "run_dungeon.h"
++#ifdef PLATFORM_3DS
++#include <string.h>
++#include "port_game.h"
++#include "save.h"
++#endif
+ 
+ static void PrintOthersMenuOptions(void);
+ static void ShowGameOptionsMenu(void);
+@@ -147,9 +152,225 @@ void ShowDungeonOthersMenu(void)
+ enum {
+     GAME_OPTION_DUNGEON,
+     GAME_OPTION_OTHERS,
++#ifdef PLATFORM_3DS
++    GAME_OPTION_LAYOUT, // 3DS port: Layout Options
++#endif
+     GAME_OPTION_DEFAULT,
++    GAME_OPTIONS_COUNT
+ };
+ 
++#ifdef PLATFORM_3DS
++// 3DS port. Windows Options here is the same as outside dungeons (BG Color,
++// BG Shading, Border Color), for dungeons only (gPortConfig.dungeon*); Layout
++// Options holds placeholders. Like the game's options here, they are changed
++// on a copy and kept if "Change settings?" is answered Yes.
++enum { PAGE_WINDOWS, PAGE_LAYOUT };
++static u8 sPortValues[2][3]; // [page][row]
++static u8 sPortOpened[2][3];
++static s32 sPortPage;
++
++static const u8 sTextBgColor[] = _("BG Color");
++static const u8 sTextBgShading[] = _("BG Shading");
++static const u8 sTextBorderColor[] = _("Border Color");
++static const u8 sTextBlue[] = _("Blue");
++static const u8 sTextRed[] = _("Red");
++static const u8 sTextGreen[] = _("Green");
++static const u8 sTextSolid[] = _("Solid");
++static const u8 sTextTranslucent[] = _("Translucent");
++static const u8 sTextPink[] = _("Pink");
++static const u8 sTextLayoutOptions[] = _("Layout Options");
++static const u8 sTextSubScreen[] = _("Sub-Screen");
++static const u8 sTextSky[] = _("Sky");
++static const u8 sTextLog[] = _("Log");
++static const u8 sTextMT[] = _("M+T");
++static const u8 sTextAdditionalInfo[] = _("Additional Info");
++static const u8 sTextOn[] = _("On");
++static const u8 sTextOff[] = _("Off");
++
++static const struct PortRow {
++    const u8 *label;
++    u8 count, x0, step;
++    const u8 *choices[4];
++} sPortRows[2][3] = {
++    [PAGE_WINDOWS] = {
++        { sTextBgColor, 3, 80, 40, { sTextBlue, sTextRed, sTextGreen } },
++        { sTextBgShading, 2, 80, 40, { sTextSolid, sTextTranslucent } },
++        { sTextBorderColor, 2, 80, 40, { sTextBlue, sTextPink } },
++    },
++    [PAGE_LAYOUT] = {
++        { sTextSubScreen, 4, 80, 28, { sTextBlue, sTextSky, sTextLog, sTextMT } },
++        { sTextAdditionalInfo, 2, 80, 40, { sTextOn, sTextOff } },
++    },
++};
++static const u8 sPortRowCount[2] = { 3, 2 };
++
++static void PortLoadValues(void)
++{
++    Port_GetDungeonWindows(&sPortValues[PAGE_WINDOWS][0], &sPortValues[PAGE_WINDOWS][1], &sPortValues[PAGE_WINDOWS][2]);
++    sPortValues[PAGE_LAYOUT][0] = gPortConfig.layoutSubScreen & 3;
++    sPortValues[PAGE_LAYOUT][1] = gPortConfig.layoutInfo ? 0 : 1; // On, Off
++    memcpy(sPortOpened, sPortValues, sizeof(sPortValues));
++}
++
++static bool8 PortValuesChanged(void)
++{
++    return memcmp(sPortOpened, sPortValues, sizeof(sPortValues)) != 0;
++}
++
++// As outside dungeons (options_menu1.c): a change takes effect at once...
++static GameOptions sOpenedGameOptions;
++
++static void PortApplyNow(void)
++{
++    *gGameOptionsRef = sChangedGameOptions;
++    if (memcmp(sPortValues[PAGE_WINDOWS], sPortOpened[PAGE_WINDOWS], 3) != 0) {
++        gPortConfig.dungeonWindowsSet = TRUE;
++        gPortConfig.dungeonBgColor = sPortValues[PAGE_WINDOWS][0];
++        gPortConfig.dungeonShading = sPortValues[PAGE_WINDOWS][1];
++        gPortConfig.dungeonBorder = sPortValues[PAGE_WINDOWS][2];
++    }
++    gPortConfig.layoutSubScreen = sPortValues[PAGE_LAYOUT][0];
++    gPortConfig.layoutInfo = sPortValues[PAGE_LAYOUT][1] == 0;
++    sub_803E13C();
++    LoadDungeonMapPalette();
++}
++
++// ... and leaving a page writes what changed and says so.
++static void PortFinishOptions(void)
++{
++    static const u8 sChangesSaved[] = _("Changes saved.");
++    bool8 gameChanged = memcmp(gGameOptionsRef, &sOpenedGameOptions, sizeof(GameOptions)) != 0;
++    bool8 portChanged = PortValuesChanged();
++
++    if (!gameChanged && !portChanged)
++        return;
++    if (gameChanged)
++        Port_WriteGameOptionsToPak();
++    if (portChanged)
++        Port_SaveConfig();
++    DisplayDungeonMessage_Async(NULL, sChangesSaved, TRUE);
++}
++
++static void PortChangeValue(s32 row, s32 step)
++{
++    s32 n = sPortRows[sPortPage][row].count;
++    sPortValues[sPortPage][row] = (sPortValues[sPortPage][row] + n + step) % n;
++}
++
++static void PrintPortPage(void)
++{
++    s32 i, c;
++    s32 rows = sPortRowCount[sPortPage];
++    WindowHeader header;
++    WindowTemplates windows = {
++        .id = {
++            [0] = {
++                .type = WINDOW_TYPE_WITH_HEADER,
++                .pos = { 2, 2 },
++                .width = 24,
++                .height = 16,
++                .totalHeight = 16,
++                .unk12 = 0,
++                .header = &header,
++            },
++            [1] = WIN_TEMPLATE_DUMMY,
++            [2] = WIN_TEMPLATE_DUMMY,
++            [3] = WIN_TEMPLATE_DUMMY,
++        }
++    };
++
++    header.count = 1;
++    header.currId = 0;
++    header.f3 = 0;
++    gDungeonMenu.currPageEntries = rows;
++    gDungeonMenu.entriesPerPage = rows;
++    gDungeonMenu.currPage = 0;
++    gDungeonMenu.pagesCount = 0;
++    gDungeonMenu.unk4 = 0;
++    gDungeonMenu.firstEntryY = 16;
++    gDungeonMenu.leftRightArrowsPos.x = 0;
++    gDungeonMenu.leftRightArrowsPos.y = 0;
++    gDungeonMenu.unk14.x = 0;
++    gDungeonMenu.windowId = 0;
++    ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
++    windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(rows, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
++    header.width = 11; // room for "Windows Options"
++    DungeonShowWindows(&windows, TRUE);
++    sub_80137B0(&gDungeonMenu, 0);
++
++    sub_80073B8(0);
++    PrintFormattedStringOnWindow(16, 0, sPortPage == PAGE_WINDOWS ? gOptionsOthersTextPtr : sTextLayoutOptions, 0, '\0');
++    for (i = 0; i < rows; i++) {
++        const struct PortRow *row = &sPortRows[sPortPage][i];
++        s32 y = GetMenuEntryYCoord(&gDungeonMenu, i);
++        s32 v = sPortValues[sPortPage][i];
++        PrintFormattedStringOnWindow(8, y, row->label, 0, '\0');
++        for (c = 0; c < row->count; c++)
++            PrintFormattedStringOnWindow(row->x0 + c * row->step, y, row->choices[c], 0, '\0');
++        AddDoubleUnderScoreHighlight(0, row->x0 + v * row->step, y + 10, GetStringLineWidth(row->choices[v]), 7);
++    }
++    sub_80073E0(0);
++}
++
++// Windows Options / Layout Options: like ShowOthersOptions.
++static bool8 ShowPortOptions(s32 page)
++{
++    bool8 dpadMoved;
++    bool8 bPress = FALSE;
++
++    sPortPage = page;
++    gDungeonMenu.menuIndex = 0;
++    while (TRUE) {
++        bPress = FALSE;
++        dpadMoved = FALSE;
++
++        PrintPortPage();
++        while (TRUE) {
++            AddMenuCursorSprite(&gDungeonMenu);
++            DungeonRunFrameActions(0x24);
++            if (gRealInputs.repeated & DPAD_DOWN) {
++                PlayDungeonCursorSE(TRUE);
++                MoveMenuCursorDownWrapAround(&gDungeonMenu, TRUE);
++            }
++            if (gRealInputs.repeated & DPAD_UP) {
++                PlayDungeonCursorSE(TRUE);
++                MoveMenuCursorUpWrapAround(&gDungeonMenu, TRUE);
++            }
++            if (gRealInputs.repeated & DPAD_LEFT) {
++                PlayDungeonCursorSE(FALSE);
++                PortChangeValue(gDungeonMenu.menuIndex, -1);
++                PortApplyNow();
++                dpadMoved = TRUE;
++                break;
++            }
++            if (gRealInputs.repeated & DPAD_RIGHT) {
++                PlayDungeonCursorSE(FALSE);
++                PortChangeValue(gDungeonMenu.menuIndex, 1);
++                PortApplyNow();
++                dpadMoved = TRUE;
++                break;
++            }
++            if ((gRealInputs.pressed & A_BUTTON) || gDungeonMenu.touchScreen.b_button) {
++                PlayDungeonConfirmationSE();
++                break;
++            }
++            if (gRealInputs.pressed & B_BUTTON) {
++                PlayDungeonCancelSE();
++                bPress = TRUE;
++                break;
++            }
++        }
++
++        AddMenuCursorSprite(&gDungeonMenu);
++        DungeonRunFrameActions(0x24);
++        if (!dpadMoved)
++            break;
++    }
++
++    return bPress;
++}
++#endif
++
+ static void ShowGameOptionsMenu(void)
+ {
+     while (TRUE) {
+@@ -185,6 +406,22 @@ static void ShowGameOptionsMenu(void)
+             break;
+ 
+         sChangedGameOptions = *gGameOptionsRef;
++#ifdef PLATFORM_3DS
++        PortLoadValues();
++        sOpenedGameOptions = *gGameOptionsRef;
++        if (gDungeonMenu.menuIndex == GAME_OPTION_DUNGEON) {
++            ShowDungeonOptions();
++            PortFinishOptions();
++        }
++        else if (gDungeonMenu.menuIndex == GAME_OPTION_OTHERS) {
++            ShowPortOptions(PAGE_WINDOWS);
++            PortFinishOptions();
++        }
++        else if (gDungeonMenu.menuIndex == GAME_OPTION_LAYOUT) {
++            ShowPortOptions(PAGE_LAYOUT);
++            PortFinishOptions();
++        }
++#else
+         if (gDungeonMenu.menuIndex == GAME_OPTION_DUNGEON) {
+             bPress = ShowDungeonOptions();
+             TrySetNewGameOptions(bPress);
+@@ -193,6 +430,7 @@ static void ShowGameOptionsMenu(void)
+             bPress = ShowOthersOptions();
+             TrySetNewGameOptions(bPress);
+         }
++#endif
+         else if (gDungeonMenu.menuIndex == GAME_OPTION_DEFAULT) {
+             AskToResetToDefault();
+         }
+@@ -240,12 +478,18 @@ static bool8 ShowDungeonOptions(void)
+             if (gRealInputs.repeated & DPAD_LEFT) {
+                 PlayDungeonCursorSE(FALSE);
+                 ChangeGameOptionLeft(gDungeonMenu.menuIndex);
++#ifdef PLATFORM_3DS
++                PortApplyNow();
++#endif
+                 dpadMoved = TRUE;
+                 break;
+             }
+             if (gRealInputs.repeated & DPAD_RIGHT) {
+                 PlayDungeonCursorSE(FALSE);
+                 ChangeGameOptionRight(gDungeonMenu.menuIndex);
++#ifdef PLATFORM_3DS
++                PortApplyNow();
++#endif
+                 dpadMoved = TRUE;
+                 break;
+             }
+@@ -361,6 +605,13 @@ static void AskToResetToDefault(void)
+ {
+     if (DisplayDungeonYesNoMessage_Async(0, gUnknown_80FEC28, FALSE) == 1) {
+         InitializeGameOptions(FALSE);
++#ifdef PLATFORM_3DS
++        // and the port's dungeon settings (Windows Options, Layout Options)
++        gPortConfig.dungeonWindowsSet = FALSE;
++        gPortConfig.layoutSubScreen = 0;
++        gPortConfig.layoutInfo = 0;
++        Port_SaveConfig();
++#endif
+         sub_803E13C();
+     }
+ }
+@@ -562,7 +813,7 @@ static void PrintQuickSaveMenuOptions(void)
+ static void PrintGameOptions(void)
+ {
+     s32 optionsCount;
+-    s32 y[3];
++    s32 y[GAME_OPTIONS_COUNT];
+     WindowHeader header;
+     WindowTemplates windows = {
+         .id = {
+@@ -585,7 +836,7 @@ static void PrintGameOptions(void)
+     header.currId = 0;
+     header.f3 = 0;
+     gDungeonMenu.menuIndex = 0;
+-    optionsCount = 3;
++    optionsCount = GAME_OPTIONS_COUNT;
+     gDungeonMenu.currPageEntries = optionsCount;
+     gDungeonMenu.entriesPerPage = optionsCount;
+     gDungeonMenu.currPage = 0;
+@@ -611,7 +862,11 @@ static void PrintGameOptions(void)
+     PrintFormattedStringOnWindow(16, 0, gGameOptionsTextPtr, 0, '\0');
+     PrintFormattedStringOnWindow(8, y[0], gOptionsDungeonTextPtr, 0, '\0');
+     PrintFormattedStringOnWindow(8, y[1], gOptionsOthersTextPtr, 0, '\0');
+-    PrintFormattedStringOnWindow(8, y[2], gUnknown_80FE748, 0, '\0');
++#ifdef PLATFORM_3DS
++    y[3] = GetMenuEntryYCoord(&gDungeonMenu, 3);
++    PrintFormattedStringOnWindow(8, y[GAME_OPTION_LAYOUT], sTextLayoutOptions, 0, '\0');
++#endif
++    PrintFormattedStringOnWindow(8, y[GAME_OPTION_DEFAULT], gUnknown_80FE748, 0, '\0');
+     sub_80073E0(0);
+ }
+ 
+@@ -654,7 +909,11 @@ static void PrintDungeonOptions(void)
+     ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
+     windows.id[0].width = 24;
+     windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(DUNGEON_OPTIONS_COUNT, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
++#ifdef PLATFORM_3DS
++    header.width = 11; // room for "Dungeon Options"
++#else
+     header.width = 10;
++#endif
+     windows.id[0].pos.x = 2;
+     DungeonShowWindows(&windows, TRUE);
+     sub_80137B0(&gDungeonMenu, 0);
 diff --git a/src/dungeon_pokemon_sprites.c b/src/dungeon_pokemon_sprites.c
 index b965ec4a..26a31bcd 100644
 --- a/src/dungeon_pokemon_sprites.c
@@ -744,6 +1162,64 @@ index ca1c1984..8939a90f 100644
      {
          SpriteSetX(&gUnknown_202ED28[0][index].sprite, x + gUnknown_202ED28[0][index].pos.x);
          SpriteSetY(&gUnknown_202ED28[0][index].sprite, y + gUnknown_202ED28[0][index].pos.y);
+diff --git a/src/dungeon_strings.c b/src/dungeon_strings.c
+index e5de5d56..72d27d9e 100644
+--- a/src/dungeon_strings.c
++++ b/src/dungeon_strings.c
+@@ -922,8 +922,13 @@ const u8 *const gUnknown_80FE708 = _("Tile underfoot");
+ const u8 *const gUnknown_80FE70C = _("Stairs");
+ const u8 *const gUnknown_80FE720 = _("Rescue Point");
+ const u8 *const gUnknown_80FE724 = _("Warp Zone");
++#ifdef PLATFORM_3DS
++const u8 *const gOptionsDungeonTextPtr = _("Dungeon Options"); // 3DS port: renamed
++const u8 *const gOptionsOthersTextPtr = _("Windows Options");
++#else
+ const u8 *const gOptionsDungeonTextPtr = _("Dungeon");
+ const u8 *const gOptionsOthersTextPtr = _("Others");
++#endif
+ const u8 *const gUnknown_80FE748 = _("Default");
+ const u8 *const gUnknown_80FE764 = _("Speed{MOVE_X_POSITION_BY_80}Slow{MOVE_X_POSITION_BY_136}Fast");
+ const u8 *const gUnknown_80FE788 = _("Far-off pals{MOVE_X_POSITION_BY_80}Self{MOVE_X_POSITION_BY_136}Look");
+diff --git a/src/dungeon_tilemap.c b/src/dungeon_tilemap.c
+index 80a7d04f..1a8f04c5 100644
+--- a/src/dungeon_tilemap.c
++++ b/src/dungeon_tilemap.c
+@@ -1,4 +1,10 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#define PORT_PINK_BORDERS Port_PinkBorders() // dungeons: their own Border Color
++#else
++#define PORT_PINK_BORDERS (gGameOptionsRef->playerGender != MALE)
++#endif
+ #include "globaldata.h"
+ #include "dungeon_tilemap.h"
+ #include "constants/item.h"
+@@ -106,7 +112,7 @@ static void sub_803F38C(void)
+     strPtr->unk36 = -1;
+     strPtr->unk38 = -1;
+ 
+-    palId = (gGameOptionsRef->playerGender != MALE) ? 4 : 0;
++    palId = (PORT_PINK_BORDERS) ? 4 : 0;
+ 
+     SetBGPaletteBufferColorArray(0xFD, &gFontPalette[16 * palId + 13]);
+     SetBGPaletteBufferColorArray(0xFE, &gFontPalette[16 * palId + 14]);
+@@ -504,13 +510,13 @@ static void sub_803FB74(void)
+         if (strPtr->unk18212 != 0) {
+             r5 = 96;
+         }
+-        else if (gGameOptionsRef->playerGender != MALE) {
++        else if (PORT_PINK_BORDERS) {
+             r5 = 64;
+         }
+     }
+ 
+     if (r6 == 0) {
+-        if (gGameOptionsRef->playerGender != MALE) {
++        if (PORT_PINK_BORDERS) {
+             r6 = 64;
+         }
+     }
 diff --git a/src/dungeon_util.c b/src/dungeon_util.c
 index 60311546..dc2b1bf5 100644
 --- a/src/dungeon_util.c
@@ -988,6 +1464,30 @@ index f3807983..f02e58a2 100644
      AnimateSprites();
      UpdateAnimatedColors(FadeScreen(), gFriendAreasMapPtr->unk4C4C, 0xB0, 16, gFriendAreasMapPtr->brightness, NULL);
      CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
+diff --git a/src/game_options.c b/src/game_options.c
+index 4d138409..fd89ffbf 100644
+--- a/src/game_options.c
++++ b/src/game_options.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "game_options.h"
+ #include "graphics_memory.h"
+@@ -192,7 +195,11 @@ void SetWindowBGColor(void)
+         { .r = 0x28, .g = 0x80, .b = 0x48, .unk4 = 0x00} // Green
+     };
+ 
++#ifdef PLATFORM_3DS
++    SetFontsBaseColor(winColors[Port_WindowColor() & NUM_WINDOW_COLORS]); // dungeons: their own (options.c)
++#else
+     SetFontsBaseColor(winColors[gGameOptionsRef->windowColor & NUM_WINDOW_COLORS]);
++#endif
+ }
+ 
+ bool8 GameOptions_ShowMiniMap(void)
 diff --git a/src/graphics_memory.c b/src/graphics_memory.c
 index 1179e657..13c8e87f 100644
 --- a/src/graphics_memory.c

@@ -340,9 +340,10 @@ bool Backend_LoadConfig(uint8_t *data, uint32_t size)
     FILE *f = fopen(CONFIG_PATH, "rb");
     if (!f)
         return false;
-    size_t n = fread(data, 1, size, f);
+    memset(data, 0, size);
+    size_t n = fread(data, 1, size, f); // an older, shorter file: the rest stays 0
     fclose(f);
-    return n == size;
+    return n > 0;
 }
 
 void Backend_StoreConfig(const uint8_t *data, uint32_t size)

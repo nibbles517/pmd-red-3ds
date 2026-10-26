@@ -267,8 +267,8 @@ class Harness:
                 ok = 0
                 if self.args.config and os.path.exists(self.args.config):
                     d = open(self.args.config, 'rb').read()[:length]
-                    if len(d) == length:
-                        uc.mem_write(buf, d)
+                    if len(d) > 0:
+                        uc.mem_write(buf, d.ljust(length, b'\0'))
                         ok = 1
                 self.regs[8] = ok
         elif reg == 13:  # capture finished: dump regs[160][0x400], vram, pltt, oam
