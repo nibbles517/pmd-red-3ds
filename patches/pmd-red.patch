@@ -259,6 +259,22 @@ index 000bd33a..0517662f 100644
  
      REG_WININ = WININ_WIN0_ALL | WININ_WIN1_ALL;
      REG_WINOUT = WINOUT_WIN01_OBJ | WINOUT_WIN01_CLR | WINOUT_WIN01_BG3 | WINOUT_WIN01_BG2 | WINOUT_WIN01_BG0;
+diff --git a/src/dungeon_cleared_window.c b/src/dungeon_cleared_window.c
+index 28b04fb0..368ffdc7 100644
+--- a/src/dungeon_cleared_window.c
++++ b/src/dungeon_cleared_window.c
+@@ -68,4 +68,11 @@ void ShowDungeonClearedWindow_Async(void)
+     }
+ 
+     PlayDungeonConfirmationSE();
++#ifdef PLATFORM_3DS
++    {
++        // The main screen cuts to black here; the port's second screen too.
++        void Port_SubScreenCutToBlack(void);
++        Port_SubScreenCutToBlack();
++    }
++#endif
+ }
 diff --git a/src/dungeon_map_access.c b/src/dungeon_map_access.c
 index 4a9a72ad..9b88378e 100644
 --- a/src/dungeon_map_access.c

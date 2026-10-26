@@ -940,18 +940,61 @@ static void Darken(u16 *out, int brightness)
     }
 }
 
+// --- Cut to black ------------------------------------------------------------------
+//
+// When the dungeon results window is closed, the main screen cuts to black at
+// once, and so does the second screen. It comes back with the next screen,
+// following the town's fade in.
+
+enum { CUT_NONE, CUT_DUNGEON, CUT_AFTER };
+static int sCutPhase;
+
+void Port_SubScreenCutToBlack(void)
+{
+    sCutPhase = CUT_DUNGEON;
+}
+
+// The brightness (0-0x100) to show the second screen at, or -1 for normal.
+static int CutBrightness(void)
+{
+    switch (sCutPhase) {
+        case CUT_DUNGEON:
+            if (gDungeon != NULL)
+                return 0;
+            sCutPhase = CUT_AFTER;
+            // fall through
+        case CUT_AFTER:
+            if (gDungeon != NULL) { // straight into another dungeon
+                sCutPhase = CUT_NONE;
+                return -1;
+            }
+            if (Port_GroundBrightness() >= 0x100) {
+                sCutPhase = CUT_NONE;
+                return -1;
+            }
+            return Port_GroundBrightness();
+    }
+    return -1;
+}
+
 bool Port_RenderSubScreen(u16 *out)
 {
     int brightness;
 
     sOut = sOutFrame = out;
+    brightness = CutBrightness();
+    if (brightness == 0) {
+        memset(out, 0, W * H * sizeof(u16));
+        return TRUE;
+    }
     if (gDungeon != NULL) {
         DrawTeamPanel();
         return TRUE;
     }
     sInDungeon = FALSE;
 
-    brightness = FriendAreasBrightness();
+    if (brightness < 0)
+        brightness = FriendAreasBrightness();
     if (brightness == 0) {
         memset(out, 0, W * H * sizeof(u16));
         return TRUE;
