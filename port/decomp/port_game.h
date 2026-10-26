@@ -28,8 +28,8 @@ struct PortConfig
     u8 version;
     u8 subScreenDisabled;   // Sub-Screen Settings > Enabled? (0 = Yes)
     u8 layout[2][2];        // [main, sub][size, scale]
-    u8 windowShading;       // Windows Options > BG Shading: 0 Solid, 1 Translucent (placeholder)
-    u8 windowBorder;        // Windows Options > Border Color: 0 Blue, 1 Pink (placeholder)
+    u8 windowShading;       // Windows Options > BG Shading: 0 Solid, 1 Translucent
+    u8 unused;              // (was Border Color, now the game's own player gender option)
 };
 extern struct PortConfig gPortConfig;
 enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_3DS };

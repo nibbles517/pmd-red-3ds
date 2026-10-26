@@ -1765,10 +1765,10 @@ index 86f582c2..8135b283 100644
  {
      s32 menuAction;
 diff --git a/src/options_menu2.c b/src/options_menu2.c
-index 03531690..e5ca5ad0 100644
+index 03531690..f1c491dd 100644
 --- a/src/options_menu2.c
 +++ b/src/options_menu2.c
-@@ -10,9 +10,29 @@
+@@ -10,9 +10,31 @@
  #include "text_1.h"
  #include "text_2.h"
  #include "text_3.h"
@@ -1780,7 +1780,9 @@ index 03531690..e5ca5ad0 100644
  
 +#ifdef PLATFORM_3DS
 +// The port's two-choice toggles (entries 1 and 2): flips one; FALSE for the
-+// game's own entry.
++// game's own entry. Border Color is the player's gender (boy: blue borders,
++// girl: pink), which only picks the windows' colors; like BG Color it is a
++// game option, kept in the save.
 +static bool8 Port_ToggleWindowsOption(s32 entry)
 +{
 +    if (entry == 1) {
@@ -1788,7 +1790,7 @@ index 03531690..e5ca5ad0 100644
 +        UpdateFadeInTile(sub_80063B0()); // takes effect at once
 +    }
 +    else if (entry == 2)
-+        gPortConfig.windowBorder ^= 1;
++        sUnknown_203B260->optionsMenu->playerGender ^= 1;
 +    else
 +        return FALSE;
 +    return TRUE;
@@ -1798,7 +1800,7 @@ index 03531690..e5ca5ad0 100644
  #include "data/options_menu2.h"
  
  static void CreateOptionsMenu(void);
-@@ -27,10 +47,10 @@ bool8 sub_801E198(GameOptions *optionsMenu)
+@@ -27,10 +49,10 @@ bool8 sub_801E198(GameOptions *optionsMenu)
      sUnknown_203B260->unk48 = &sUnknown_203B260->unk4C.id[0];
      RestoreSavedWindows(&sUnknown_203B260->unk4C);
      sUnknown_203B260->unk4C.id[sUnknown_203B260->unk44] = sUnknown_80DC03C;
@@ -1811,7 +1813,7 @@ index 03531690..e5ca5ad0 100644
      nullsub_38();
      CreateOptionsMenu();
      return TRUE;
-@@ -50,6 +70,13 @@ u32 sub_801E218(void)
+@@ -50,6 +72,13 @@ u32 sub_801E218(void)
              PlayMenuSoundEffect(MENU_SFX_ACCEPT);
              return 3;
          case INPUT_DPAD_LEFT:
@@ -1825,7 +1827,7 @@ index 03531690..e5ca5ad0 100644
              if (sUnknown_203B260->input.menuIndex == 0) {
                  if (sUnknown_203B260->optionsMenu->windowColor == WINDOW_COLOR_BLUE)
                      sUnknown_203B260->optionsMenu->windowColor = WINDOW_COLOR_GREEN;
-@@ -61,6 +88,13 @@ u32 sub_801E218(void)
+@@ -61,6 +90,13 @@ u32 sub_801E218(void)
              }
              break;
          case INPUT_DPAD_RIGHT:
@@ -1839,7 +1841,7 @@ index 03531690..e5ca5ad0 100644
              if (sUnknown_203B260->input.menuIndex == 0) {
                  if (sUnknown_203B260->optionsMenu->windowColor > WINDOW_COLOR_RED)
                      sUnknown_203B260->optionsMenu->windowColor = WINDOW_COLOR_BLUE;
-@@ -124,5 +158,22 @@ static void CreateOptionsMenu(void)
+@@ -124,5 +160,22 @@ static void CreateOptionsMenu(void)
              break;
      }
  
@@ -1847,7 +1849,7 @@ index 03531690..e5ca5ad0 100644
 +    {
 +        const u8 *const choices[2][2] = { { sSolid, sTranslucent }, { sBorderBlue, sPink } };
 +        const u8 *const labels[2] = { sBgShading, sBorderColor };
-+        u8 values[2] = { gPortConfig.windowShading & 1, gPortConfig.windowBorder & 1 };
++        u8 values[2] = { gPortConfig.windowShading & 1, sUnknown_203B260->optionsMenu->playerGender != MALE };
 +        s32 i, c;
 +
 +        for (i = 0; i < 2; i++) {
