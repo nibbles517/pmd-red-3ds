@@ -14,6 +14,7 @@
 #include "constants/direction.h"
 #include "constants/dungeon.h"
 #include "constants/event_flag.h"
+#include "constants/monster.h"
 #include "decompress_at.h"
 #include "decompress_sir.h"
 #include "def_filearchives.h"
@@ -306,99 +307,158 @@ static void DrawPose(const ax_pose *first, const ax_sprite *const *spriteData,
     }
 }
 
-// Draws a monster's current animation frame, facing down-left, with its
-// anchor (the point the game positions it by) at (ax, ay).
-static void DrawMonSprite(Entity *entity, int ax, int ay)
+static const void *FindFile(const FileArchive *arc, const char *name);
+
+// Monster palettes, as the game sets them in OBJ palette RAM from "palet"
+// (GetPokemonOverworldPalette picks one per species). Read from the file, so
+// the screen fades and colour effects of the main screen don't reach them.
+static u16 sPalet[256];
+static bool8 sPaletLoaded;
+
+static bool8 LoadPalet(void)
+{
+    const RGB_Struct *pal;
+    if (sPaletLoaded)
+        return TRUE;
+    pal = FindFile(&gMonsterFileArchive, "palet");
+    if (pal == NULL)
+        return FALSE;
+    for (int i = 0; i < 240; i++)
+        sPalet[i] = Rgb(pal[i].r, pal[i].g, pal[i].b);
+    sPaletLoaded = TRUE;
+    return TRUE;
+}
+
+// --- Team panel -----------------------------------------------------------------------
+//
+// What the panel shows is kept per row, refreshed from the dungeon while the
+// team's sprites are loaded. When they are not (between floors, on the
+// results screen after clearing or fainting), the rows stay as they were and
+// the sprites keep animating on their own.
+
+typedef struct {
+    bool8 used;
+    bool8 leader;
+    u8 name[POKEMON_NAME_LENGTH + 1];
+    u8 level;
+    s16 hp, maxHp;
+    const u8 *item;     // NULL: none
+    const u8 *tactic;
+    const axmain *sprite;
+    u8 anim, palNum;
+    s16 frame, frameLeft; // position in the down-left animation
+} PanelRow;
+
+static PanelRow sRows[MAX_TEAM_MEMBERS];
+
+// The down-left animation of a row's current animation, and its length.
+static const ax_anim *RowAnim(const PanelRow *row, int *length)
+{
+    const ax_anim *sw;
+    if (row->sprite == NULL || row->anim >= row->sprite->animCount)
+        return NULL;
+    sw = row->sprite->animations[row->anim][DIRECTION_SOUTHWEST];
+    if (sw == NULL || (*length = AnimLength(sw)) == 0)
+        return NULL;
+    return sw;
+}
+
+// Takes the sprite state from a monster on the main screen: the same frame
+// of the same animation, facing down-left. Returns FALSE if its sprite is not
+// loaded.
+static bool8 FollowSprite(PanelRow *row, Entity *entity)
 {
     axObject *obj = &entity->axObj;
     const axmain *m;
     const ax_anim *cur, *sw;
     int frame, n;
 
-    if (obj->spriteFile == NULL || obj->axdata.activeAnimData == NULL)
-        return;
+    // The sprite file must still be the dungeon's open file for the species:
+    // when the dungeon closes it, the file cache slot may be reused.
+    if (obj->spriteFile == NULL || obj->spriteFile->data == NULL || obj->axdata.activeAnimData == NULL)
+        return FALSE;
+    if (GetEntInfo(entity)->apparentID < 0 || GetEntInfo(entity)->apparentID >= MONSTER_MAX)
+        return FALSE;
+    if (obj->spriteFile != gDungeon->sprites[GetEntInfo(entity)->apparentID]
+        && obj->spriteFile != gDungeon->sprites[MONSTER_DECOY])
+        return FALSE;
+    if (obj->spriteFile->file == NULL || strncmp(obj->spriteFile->file->name, "ax", 2) != 0)
+        return FALSE;
     m = (const axmain *)obj->spriteFile->data;
-    if (m == NULL || obj->unk43_animId2 >= m->animCount)
-        return;
+    if (obj->unk43_animId2 >= m->animCount)
+        return FALSE;
     cur = m->animations[obj->unk43_animId2][obj->unk45_orientation & DIRECTION_MASK];
     sw = m->animations[obj->unk43_animId2][DIRECTION_SOUTHWEST];
-    if (cur == NULL || sw == NULL)
-        return;
+    if (cur == NULL || sw == NULL || (n = AnimLength(sw)) == 0)
+        return FALSE;
 
-    // The main sprite is showing the frame before activeAnimData. Show the
-    // same frame of the down-left animation.
+    // The main sprite is showing the frame before activeAnimData.
     frame = (int)(obj->axdata.activeAnimData - cur) - 1;
-    n = AnimLength(sw);
-    if (n == 0)
-        return;
     if (frame < 0 || frame >= AnimLength(cur))
         frame = 0;
     if (frame >= n)
         frame = n - 1;
 
-    DrawPose(m->poses[sw[frame].poseId], m->spriteData, NULL, 0,
-             &sPltt[0x100], obj->axdata.sub1.paletteNum,
-             ax + sw[frame].offset.x, ay + sw[frame].offset.y);
+    row->sprite = m;
+    row->anim = obj->unk43_animId2;
+    row->palNum = obj->axdata.sub1.paletteNum;
+    row->frame = frame;
+    row->frameLeft = obj->axdata.animFrames > 0 ? obj->axdata.animFrames : sw[frame].frames;
+    return TRUE;
 }
 
-// --- Team panel -----------------------------------------------------------------------
+// Plays the row's animation by itself, one frame per call.
+static void AdvanceSprite(PanelRow *row)
+{
+    int n;
+    const ax_anim *sw = RowAnim(row, &n);
+    if (sw == NULL)
+        return;
+    if (--row->frameLeft <= 0) {
+        row->frame = (row->frame + 1) % n;
+        row->frameLeft = sw[row->frame].frames;
+    }
+}
 
-static const u8 sLevel[] = "Level ";
-static const u8 sItem[] = "Item: ";
-static const u8 sNone[] = "None";
-static const u8 sLeader[] = "Leader";
-static const u8 sSlash[] = "/";
+static void DrawRowSprite(const PanelRow *row, int ax, int ay)
+{
+    int n;
+    const ax_anim *sw = RowAnim(row, &n);
+    if (sw == NULL || !LoadPalet())
+        return;
+    if (row->frame >= n)
+        return;
+    DrawPose(row->sprite->poses[sw[row->frame].poseId], row->sprite->spriteData, NULL, 0,
+             sPalet, row->palNum, ax + sw[row->frame].offset.x, ay + sw[row->frame].offset.y);
+}
 
-static void DrawMember(int y0, Entity *entity)
+static void ReadMember(PanelRow *row, Entity *entity)
 {
     EntityInfo *info = GetEntInfo(entity);
-    u8 buf[64];
-    int x;
+    int i;
 
-    DrawSpriteBox(y0, FALSE);
-    DrawInfoPanel(y0);
-    DrawMonSprite(entity, 23, y0 + 41); // feet on the middle of the floor
-
-    // Name (team members' own names; the game's StrncpyCustom stops at 0 too)
+    row->used = TRUE;
+    row->leader = info->isTeamLeader;
+    row->name[0] = 0;
     if (info->teamIndex < MAX_TEAM_MEMBERS) {
+        // team members' own names (the game's StrncpyCustom stops at 0 too)
         const u8 *name = gRecruitedPokemonRef->dungeonTeam[info->teamIndex].name;
-        int i;
         for (i = 0; i < POKEMON_NAME_LENGTH && name[i]; i++)
-            buf[i] = name[i];
-        buf[i] = 0;
-        DrawText(56, y0 + 5, buf, COLOR_NAME);
+            row->name[i] = name[i];
+        row->name[i] = 0;
     }
-
-    // Level
-    x = DrawText(60, y0 + 17, sLevel, COLOR_TEXT);
-    FormatInt(buf, info->level);
-    DrawText(x, y0 + 17, buf, COLOR_TEXT);
-
-    // HP: "hp/ max", each number right-aligned in three digits
-    FormatInt(buf, info->HP);
-    DrawText(138 - TextWidth(buf), y0 + 17, buf, COLOR_TEXT);
-    DrawText(138, y0 + 17, sSlash, COLOR_TEXT);
-    FormatInt(buf, info->maxHPStat);
-    DrawText(160 - TextWidth(buf), y0 + 17, buf, COLOR_TEXT);
-    DrawHpBar(163, y0 + 20, 52, info->HP, info->maxHPStat);
-
-    // Held item
-    x = DrawText(60, y0 + 29, sItem, COLOR_TEXT);
-    if (ItemExists(&info->heldItem))
-        DrawText(x, y0 + 29, gItemParametersData[info->heldItem.id].name, COLOR_TEXT);
-    else
-        DrawText(x, y0 + 29, sNone, COLOR_TEXT);
-
-    // Tactic
-    if (info->isTeamLeader)
-        DrawText(148, y0 + 29, sLeader, COLOR_TEXT);
-    else if (info->tactic < NUM_TACTICS)
-        DrawText(148, y0 + 29, gTacticsNames[info->tactic], COLOR_TEXT);
+    row->level = info->level;
+    row->hp = info->HP;
+    row->maxHp = info->maxHPStat;
+    row->item = ItemExists(&info->heldItem) ? gItemParametersData[info->heldItem.id].name : NULL;
+    row->tactic = info->tactic < NUM_TACTICS ? gTacticsNames[info->tactic] : NULL;
 }
 
-static void DrawTeamPanel(void)
+// Updates the rows from the dungeon, unless the team's sprites are not loaded.
+static void UpdateRows(void)
 {
     Entity *members[MAX_TEAM_MEMBERS];
+    PanelRow rows[MAX_TEAM_MEMBERS];
     int count = 0, i;
 
     // Leader first, then the others in team order.
@@ -413,13 +473,86 @@ static void DrawTeamPanel(void)
             members[count++] = e;
     }
 
+    memset(rows, 0, sizeof(rows));
+    for (i = 0; i < count; i++) {
+        ReadMember(&rows[i], members[i]);
+        if (!FollowSprite(&rows[i], members[i]))
+            count = -1;
+    }
+    if (count > 0) {
+        memcpy(sRows, rows, sizeof(sRows));
+    } else {
+        for (i = 0; i < MAX_TEAM_MEMBERS; i++)
+            AdvanceSprite(&sRows[i]);
+    }
+}
+
+static const u8 sLevel[] = "Level ";
+static const u8 sItem[] = "Item: ";
+static const u8 sNone[] = "None";
+static const u8 sLeader[] = "Leader";
+static const u8 sSlash[] = "/";
+
+// Draws a number right-aligned at xRight with every digit in a cell as wide
+// as '0', so that the columns line up.
+static void DrawNumberRight(int xRight, int y, int v)
+{
+    u8 buf[12], one[2] = { 0, 0 };
+    int cell = GlyphWidth('0'), n, i;
+    FormatInt(buf, v);
+    n = strlen((const char *)buf);
+    for (i = 0; i < n; i++) {
+        int x = xRight - (n - i) * cell;
+        one[0] = buf[i];
+        DrawText(x + (cell - GlyphWidth(buf[i])) / 2, y, one, COLOR_TEXT);
+    }
+}
+
+static void DrawRow(int y0, const PanelRow *row)
+{
+    u8 buf[16];
+    int x;
+
+    DrawSpriteBox(y0, FALSE);
+    DrawInfoPanel(y0);
+    DrawRowSprite(row, 23, y0 + 41); // feet on the middle of the floor
+
+    DrawText(56, y0 + 5, row->name, COLOR_NAME);
+
+    x = DrawText(60, y0 + 17, sLevel, COLOR_TEXT);
+    FormatInt(buf, row->level);
+    DrawText(x, y0 + 17, buf, COLOR_TEXT);
+
+    // HP: "hp/ max", each number right-aligned in three digit cells
+    DrawNumberRight(136, y0 + 17, row->hp);
+    DrawText(136, y0 + 17, sSlash, COLOR_TEXT);
+    DrawNumberRight(160, y0 + 17, row->maxHp);
+    DrawHpBar(163, y0 + 20, 52, row->hp, row->maxHp);
+
+    x = DrawText(60, y0 + 29, sItem, COLOR_TEXT);
+    DrawText(x, y0 + 29, row->item != NULL ? row->item : sNone, COLOR_TEXT);
+
+    if (row->leader)
+        DrawText(148, y0 + 29, sLeader, COLOR_TEXT);
+    else if (row->tactic != NULL)
+        DrawText(148, y0 + 29, row->tactic, COLOR_TEXT);
+}
+
+static bool8 sInDungeon;
+
+static void DrawTeamPanel(void)
+{
+    if (!sInDungeon) { // a new dungeon: forget the last one's team
+        memset(sRows, 0, sizeof(sRows));
+        sInDungeon = TRUE;
+    }
+    UpdateRows();
     Fill(0, 0, W, H, Rgb(74, 74, 116));
-    for (i = 0; i < MAX_TEAM_MEMBERS; i++) {
-        int y0 = i * ROW_H;
-        if (i < count)
-            DrawMember(y0, members[i]);
+    for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
+        if (sRows[i].used)
+            DrawRow(i * ROW_H, &sRows[i]);
         else
-            DrawSpriteBox(y0, TRUE);
+            DrawSpriteBox(i * ROW_H, TRUE);
     }
 }
 
@@ -483,24 +616,18 @@ static bool8 LoadMapSet(int set)
 // The map's marker sprites ("wmapspr": location markers, arrows). Their
 // colours are OBJ palette 0 as the map scenes set it, from "palet".
 static const EfoFileData *sMapSprites;
-static u16 sMapSpritePals[256];
 
 static bool8 LoadMapSprites(void)
 {
-    const RGB_Struct *pal = FindFile(&gMonsterFileArchive, "palet");
     sMapSprites = FindFile(&gTitleMenuFileArchive, "wmapspr");
-    if (sMapSprites == NULL || pal == NULL)
-        return FALSE;
-    for (int i = 0; i < 240; i++)
-        sMapSpritePals[i] = Rgb(pal[i].r, pal[i].g, pal[i].b);
-    return TRUE;
+    return sMapSprites != NULL && LoadPalet();
 }
 
 static void DrawMapSpriteFrame(int anim, int frame, int x, int y)
 {
     const ax_anim *a = sMapSprites->animations[anim][0];
     DrawPose(sMapSprites->poses[a[frame].poseId], NULL, sMapSprites->tiles, sMapSprites->tileCount,
-             sMapSpritePals, 0, x + a[frame].offset.x, y + a[frame].offset.y);
+             sPalet, 0, x + a[frame].offset.x, y + a[frame].offset.y);
 }
 
 // Development aid (test harness): every frame of every marker animation, one
@@ -743,5 +870,6 @@ bool Port_RenderSubScreen(u16 *out)
         DrawTeamPanel();
         return TRUE;
     }
+    sInDungeon = FALSE;
     return DrawWorldMap();
 }
