@@ -41,6 +41,8 @@ extern Dungeon *gDungeon;
 extern const DungeonPos gDungeonCoordinates[64]; // world_map.c
 extern struct FriendAreasMap *gFriendAreasMapPtr; // friend_areas_map.c (NULL when not showing)
 s32 Port_GroundExitRequest(void);                 // ground_main.c
+bool8 Port_GroundIsDemo(void);                    // ground_main.c
+s32 Port_TitleBrightness(void);                   // main_loops.c
 u16 Port_GroundBrightness(void);                  // palette_util.c
 bool8 Port_FriendAreaMapPos(u8 areaId, DungeonPos *pos); // friend_areas_map.c
 
@@ -897,7 +899,9 @@ static bool8 DrawWorldMap(void)
 // - entering a dungeon: fades out with the town, black on the world map and
 //   the dungeon's name banner, fades in with the first floor;
 // - closing the dungeon results window: cuts to black with the main screen,
-//   fades in with the town.
+//   fades in with the town;
+// - in the intro's scenes and on the title menu, it fades in and out with
+//   the main screen.
 
 enum {
     TR_NONE,
@@ -916,6 +920,13 @@ void Port_SubScreenCutToBlack(void)
 
 static int GroundLevel(void) { return Port_GroundBrightness(); } // 0-0x100
 
+static s32 PlaceDungeon(s32 place);
+static bool8 PlaceOnMap(void) { return PlaceDungeon(GetScriptVarValue(NULL, GROUND_PLACE)) >= 0; }
+
+// Set by the game (main_loops.c) for the port: the ground is running; the
+// title menu is up.
+bool8 gPortGroundRunning, gPortTitleMenu;
+
 // The brightness (0-0x100) to show the second screen at, or -1 for normal.
 static int TransitionBrightness(void)
 {
@@ -930,6 +941,10 @@ static int TransitionBrightness(void)
                 sTransition = TR_TOWN_OUT;
             else if (request == 2)
                 sTransition = TR_DUNGEON;
+            else if (gDungeon == NULL && gPortTitleMenu)
+                return PlaceOnMap() ? Port_TitleBrightness() * 0x100 / 32 : -1; // the title menu's fades
+            else if (gDungeon == NULL && gPortGroundRunning && Port_GroundIsDemo())
+                return PlaceOnMap() ? GroundLevel() : -1; // intro scenes: follow their fades
             else
                 return -1;
             break;

@@ -430,7 +430,7 @@ index c2e99136..e9c5336a 100644
  
  static s32 ChooseLocation_Async(s32 *newLocationId, s32 *newDirection)
 diff --git a/src/ground_main.c b/src/ground_main.c
-index 1dea7998..c17fa2eb 100644
+index 1dea7998..d585e375 100644
 --- a/src/ground_main.c
 +++ b/src/ground_main.c
 @@ -15,6 +15,7 @@
@@ -441,11 +441,18 @@ index 1dea7998..c17fa2eb 100644
  #include "graphics_memory.h"
  #include "ground_effect.h"
  #include "ground_event.h"
-@@ -556,6 +557,31 @@ bool8 GroundMainGroundRequest(s32 r0, s32 r1, s32 r2)
+@@ -556,6 +557,38 @@ bool8 GroundMainGroundRequest(s32 r0, s32 r1, s32 r2)
      return FALSE;
  }
  
 +#ifdef PLATFORM_3DS
++// For the port's second screen: whether the ground is running a scene of the
++// intro or the title menus (start modes 13-17), not the game itself.
++bool8 Port_GroundIsDemo(void)
++{
++    return sUnknown_20398B9;
++}
++
 +// For the port's second screen: what the ground is fading out for.
 +// 1: the friend areas map (sub_8098D80) or a visit to a friend area (a ground
 +// request to one of their maps); 2: a dungeon, or the world map to pick one;
@@ -571,6 +578,65 @@ index 8a40a25c..8c094343 100644
  	str r0, [r1, o_MusicPlayerTrack_cmdPtr]
  	pop {r0}
  	bx r0
+diff --git a/src/main_loops.c b/src/main_loops.c
+index 372641a7..97c3fbad 100644
+--- a/src/main_loops.c
++++ b/src/main_loops.c
+@@ -60,6 +60,16 @@ typedef struct unkTalkTable
+ } unkTalkTable;
+ 
+ static EWRAM_DATA s32 sTitleBrightness = 0; // NDS=210FAC0
++
++#ifdef PLATFORM_3DS
++// For the port's second screen: the title menu is up, and its brightness
++// (0-32, as the menu fades in and out).
++extern bool8 gPortTitleMenu;
++s32 Port_TitleBrightness(void)
++{
++    return sTitleBrightness;
++}
++#endif
+ // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
+ 
+ static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
+@@ -166,6 +176,9 @@ void GameLoop_Async(void)
+         sub_800CDA8(2);
+         ShowWindows(NULL, TRUE, TRUE);
+         gUnknown_2026E4E = 0x1000;
++#ifdef PLATFORM_3DS
++        gPortTitleMenu = TRUE; // for the port's second screen
++#endif
+         LoadTitleScreen();
+         SetBG2RegOffsets(0, 0);
+         SetBG3RegOffsets(0, 0);
+@@ -241,6 +254,9 @@ void GameLoop_Async(void)
+         }
+ 
+         CloseFile(sTitlePaletteFile);
++#ifdef PLATFORM_3DS
++        gPortTitleMenu = FALSE;
++#endif
+ 
+         switch (nextMenu) {
+             case 2: {
+@@ -1095,7 +1111,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+ // startMode: See enum "StartModeVal"
+ static u32 xxx_script_related_8001334_Async(u32 startMode)
+ {
++#ifdef PLATFORM_3DS
++    // The port's second screen wants to know when the ground is running.
++    extern bool8 gPortGroundRunning;
++    u32 ret;
++    gPortGroundRunning = TRUE;
++    ret = xxx_script_related_8098468_Async(startMode);
++    gPortGroundRunning = FALSE;
++    return ret;
++#else
+     return xxx_script_related_8098468_Async(startMode);
++#endif
+ }
+ 
+ // arm9.bin::0200CA1C
 diff --git a/src/options_menu2.c b/src/options_menu2.c
 index 03531690..64627f53 100644
 --- a/src/options_menu2.c
