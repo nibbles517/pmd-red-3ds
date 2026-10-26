@@ -233,6 +233,25 @@ index deddec5b..db4551d5 100644
 +#endif
 +
  #endif // GUARD_GBA_SYSCALL_H
+diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
+new file mode 100644
+index 00000000..201b4fe5
+--- /dev/null
++++ b/include/port_screen_menu.h
+@@ -0,0 +1,13 @@
++#ifndef GUARD_PORT_SCREEN_MENU_H
++#define GUARD_PORT_SCREEN_MENU_H
++
++// 3DS port: Others > Screen/Layout Options (src/port_screen_menu.c).
++#include "game_options.h"
++
++extern u8 gPortLayoutSettings[2][2];
++
++void PortScreenMenu_Create(GameOptions *options);
++u32 PortScreenMenu_Update(void);
++void PortScreenMenu_Destroy(void);
++
++#endif
 diff --git a/src/code_800D090.c b/src/code_800D090.c
 index 002fa3c7..406bee8e 100644
 --- a/src/code_800D090.c
@@ -690,86 +709,143 @@ index 372641a7..97c3fbad 100644
  }
  
  // arm9.bin::0200CA1C
-diff --git a/src/options_menu2.c b/src/options_menu2.c
-index 03531690..64627f53 100644
---- a/src/options_menu2.c
-+++ b/src/options_menu2.c
-@@ -18,6 +18,19 @@ static EWRAM_INIT struct unkStruct_203B260 *sUnknown_203B260 = {NULL};
- static void CreateOptionsMenu(void);
- static void nullsub_38(void);
- 
+diff --git a/src/options_menu1.c b/src/options_menu1.c
+index 86f582c2..43573f34 100644
+--- a/src/options_menu1.c
++++ b/src/options_menu1.c
+@@ -9,6 +9,9 @@
+ #include "menu_input.h"
+ #include "options_menu1.h"
+ #include "options_menu2.h"
 +#ifdef PLATFORM_3DS
-+// 3DS port: a second entry picks the screen the game is drawn on. It is kept
-+// in the save's game options, in the bit the DS version uses for its touch
-+// screen setting (unused on the GBA): clear = bottom screen, the default, as
-+// on the DS; set = top screen.
-+#define NUM_OPTIONS_ENTRIES 2
-+ALIGNED(4) static const u8 sScreenOption[] = _("Main Screen{MOVE_X_POSITION_BY_80}Top{MOVE_X_POSITION_BY_120}Bottom");
-+ALIGNED(4) static const u8 sTop[] = _("Top");
-+ALIGNED(4) static const u8 sBottom[] = _("Bottom");
++#include "port_screen_menu.h"
++#endif
+ #include "string_format.h"
+ #include "text_1.h"
+ 
+@@ -18,7 +21,8 @@ enum
+     MENU_OPTION_HINTS,
+     MENU_OPTION_GAMEOPTIONS,
+     MENU_OPTION_YES,
+-    MENU_OPTION_NO
++    MENU_OPTION_NO,
++    MENU_OPTION_SCREEN, // 3DS port: Screen/Layout Options
+ };
+ 
+ enum OptionsMenuStates
+@@ -31,6 +35,7 @@ enum OptionsMenuStates
+     OPTIONS_MENU_DISPLAY_HINT,
+     OPTIONS_MENU_UNKNOWN_6,
+     OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
++    OPTIONS_MENU_SCREEN, // 3DS port
+ };
+ 
+ static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
+@@ -48,6 +53,13 @@ static void sub_801DED0(void);
+ static void sub_801E088(void);
+ static void sub_801E0E0(void);
+ static void sub_801E0FC(void);
++#ifdef PLATFORM_3DS
++static void HandleScreenMenu(void);
++ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Screen/Layout Options");
++#define OTHERS_MENU_WIDTH 14
 +#else
-+#define NUM_OPTIONS_ENTRIES 1
++#define OTHERS_MENU_WIDTH 10
 +#endif
-+
- bool8 sub_801E198(GameOptions *optionsMenu)
+ 
+ bool8 sub_801DCC4(void)
  {
-     sUnknown_203B260 = MemoryAlloc(sizeof(struct unkStruct_203B260), MEMALLOC_GROUP_8);
-@@ -27,10 +40,10 @@ bool8 sub_801E198(GameOptions *optionsMenu)
-     sUnknown_203B260->unk48 = &sUnknown_203B260->unk4C.id[0];
-     RestoreSavedWindows(&sUnknown_203B260->unk4C);
-     sUnknown_203B260->unk4C.id[sUnknown_203B260->unk44] = sUnknown_80DC03C;
--    sub_8012D08(sUnknown_203B260->unk48, 1);
-+    sub_8012D08(sUnknown_203B260->unk48, NUM_OPTIONS_ENTRIES);
-     ResetUnusedInputStruct();
-     ShowWindows(&sUnknown_203B260->unk4C, TRUE, TRUE);
--    CreateMenuOnWindow(&sUnknown_203B260->input, 1, 1, sUnknown_203B260->unk44);
-+    CreateMenuOnWindow(&sUnknown_203B260->input, NUM_OPTIONS_ENTRIES, NUM_OPTIONS_ENTRIES, sUnknown_203B260->unk44);
-     nullsub_38();
-     CreateOptionsMenu();
-     return TRUE;
-@@ -59,6 +72,13 @@ u32 sub_801E218(void)
-                 PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
-                 flag = TRUE;
-             }
-+#ifdef PLATFORM_3DS
-+            else if (sUnknown_203B260->input.menuIndex == 1) {
-+                sUnknown_203B260->optionsMenu->touchScreen = !sUnknown_203B260->optionsMenu->touchScreen;
-+                PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
-+                flag = TRUE;
-+            }
-+#endif
+@@ -78,6 +90,11 @@ u32 sub_801DCE8(void)
+         case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
+             HandleChangeSettingsMenu();
              break;
-         case INPUT_DPAD_RIGHT:
-             if (sUnknown_203B260->input.menuIndex == 0) {
-@@ -70,6 +90,13 @@ u32 sub_801E218(void)
-                 PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
-                 flag = TRUE;
-             }
 +#ifdef PLATFORM_3DS
-+            else if (sUnknown_203B260->input.menuIndex == 1) {
-+                sUnknown_203B260->optionsMenu->touchScreen = !sUnknown_203B260->optionsMenu->touchScreen;
-+                PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
-+                flag = TRUE;
-+            }
++        case OPTIONS_MENU_SCREEN:
++            HandleScreenMenu();
++            break;
 +#endif
+         default:
              break;
      }
+@@ -122,7 +139,7 @@ static void sub_801DD84(void)
  
-@@ -124,5 +151,14 @@ static void CreateOptionsMenu(void)
+             sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
+             sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
+-            sUnknown_203B25C->unkBC.id[0].width = 10;
++            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
              break;
-     }
+         case OPTIONS_MENU_MAIN:
+             CreateOthersMenu();
+@@ -132,7 +149,7 @@ static void sub_801DD84(void)
+ 
+             sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
+             sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
+-            sUnknown_203B25C->unkBC.id[0].width = 10;
++            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
+             break;
+         default:
+             for (i = 0; i < 4; i++)
+@@ -166,6 +183,12 @@ static void sub_801DED0(void)
+             sUnknown_203B25C->newOptions = *gGameOptionsRef;
+             sub_801E198(&sUnknown_203B25C->newOptions);
+             break;
++#ifdef PLATFORM_3DS
++        case OPTIONS_MENU_SCREEN:
++            sUnknown_203B25C->newOptions = *gGameOptionsRef;
++            PortScreenMenu_Create(&sUnknown_203B25C->newOptions);
++            break;
++#endif
+         case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
+             CreateChangeSettingsConfirmMenu();
+             CreateMenuDialogueBoxAndPortrait(sChangeSettingsPrompt, 0, 4, sUnknown_203B25C->menuItems, 0, 4, 0, 0, 32);
+@@ -183,6 +206,12 @@ static void CreateOthersMenu(void)
+     sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
+     sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
  
 +#ifdef PLATFORM_3DS
-+    y = GetMenuEntryYCoord(&sUnknown_203B260->input, 1);
-+    PrintStringOnWindow(8, y, sScreenOption, sUnknown_203B260->unk44, 0);
-+    if (sUnknown_203B260->optionsMenu->touchScreen)
-+        AddDoubleUnderScoreHighlight(sUnknown_203B260->unk44, 80, y + 10, GetStringLineWidth(sTop), COLOR_WHITE_2);
-+    else
-+        AddDoubleUnderScoreHighlight(sUnknown_203B260->unk44, 120, y + 10, GetStringLineWidth(sBottom), COLOR_WHITE_2);
++    loopMax++;
++    sUnknown_203B25C->menuItems[loopMax].text = sScreenLayoutOptions;
++    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SCREEN;
 +#endif
 +
-     sub_80073E0(sUnknown_203B260->unk44);
+     loopMax++;
+     sUnknown_203B25C->menuItems[loopMax].text = sHints;
+     sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_HINTS;
+@@ -229,6 +258,11 @@ static void HandleOthersMenu(void)
+         case MENU_OPTION_GAMEOPTIONS:
+             SetOptionsMenuState(6);
+             break;
++#ifdef PLATFORM_3DS
++        case MENU_OPTION_SCREEN:
++            SetOptionsMenuState(OPTIONS_MENU_SCREEN);
++            break;
++#endif
+         case MENU_OPTION_DEFAULT:
+             SetOptionsMenuState(OPTIONS_MENU_EXIT);
+             break;
+@@ -288,6 +322,22 @@ static void sub_801E0FC(void)
+     }
  }
+ 
++#ifdef PLATFORM_3DS
++static void HandleScreenMenu(void)
++{
++    switch (PortScreenMenu_Update()) {
++        case 2:
++        case 3:
++            PortScreenMenu_Destroy();
++            if (GameOptionsNotChange(&sUnknown_203B25C->newOptions))
++                SetOptionsMenuState(OPTIONS_MENU_MAIN);
++            else
++                SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
++            break;
++    }
++}
++#endif
++
+ static void HandleChangeSettingsMenu(void)
+ {
+     s32 menuAction;
 diff --git a/src/palette_util.c b/src/palette_util.c
 index 926d28d1..684b3d20 100644
 --- a/src/palette_util.c
@@ -790,6 +866,201 @@ index 926d28d1..684b3d20 100644
  void sub_8099744(void)
  {
      RunPaletteFadeFunctions();
+diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
+new file mode 100644
+index 00000000..633b3dbc
+--- /dev/null
++++ b/src/port_screen_menu.c
+@@ -0,0 +1,189 @@
++// 3DS port: Others > Screen/Layout Options (outside dungeons).
++//
++// Built like the game's own Game Options window (options_menu2.c):
++//   Main Screen            Top / Bottom (kept in the save's game options, in the
++//                          bit the DS version uses for its touch screen option:
++//                          clear = bottom, set = top)
++//   Main Screen Settings   a page of two toggles (placeholders for now)
++//   Sub-Screen Settings    a page of two toggles (placeholders for now)
++#include "global.h"
++#include "globaldata.h"
++#include "constants/colors.h"
++#include "constants/input.h"
++#include "music_util.h"
++#include "input.h"
++#include "menu_input.h"
++#include "port_screen_menu.h"
++#include "text_1.h"
++#include "text_2.h"
++#include "text_3.h"
++
++#ifdef PLATFORM_3DS
++
++enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN };
++
++#define TOP_ENTRIES 3
++#define PAGE_ENTRIES 2
++#define DUMMY_CHOICES 3
++
++// The placeholder settings of the two pages (not saved yet).
++u8 gPortLayoutSettings[2][PAGE_ENTRIES];
++
++static struct {
++    GameOptions *options;
++    MenuInputStruct input;
++    u32 windowId;
++    WindowTemplates windows;
++    s32 page;
++} sMenu;
++
++static const WindowTemplate sNoWindow = { 0, 3, 0, 0, 0, 0, 0, 0, NULL };
++static const WindowHeader sHeader = { 1, 0, 15, 0 };
++static const WindowTemplate sWindow = {
++    0,
++    6,
++    2, 2,
++    24, 16,
++    18, 0,
++    &sHeader
++};
++
++ALIGNED(4) static const u8 sTitleTop[] = _("Screen/Layout Options");
++ALIGNED(4) static const u8 sTitleMain[] = _("Main Screen Settings");
++ALIGNED(4) static const u8 sTitleSub[] = _("Sub-Screen Settings");
++ALIGNED(4) static const u8 sMainScreen[] = _("Main Screen{MOVE_X_POSITION_BY_80}Top{MOVE_X_POSITION_BY_120}Bottom");
++ALIGNED(4) static const u8 sTop[] = _("Top");
++ALIGNED(4) static const u8 sBottom[] = _("Bottom");
++ALIGNED(4) static const u8 sMainScreenSettings[] = _("Main Screen Settings");
++ALIGNED(4) static const u8 sSubScreenSettings[] = _("Sub-Screen Settings");
++ALIGNED(4) static const u8 sDummy1[] = _("Dummy 1{MOVE_X_POSITION_BY_80}A{MOVE_X_POSITION_BY_120}B{MOVE_X_POSITION_BY_160}C");
++ALIGNED(4) static const u8 sDummy2[] = _("Dummy 2{MOVE_X_POSITION_BY_80}A{MOVE_X_POSITION_BY_120}B{MOVE_X_POSITION_BY_160}C");
++ALIGNED(4) static const u8 sChoiceA[] = _("A");
++ALIGNED(4) static const u8 sChoiceB[] = _("B");
++ALIGNED(4) static const u8 sChoiceC[] = _("C");
++static const u8 *const sChoices[DUMMY_CHOICES] = { sChoiceA, sChoiceB, sChoiceC };
++
++static s32 EntryCount(void)
++{
++    return sMenu.page == PAGE_TOP ? TOP_ENTRIES : PAGE_ENTRIES;
++}
++
++static void Draw(void)
++{
++    u32 win = sMenu.windowId;
++    s32 i, y;
++
++    CallPrepareTextbox_8008C54(win);
++    sub_80073B8(win);
++
++    if (sMenu.page == PAGE_TOP) {
++        PrintStringOnWindow(16, 0, sTitleTop, win, 0);
++        y = GetMenuEntryYCoord(&sMenu.input, 0);
++        PrintStringOnWindow(8, y, sMainScreen, win, 0);
++        if (sMenu.options->touchScreen)
++            AddDoubleUnderScoreHighlight(win, 80, y + 10, GetStringLineWidth(sTop), COLOR_WHITE_2);
++        else
++            AddDoubleUnderScoreHighlight(win, 120, y + 10, GetStringLineWidth(sBottom), COLOR_WHITE_2);
++        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, 1), sMainScreenSettings, win, 0);
++        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, 2), sSubScreenSettings, win, 0);
++    }
++    else {
++        u8 *values = gPortLayoutSettings[sMenu.page - PAGE_MAIN_SCREEN];
++        PrintStringOnWindow(16, 0, sMenu.page == PAGE_MAIN_SCREEN ? sTitleMain : sTitleSub, win, 0);
++        for (i = 0; i < PAGE_ENTRIES; i++) {
++            y = GetMenuEntryYCoord(&sMenu.input, i);
++            PrintStringOnWindow(8, y, i == 0 ? sDummy1 : sDummy2, win, 0);
++            AddDoubleUnderScoreHighlight(win, 80 + values[i] * 40, y + 10, GetStringLineWidth(sChoices[values[i]]), COLOR_WHITE_2);
++        }
++    }
++
++    sub_80073E0(win);
++}
++
++// Shows the window for the current page, with the cursor on `entry`.
++static void ShowPage(s32 entry)
++{
++    s32 count = EntryCount();
++
++    RestoreSavedWindows(&sMenu.windows);
++    sMenu.windows.id[sMenu.windowId] = sWindow;
++    sub_8012D08(&sMenu.windows.id[sMenu.windowId], count);
++    ResetUnusedInputStruct();
++    ShowWindows(&sMenu.windows, TRUE, TRUE);
++    CreateMenuOnWindow(&sMenu.input, count, count, sMenu.windowId);
++    MoveMenuToEntryId(&sMenu.input, entry);
++    Draw();
++}
++
++void PortScreenMenu_Create(GameOptions *options)
++{
++    sMenu.options = options;
++    sMenu.windowId = 0;
++    sMenu.page = PAGE_TOP;
++    ShowPage(0);
++}
++
++// 0: still open; 1: redrawn; 2: closed with B; 3: closed with A.
++u32 PortScreenMenu_Update(void)
++{
++    bool8 changed = FALSE;
++    s32 index = sMenu.input.menuIndex;
++
++    s32 input = GetMenuInput();
++
++    switch (input) {
++        case INPUT_B_BUTTON:
++        case INPUT_A_BUTTON: {
++            bool8 accept = input == INPUT_A_BUTTON;
++            if (sMenu.page != PAGE_TOP) {
++                // back to the first page, on the entry that led here
++                PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
++                index = sMenu.page == PAGE_MAIN_SCREEN ? 1 : 2;
++                sMenu.page = PAGE_TOP;
++                ShowPage(index);
++                return 1;
++            }
++            if (accept && index != 0) {
++                PlayMenuSoundEffect(MENU_SFX_ACCEPT);
++                sMenu.page = index == 1 ? PAGE_MAIN_SCREEN : PAGE_SUB_SCREEN;
++                ShowPage(0);
++                return 1;
++            }
++            PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
++            return accept ? 3 : 2;
++        }
++        case INPUT_DPAD_LEFT:
++        case INPUT_DPAD_RIGHT: {
++            s32 step = input == INPUT_DPAD_LEFT ? -1 : 1;
++            if (sMenu.page == PAGE_TOP) {
++                if (index == 0) {
++                    sMenu.options->touchScreen = !sMenu.options->touchScreen;
++                    changed = TRUE;
++                }
++            }
++            else {
++                u8 *value = &gPortLayoutSettings[sMenu.page - PAGE_MAIN_SCREEN][index];
++                *value = (*value + DUMMY_CHOICES + step) % DUMMY_CHOICES;
++                changed = TRUE;
++            }
++            if (changed)
++                PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
++            break;
++        }
++    }
++
++    if (MenuCursorUpdate(&sMenu.input, 1) || changed) {
++        Draw();
++        return 1;
++    }
++    return 0;
++}
++
++void PortScreenMenu_Destroy(void)
++{
++    sMenu.windows.id[sMenu.windowId] = sNoWindow;
++    ResetUnusedInputStruct();
++    ShowWindows(&sMenu.windows, TRUE, TRUE);
++}
++
++#endif // PLATFORM_3DS
 diff --git a/src/reg_control.c b/src/reg_control.c
 index e6872a26..c6368b99 100644
 --- a/src/reg_control.c
