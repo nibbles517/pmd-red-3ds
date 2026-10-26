@@ -235,20 +235,21 @@ index deddec5b..db4551d5 100644
  #endif // GUARD_GBA_SYSCALL_H
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..d18c3679
+index 00000000..3678c221
 --- /dev/null
 +++ b/include/port_screen_menu.h
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,13 @@
 +#ifndef GUARD_PORT_SCREEN_MENU_H
 +#define GUARD_PORT_SCREEN_MENU_H
 +
 +// 3DS port: Others > Screen/Layout Options (src/port_screen_menu.c).
 +#include "game_options.h"
 +
-+
 +void PortScreenMenu_Create(GameOptions *options);
 +u32 PortScreenMenu_Update(void);
 +void PortScreenMenu_Destroy(void);
++bool8 PortScreenMenu_Changed(void);
++void PortScreenMenu_Finish(bool8 apply);
 +
 +#endif
 diff --git a/src/code_800D090.c b/src/code_800D090.c
@@ -709,7 +710,7 @@ index 372641a7..97c3fbad 100644
  
  // arm9.bin::0200CA1C
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..43573f34 100644
+index 86f582c2..d60eea11 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -9,6 +9,9 @@
@@ -822,7 +823,7 @@ index 86f582c2..43573f34 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -288,6 +322,22 @@ static void sub_801E0FC(void)
+@@ -288,6 +322,24 @@ static void sub_801E0FC(void)
      }
  }
  
@@ -833,8 +834,10 @@ index 86f582c2..43573f34 100644
 +        case 2:
 +        case 3:
 +            PortScreenMenu_Destroy();
-+            if (GameOptionsNotChange(&sUnknown_203B25C->newOptions))
++            if (GameOptionsNotChange(&sUnknown_203B25C->newOptions) && !PortScreenMenu_Changed()) {
++                PortScreenMenu_Finish(FALSE);
 +                SetOptionsMenuState(OPTIONS_MENU_MAIN);
++            }
 +            else
 +                SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
 +            break;
@@ -845,6 +848,25 @@ index 86f582c2..43573f34 100644
  static void HandleChangeSettingsMenu(void)
  {
      s32 menuAction;
+@@ -299,12 +351,18 @@ static void HandleChangeSettingsMenu(void)
+         case MENU_OPTION_YES:
+             // Save our option changes??
+             *gGameOptionsRef = sUnknown_203B25C->newOptions;
++#ifdef PLATFORM_3DS
++            PortScreenMenu_Finish(TRUE);
++#endif
+             SetWindowBGColor();
+             sub_8099690(0);
+             SetOptionsMenuState(OPTIONS_MENU_MAIN);
+             break;
+         case MENU_OPTION_DEFAULT:
+         case MENU_OPTION_NO:
++#ifdef PLATFORM_3DS
++            PortScreenMenu_Finish(FALSE);
++#endif
+             SetOptionsMenuState(OPTIONS_MENU_MAIN);
+             break;
+     }
 diff --git a/src/palette_util.c b/src/palette_util.c
 index 926d28d1..684b3d20 100644
 --- a/src/palette_util.c
@@ -867,10 +889,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..1a7a2076
+index 00000000..53a1c2c8
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,233 @@
+@@ -0,0 +1,254 @@
 +// 3DS port: Others > Screen/Layout Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -881,8 +903,10 @@ index 00000000..1a7a2076
 +//                          Scale (None/Full/Stretch), placeholders for now
 +//   Sub-Screen Settings    Enabled? (Yes/No: turns the second screen on/off),
 +//                          then the same Size and Scale placeholders
-+// The page settings live in the port's own config file (gPortConfig), saved
-+// when the menu closes.
++// The page settings live in the port's own config file (gPortConfig). Like the
++// game's options, they are changed on a copy, and only take effect (and are
++// saved) once "Change settings?" is answered Yes.
++#include <string.h>
 +#include "global.h"
 +#include "globaldata.h"
 +#include "constants/colors.h"
@@ -911,6 +935,8 @@ index 00000000..1a7a2076
 +    u32 windowId;
 +    WindowTemplates windows;
 +    s32 page;
++    struct PortConfig config; // the settings being changed
++    bool8 pending;
 +} sMenu;
 +
 +static const WindowTemplate sNoWindow = { 0, 3, 0, 0, 0, 0, 0, 0, NULL };
@@ -973,8 +999,8 @@ index 00000000..1a7a2076
 +{
 +    s32 screen = sMenu.page == PAGE_MAIN_SCREEN ? 0 : 1;
 +    if (setting == SETTING_ENABLED)
-+        return &gPortConfig.subScreenDisabled;
-+    return &gPortConfig.layout[screen][setting - SETTING_SIZE];
++        return &sMenu.config.subScreenDisabled;
++    return &sMenu.config.layout[screen][setting - SETTING_SIZE];
 +}
 +
 +static void Draw(void)
@@ -1034,7 +1060,25 @@ index 00000000..1a7a2076
 +    sMenu.options = options;
 +    sMenu.windowId = 0;
 +    sMenu.page = PAGE_TOP;
++    sMenu.config = gPortConfig;
++    sMenu.pending = TRUE;
 +    ShowPage(0);
++}
++
++bool8 PortScreenMenu_Changed(void)
++{
++    return sMenu.pending && memcmp(&sMenu.config, &gPortConfig, sizeof(gPortConfig)) != 0;
++}
++
++// After "Change settings?" (or when nothing changed): applies and saves the
++// port settings if `apply`, else drops them.
++void PortScreenMenu_Finish(bool8 apply)
++{
++    if (sMenu.pending && apply && PortScreenMenu_Changed()) {
++        gPortConfig = sMenu.config;
++        Port_SaveConfig();
++    }
++    sMenu.pending = FALSE;
 +}
 +
 +// 0: still open; 1: redrawn; 2: closed with B; 3: closed with A.
@@ -1064,7 +1108,6 @@ index 00000000..1a7a2076
 +                return 1;
 +            }
 +            PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
-+            Port_SaveConfig();
 +            return accept ? 3 : 2;
 +        }
 +        case INPUT_DPAD_LEFT:
