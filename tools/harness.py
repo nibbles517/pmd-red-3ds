@@ -46,6 +46,17 @@ def load_elf(uc, path):
     uc.mem_map(lo, hi - lo, UC_PROT_ALL)
     for off, vaddr, filesz, memsz in segs:
         uc.mem_write(vaddr, data[off:off + filesz])
+    # Like the 3DS, only the code segment is executable: from the first
+    # non-executable segment's page to the end (data, bss, heap, stack) is RW.
+    ro_start = None
+    for i in range(e_phnum):
+        p_type, _, p_vaddr, _, _, p_memsz, p_flags = struct.unpack_from('<7I', data, e_phoff + i * e_phentsize)
+        if p_type == 1 and p_memsz and not (p_flags & 1):
+            start = p_vaddr & ~0xFFF
+            ro_start = start if ro_start is None else min(ro_start, start)
+    if ro_start is not None:
+        from unicorn import UC_PROT_READ, UC_PROT_WRITE
+        uc.mem_protect(ro_start, hi - ro_start, UC_PROT_READ | UC_PROT_WRITE)
     return e_entry
 
 

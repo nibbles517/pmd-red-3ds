@@ -13,6 +13,9 @@ SECTIONS
     .rodata : ALIGN(4) { *(.rodata .rodata.*) }
     .ARM.exidx : { *(.ARM.exidx*) }
 
+    /* Data starts on a fresh page so the harness can map it non-executable,
+     * as the 3DS does (catches code that runs from RAM). */
+    . = ALIGN(0x1000);
     .data : ALIGN(4) {
         *(.data .data.*)
         INCLUDE game_init_sections.ld

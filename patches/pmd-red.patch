@@ -425,3 +425,82 @@ index e6872a26..c6368b99 100644
      SoundBiasSet();
  
      REG_IME = 0;
+diff --git a/src/text_4.c b/src/text_4.c
+index f20880c5..b44ac671 100644
+--- a/src/text_4.c
++++ b/src/text_4.c
+@@ -3,6 +3,14 @@
+ #include "text_1.h"
+ #include "text_4.h"
+ 
++// On the GBA these functions are copied to IWRAM for speed. The 3DS cannot
++// execute code from data memory, so the port keeps them as ordinary code.
++#ifdef PLATFORM_3DS
++#define IWRAM_CODE
++#else
++#define IWRAM_CODE IWRAM_INIT
++#endif
++
+ // These functions run from IWRAM for improved performance.
+ 
+ static void ScrollDownWindowInternal(Window *txtStructs, s32 id);
+@@ -10,12 +18,12 @@ static void ScrollUpWindowInternal(Window *txtStructs, s32 id);
+ static void sub_82729B8(Window *txtStructs, s32 id);
+ static void sub_8272A8C(Window *txtStructs, s32 id);
+ 
+-IWRAM_INIT void ScrollDownWindow(s32 windowId)
++IWRAM_CODE void ScrollDownWindow(s32 windowId)
+ {
+     ScrollDownWindowInternal(gWindows, windowId);
+ }
+ 
+-IWRAM_INIT static void ScrollDownWindowInternal(Window *windows, s32 windowId)
++IWRAM_CODE static void ScrollDownWindowInternal(Window *windows, s32 windowId)
+ {
+     Window *window = &windows[windowId];
+ 
+@@ -73,12 +81,12 @@ IWRAM_INIT static void ScrollDownWindowInternal(Window *windows, s32 windowId)
+     }
+ }
+ 
+-IWRAM_INIT void ScrollUpWindow(s32 windowId)
++IWRAM_CODE void ScrollUpWindow(s32 windowId)
+ {
+     ScrollUpWindowInternal(gWindows, windowId);
+ }
+ 
+-IWRAM_INIT static void ScrollUpWindowInternal(Window *windows, s32 windowId)
++IWRAM_CODE static void ScrollUpWindowInternal(Window *windows, s32 windowId)
+ {
+     Window *window = &windows[windowId];
+ 
+@@ -155,12 +163,12 @@ IWRAM_INIT static void ScrollUpWindowInternal(Window *windows, s32 windowId)
+     }
+ }
+ 
+-IWRAM_INIT void sub_82729A4(s32 id)
++IWRAM_CODE void sub_82729A4(s32 id)
+ {
+     sub_82729B8(gWindows, id);
+ }
+ 
+-IWRAM_INIT static void sub_82729B8(Window *windows, s32 id)
++IWRAM_CODE static void sub_82729B8(Window *windows, s32 id)
+ {
+     s32 i, j;
+     Window *window = &windows[id];
+@@ -209,12 +217,12 @@ IWRAM_INIT static void sub_82729B8(Window *windows, s32 id)
+     window->unk44 = TRUE;
+ }
+ 
+-IWRAM_INIT void sub_8272A78(s32 id)
++IWRAM_CODE void sub_8272A78(s32 id)
+ {
+     sub_8272A8C(gWindows, id);
+ }
+ 
+-IWRAM_INIT static void sub_8272A8C(Window *windows, s32 id)
++IWRAM_CODE static void sub_8272A8C(Window *windows, s32 id)
+ {
+     s32 i, j;
+     Window *window = &windows[id];

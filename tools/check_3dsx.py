@@ -66,7 +66,20 @@ def main():
                                   f'{where:#010x} ({name(where)}) stored {v:#010x}')
                     pos += 1
     print(f'{bad} relocations a loader would reject' if bad else 'relocations OK')
-    return 1 if bad else 0
+
+    # The 3DS only executes the code segment: a function placed anywhere else
+    # (GBA "code in RAM" tricks) faults when called.
+    misplaced = 0
+    if len(sys.argv) > 2:
+        code_end = BASE + segs[0]
+        out = subprocess.check_output(['arm-none-eabi-readelf', '-sW', sys.argv[2]], text=True)
+        for l in out.splitlines():
+            p = l.split()
+            if len(p) >= 8 and p[3] == 'FUNC' and p[6] != 'UND' and int(p[1], 16) >= code_end:
+                misplaced += 1
+                print(f'FUNCTION OUTSIDE CODE: {p[7]} at {int(p[1], 16):#x}')
+        print(f'{misplaced} functions outside the code segment' if misplaced else 'all functions in the code segment')
+    return 1 if bad or misplaced else 0
 
 
 if __name__ == '__main__':
