@@ -988,7 +988,7 @@ index 4a9a72ad..05f95b09 100644
      gDungeon->unk181e8.unk1821A = 0;
  }
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..673873b6 100644
+index 0680f301..4a20304a 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,11 @@
@@ -1059,7 +1059,7 @@ index 0680f301..673873b6 100644
 +        { sTextBorderColor, 2, 80, 40, { sTextBlue, sTextPink } },
 +    },
 +    [PAGE_LAYOUT] = {
-+        { sTextSubScreen, 4, 96, 24, { sTextBlue, sTextSky, sTextLog, sTextMT }, (1 << 1) | (1 << 2) }, // Sky, Log
++        { sTextSubScreen, 4, 96, 24, { sTextBlue, sTextSky, sTextLog, sTextMT }, (1 << 1) }, // Sky
 +        { sTextMainScreenMap, MAP_OPTION_SHADE + 1, 96, 32, { sTextOff, sTextClear, sTextShade } }, // the game's Map option
 +        { sTextAdditionalInfo, 2, 96, 40, { sTextOn, sTextOff }, 3 },
 +    },

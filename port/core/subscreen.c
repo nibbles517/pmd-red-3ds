@@ -1009,6 +1009,111 @@ static void DrawMapAndTeam(void)
 }
 
 
+// --- Message log (Layout Options > Sub-Screen: Log) ---------------------------------
+
+// The dungeon's message log (Others > Message Log), always shown, as the DS
+// version's "Log" screen: the latest lines over the M+T grid, in a window,
+// with the game's colours and its double line over the first line of each
+// message.
+
+#define LOG_WIN_X 16
+#define LOG_WIN_Y 16
+#define LOG_WIN_W 26 // inside, in tiles
+#define LOG_WIN_H 18
+#define LOG_LINES 11
+#define LOG_LINE_H 13
+
+// The game's text colour codes (InterpretColorChar, text_3.c).
+static int ColorIndex(u8 c)
+{
+    if (c < 16)
+        return c;
+    if (c >= '0' && c <= '?')
+        return c - '0';
+    switch (c) {
+        case 'H': case 'I': return 4;
+        case 'E': case 'S': case 'T': return 15;
+        case 'G': case 'M': return 5;
+        case 'C': case 'D': case 'N': return 6;
+        case 'W': return 2;
+    }
+    return 7;
+}
+
+static u16 TextColor(int index)
+{
+    switch (index) {
+        case 2: return Rgb(248, 96, 64);    // red
+        case 4: return Rgb(80, 232, 80);    // green
+        case 5: return Rgb(80, 216, 248);   // cyan
+        case 6: return COLOR_NAME;          // yellow
+        case 3: return Rgb(16, 16, 16);     // black
+        case 1: return Rgb(96, 136, 248);   // blue
+        default: return COLOR_TEXT;
+    }
+}
+
+// One line of the log, with its colour codes, as DrawStringInternal does.
+static void DrawLogText(int x0, int y, const u8 *str)
+{
+    int x = x0, color = 7, saved = 7, saved2 = 7;
+    while (TRUE) {
+        u32 chr;
+        const u8 *next;
+        if (str[0] == '#') {
+            switch (str[1]) {
+                case 'C': saved = color; color = ColorIndex(str[2]); str += 3; continue;
+                case 'c': saved2 = color; color = ColorIndex(str[2]); str += 3; continue;
+                case 'R': color = saved; str += 2; continue;
+                case 'r': color = saved2; str += 2; continue;
+                case '=': x = x0 + str[2]; str += 3; if (*str == '.') str++; continue;
+                case '_': saved = color; str += 3; if (*str == '.') str++; continue;
+                case '[':
+                    str += 2;
+                    while (*str != '\0' && *str++ != ']') ;
+                    continue;
+                case '~': str += 3; continue;
+                case 'W': case 'P': case 'p': str += 2; continue;
+            }
+        }
+        next = GetNextCharFromStr(str, &chr);
+        if (chr == '\0' || chr == '\n' || chr == '\r')
+            break;
+        str = next;
+        if (chr == '`') { x += 6; continue; }
+        DrawGlyph(x, y, chr, TextColor(color));
+        x += GlyphWidth(chr);
+    }
+}
+
+static void DrawMessageLog(void)
+{
+    const struct MessageLogString *lines[LOG_LINES];
+    int count = 0, id = gDungeon->unk16;
+
+    // the latest lines, newest last
+    for (int i = 0; i < MESSAGE_LOG_STRINGS_COUNT && count < LOG_LINES; i++) {
+        if (--id < 0)
+            id += MESSAGE_LOG_STRINGS_COUNT;
+        if (gDungeon->messageLogStrings[id].unk0)
+            lines[count++] = &gDungeon->messageLogStrings[id];
+    }
+
+    DrawGrid();
+    LoadWindowPalette();
+    DrawGameWindow(LOG_WIN_X, LOG_WIN_Y, LOG_WIN_W, LOG_WIN_H);
+    for (int i = 0; i < count; i++) {
+        const struct MessageLogString *line = lines[count - 1 - i];
+        int y = LOG_WIN_Y + 11 + i * LOG_LINE_H;
+        if (line->unk1) { // a new message: the game's double underline
+            for (int r = 0; r < 4; r++) // (kept inside the window)
+                if (y - 5 + r >= LOG_WIN_Y + 8)
+                    Fill(LOG_WIN_X + 8, y - 5 + r, LOG_WIN_W * 8 + 1, 1, r & 1 ? Rgb(0, 0, 0) : COLOR_TEXT);
+        }
+        DrawLogText(LOG_WIN_X + 16, y, line->str);
+    }
+}
+
 #define TEAM_BASE_X 0x163 // LOCATION_TEAM_BASE on the friend areas map
 #define TEAM_BASE_Y 0xA1
 #define MARKER_YELLOW_DOT 1 // wmapspr animation
@@ -1263,6 +1368,8 @@ bool Port_RenderSubScreen(u16 *out)
     if (gDungeon != NULL) {
         if (gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_MT)
             DrawMapAndTeam();
+        else if (gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_LOG)
+            DrawMessageLog();
         else
             DrawTeamPanel();
     } else {
