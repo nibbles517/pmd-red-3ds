@@ -38,7 +38,7 @@ struct PortConfig
     u8 dungeonBgColor;      // WINDOW_COLOR_*
     u8 dungeonShading;      // 0 Solid, 1 Translucent
     u8 dungeonBorder;       // 0 Blue, 1 Pink
-    // ... > Layout Options (placeholders for now)
+    // ... > Layout Options
     u8 layoutSubScreen;     // 0 Blue, 1 Sky, 2 Log, 3 M+T
     u8 layoutInfo;          // Additional Info: 0 Off, 1 On
 };
@@ -51,6 +51,7 @@ bool8 Port_SolidDungeonWindows(void);
 void Port_GetDungeonWindows(u8 *bgColor, u8 *shading, u8 *border);
 extern struct PortConfig gPortConfig;
 enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_3DS };
+enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_LAYOUT_MT };
 // Main Screen Settings > Size is DS: the 256x192 picture and the wide view
 // (port_view.h). Everything for it is off in the other sizes.
 #define PORT_DS_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS)

@@ -607,6 +607,7 @@ static void DrawTeamPanel(void)
     }
 }
 
+
 // --- World map ----------------------------------------------------------------------
 
 // The world map's graphics, as the game's world map scene loads them.
@@ -878,6 +879,133 @@ static void DrawNameBox(const u8 *name)
     DrawText(px + 8 + (w * 8 - TextWidth(name)) / 2, py + 8 + 2, name, COLOR_TEXT);
 }
 
+// --- Map and team (Layout Options > Sub-Screen: M+T) -------------------------------
+
+// The dungeon map, as the main screen shows it but always opaque (worked out
+// by dungeon_map.c into gPortSubMap), over a grid, and below it a window with
+// each member's name, level and HP, as the DS version's "M+T" screen.
+
+extern u8 gPortSubMap[DUNGEON_MAX_SIZE_Y][DUNGEON_MAX_SIZE_X];
+const u32 *Port_MinimapGfx(s32 type, s32 quadrant);
+const RGB_Struct *Port_MinimapPalette(void);
+bool8 Port_MinimapLeaderDot(DungeonPos *pos);
+
+#define SUBMAP_FIRST_ROW 2 // the rows the game's map shows (DrawMinimapTile)
+#define SUBMAP_ROWS (DUNGEON_MAX_SIZE_Y - 1 - SUBMAP_FIRST_ROW)
+#define SUBMAP_X ((W - DUNGEON_MAX_SIZE_X * 4) / 2)
+#define SUBMAP_Y 6
+#define MAP_GFX_PLAYER 8
+
+static int sDotFrames;
+
+static void DrawGrid(void)
+{
+    u16 back = Rgb(40, 32, 80), line = Rgb(56, 48, 112);
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+            sOut[y * W + x] = ((x & 7) == 0 || (y & 7) == 0) ? line : back;
+}
+
+static void MinimapPalette(u16 *pal)
+{
+    const RGB_Struct *p = Port_MinimapPalette();
+    for (int i = 0; i < 16; i++) {
+        const RGB_Struct *c = i == 14 ? &gFontPalette[1] : &p[i];
+        pal[i] = Rgb(c->r, c->g, c->b);
+    }
+}
+
+// Draws the pixels of one 8x8 map tile (two by two dungeon tiles).
+static void DrawMapBlock(const u32 *tile, int px, int py, const u16 *pal)
+{
+    for (int y = 0; y < 8; y++) {
+        u32 row = tile[y];
+        for (int x = 0; x < 8; x++) {
+            int c = (row >> (x * 4)) & 0xF;
+            if (c)
+                Plot(px + x, py + y, pal[c]);
+        }
+    }
+}
+
+static void DrawSubMap(void)
+{
+    u16 pal[16];
+    u32 tile[8];
+    DungeonPos dot;
+
+    if (Port_MinimapPalette() == NULL)
+        return;
+    MinimapPalette(pal);
+
+    // As DrawMinimapTile builds them: each dungeon tile sets one quarter of a
+    // map tile, through a mask and its pixels.
+    for (int by = 0; by < (SUBMAP_ROWS + 1) / 2; by++) {
+        for (int bx = 0; bx < DUNGEON_MAX_SIZE_X / 2; bx++) {
+            memset(tile, 0, sizeof(tile));
+            for (int q = 0; q < 4; q++) {
+                int x = bx * 2 + (q & 1), yy = by * 2 + (q >> 1), y = yy + SUBMAP_FIRST_ROW;
+                const u32 *src;
+                if (yy >= SUBMAP_ROWS)
+                    continue;
+                src = Port_MinimapGfx(gPortSubMap[y][x], q);
+                if (src == NULL)
+                    continue;
+                for (int i = 0; i < 8; i++)
+                    tile[i] = (tile[i] & src[i * 2]) | src[i * 2 + 1];
+            }
+            DrawMapBlock(tile, SUBMAP_X + bx * 8, SUBMAP_Y + by * 8, pal);
+        }
+    }
+
+    // The leader's dot, blinking as on the main screen (FlashLeaderIcon).
+    if ((++sDotFrames & 8) == 0 && Port_MinimapLeaderDot(&dot)
+        && dot.y >= SUBMAP_FIRST_ROW && dot.y < SUBMAP_FIRST_ROW + SUBMAP_ROWS) {
+        int yy = dot.y - SUBMAP_FIRST_ROW, q = (dot.x & 1) + (yy & 1) * 2;
+        const u32 *src = Port_MinimapGfx(MAP_GFX_PLAYER, q);
+        if (src != NULL) {
+            for (int i = 0; i < 8; i++)
+                tile[i] = src[i * 2 + 1];
+            DrawMapBlock(tile, SUBMAP_X + (dot.x & ~1) * 4, SUBMAP_Y + (yy & ~1) * 4, pal);
+        }
+    }
+}
+
+#define TEAM_WIN_X 16
+#define TEAM_WIN_W 26 // inside, in tiles
+#define TEAM_WIN_H 6
+#define TEAM_WIN_Y (H - (TEAM_WIN_H + 2) * 8)
+
+static void DrawMapAndTeam(void)
+{
+    u8 buf[12];
+    int x, y;
+
+    if (!sInDungeon) {
+        memset(sRows, 0, sizeof(sRows));
+        sInDungeon = TRUE;
+    }
+    UpdateRows();
+    DrawGrid();
+    DrawSubMap();
+    LoadWindowPalette();
+    DrawGameWindow(TEAM_WIN_X, TEAM_WIN_Y, TEAM_WIN_W, TEAM_WIN_H);
+    y = TEAM_WIN_Y + 8 + 1;
+    for (int i = 0; i < MAX_TEAM_MEMBERS; i++, y += 12) {
+        const PanelRow *row = &sRows[i];
+        if (!row->used)
+            continue;
+        DrawText(TEAM_WIN_X + 12, y, row->name, COLOR_NAME);
+        x = DrawText(TEAM_WIN_X + 100, y, sLevel, COLOR_TEXT);
+        FormatInt(buf, row->level);
+        DrawText(x, y, buf, COLOR_TEXT);
+        DrawNumberRight(TEAM_WIN_X + 188, y, row->hp);
+        DrawText(TEAM_WIN_X + 188, y, sSlash, COLOR_TEXT);
+        DrawNumberRight(TEAM_WIN_X + 212, y, row->maxHp);
+    }
+}
+
+
 #define TEAM_BASE_X 0x163 // LOCATION_TEAM_BASE on the friend areas map
 #define TEAM_BASE_Y 0xA1
 #define MARKER_YELLOW_DOT 1 // wmapspr animation
@@ -1130,7 +1258,10 @@ bool Port_RenderSubScreen(u16 *out)
         return TRUE;
     }
     if (gDungeon != NULL) {
-        DrawTeamPanel();
+        if (gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_MT)
+            DrawMapAndTeam();
+        else
+            DrawTeamPanel();
     } else {
         if (!DrawWorldMap())
             return FALSE;
