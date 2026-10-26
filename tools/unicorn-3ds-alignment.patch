@@ -1,0 +1,115 @@
+--- qemu/target/arm/translate.c	2026-10-25 20:21:59.937140880 -0500
++++ qemu/target/arm/translate.c	2026-10-25 20:21:59.959760727 -0500
+@@ -9032,13 +9032,13 @@
+     addr = op_addr_rr_pre(s, a);
+ 
+     tmp = tcg_temp_new_i32(tcg_ctx);
+-    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     store_reg(s, a->rt, tmp);
+ 
+     tcg_gen_addi_i32(tcg_ctx, addr, addr, 4);
+ 
+     tmp = tcg_temp_new_i32(tcg_ctx);
+-    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     store_reg(s, a->rt + 1, tmp);
+ 
+     /* LDRD w/ base writeback is undefined if the registers overlap.  */
+@@ -9062,13 +9062,13 @@
+     addr = op_addr_rr_pre(s, a);
+ 
+     tmp = load_reg(s, a->rt);
+-    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     tcg_temp_free_i32(tcg_ctx, tmp);
+ 
+     tcg_gen_addi_i32(tcg_ctx, addr, addr, 4);
+ 
+     tmp = load_reg(s, a->rt + 1);
+-    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     tcg_temp_free_i32(tcg_ctx, tmp);
+ 
+     op_addr_rr_post(s, a, addr, -4);
+@@ -9175,13 +9175,13 @@
+     addr = op_addr_ri_pre(s, a);
+ 
+     tmp = tcg_temp_new_i32(tcg_ctx);
+-    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     store_reg(s, a->rt, tmp);
+ 
+     tcg_gen_addi_i32(tcg_ctx, addr, addr, 4);
+ 
+     tmp = tcg_temp_new_i32(tcg_ctx);
+-    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     store_reg(s, rt2, tmp);
+ 
+     /* LDRD w/ base writeback is undefined if the registers overlap.  */
+@@ -9215,13 +9215,13 @@
+     addr = op_addr_ri_pre(s, a);
+ 
+     tmp = load_reg(s, a->rt);
+-    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     tcg_temp_free_i32(tcg_ctx, tmp);
+ 
+     tcg_gen_addi_i32(tcg_ctx, addr, addr, 4);
+ 
+     tmp = load_reg(s, rt2);
+-    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | s->be_data);
++    gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data);
+     tcg_temp_free_i32(tcg_ctx, tmp);
+ 
+     op_addr_ri_post(s, a, addr, -4);
+@@ -10379,7 +10379,7 @@
+         } else {
+             tmp = load_reg(s, i);
+         }
+-        gen_aa32_st32(s, tmp, addr, mem_idx);
++        gen_aa32_st_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data); /* pmd-red-3ds: 3DS faults on misaligned STM */
+         tcg_temp_free_i32(tcg_ctx, tmp);
+ 
+         /* No need to add after the last transfer.  */
+@@ -10455,7 +10455,7 @@
+         }
+ 
+         tmp = tcg_temp_new_i32(tcg_ctx);
+-        gen_aa32_ld32u(s, tmp, addr, mem_idx);
++        gen_aa32_ld_i32(s, tmp, addr, mem_idx, MO_UL | MO_ALIGN | s->be_data); /* pmd-red-3ds */
+         if (user) {
+             tmp2 = tcg_const_i32(tcg_ctx, i);
+             gen_helper_set_user_reg(tcg_ctx, tcg_ctx->cpu_env, tmp2, tmp);
+--- qemu/target/arm/translate-vfp.inc.c	2026-10-25 20:21:59.938993078 -0500
++++ qemu/target/arm/translate-vfp.inc.c	2026-10-25 20:24:26.516524145 -0500
+@@ -930,11 +930,11 @@
+     addr = add_reg_for_lit(s, a->rn, offset);
+     tmp = tcg_temp_new_i32(tcg_ctx);
+     if (a->l) {
+-        gen_aa32_ld32u(s, tmp, addr, get_mem_index(s));
++        gen_aa32_ld_i32(s, tmp, addr, get_mem_index(s), MO_UL | MO_ALIGN | s->be_data);
+         neon_store_reg32(tcg_ctx, tmp, a->vd);
+     } else {
+         neon_load_reg32(tcg_ctx, tmp, a->vd);
+-        gen_aa32_st32(s, tmp, addr, get_mem_index(s));
++        gen_aa32_st_i32(s, tmp, addr, get_mem_index(s), MO_UL | MO_ALIGN | s->be_data);
+     }
+     tcg_temp_free_i32(tcg_ctx, tmp);
+     tcg_temp_free_i32(tcg_ctx, addr);
+@@ -1041,12 +1041,12 @@
+     for (i = 0; i < n; i++) {
+         if (a->l) {
+             /* load */
+-            gen_aa32_ld32u(s, tmp, addr, get_mem_index(s));
++            gen_aa32_ld_i32(s, tmp, addr, get_mem_index(s), MO_UL | MO_ALIGN | s->be_data);
+             neon_store_reg32(tcg_ctx, tmp, a->vd + i);
+         } else {
+             /* store */
+             neon_load_reg32(tcg_ctx, tmp, a->vd + i);
+-            gen_aa32_st32(s, tmp, addr, get_mem_index(s));
++            gen_aa32_st_i32(s, tmp, addr, get_mem_index(s), MO_UL | MO_ALIGN | s->be_data);
+         }
+         tcg_gen_addi_i32(tcg_ctx, addr, addr, offset);
+     }
