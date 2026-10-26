@@ -1,3 +1,41 @@
+diff --git a/data/titlemenu_sbin.s b/data/titlemenu_sbin.s
+index dabe4fc6..f4554b1d 100644
+--- a/data/titlemenu_sbin.s
++++ b/data/titlemenu_sbin.s
+@@ -117,7 +117,15 @@ gUnknown_8392B48:
+ .4byte gUnknown_83927D8
+ .4byte gUnknown_8392828
+ .4byte gUnknown_8392878
+-.incbin "baserom.gba", 0x392B68, 0x20
++@ Pointers (were raw ROM bytes, which only work at the original addresses)
++.4byte gUnknown_8392878+0x50
++.4byte gUnknown_8392878+0xa0
++.4byte gUnknown_8392878+0xf0
++.4byte gUnknown_8392878+0x140
++.4byte gUnknown_8392878+0x190
++.4byte gUnknown_8392878+0x1e0
++.4byte gUnknown_8392878+0x230
++.4byte gUnknown_8392878+0x280
+ .global gUnknown_8392B88
+ gUnknown_8392B88:
+ .incbin "baserom.gba", 0x392B88, 0x5F0C
+@@ -437,7 +445,15 @@ gUnknown_839B7D4:
+ .4byte gUnknown_839B648
+ .4byte gUnknown_839B66C
+ .4byte gUnknown_839B690
+-.incbin "baserom.gba", 0x39B7F4, 0x20
++@ Pointers (were raw ROM bytes, which only work at the original addresses)
++.4byte gUnknown_839B690+0x24
++.4byte gUnknown_839B690+0x48
++.4byte gUnknown_839B690+0x6c
++.4byte gUnknown_839B690+0x90
++.4byte gUnknown_839B690+0xb4
++.4byte gUnknown_839B690+0xd8
++.4byte gUnknown_839B690+0xfc
++.4byte gUnknown_839B690+0x120
+ .global gUnknown_839B814
+ gUnknown_839B814:
+ .incbin "baserom.gba", 0x39B814, 0x5D58
 diff --git a/include/asm/constants/gba_constants.inc b/include/asm/constants/gba_constants.inc
 index 9d59c8fc..10cdcf67 100644
 --- a/include/asm/constants/gba_constants.inc
@@ -392,19 +430,43 @@ index c2e99136..e9c5336a 100644
  
  static s32 ChooseLocation_Async(s32 *newLocationId, s32 *newDirection)
 diff --git a/src/ground_main.c b/src/ground_main.c
-index 1dea7998..013bb40b 100644
+index 1dea7998..c17fa2eb 100644
 --- a/src/ground_main.c
 +++ b/src/ground_main.c
-@@ -556,6 +556,15 @@ bool8 GroundMainGroundRequest(s32 r0, s32 r1, s32 r2)
+@@ -15,6 +15,7 @@
+ #include "decompress_sir.h"
+ #include "debug.h"
+ #include "event_flag.h"
++#include "constants/friend_area.h"
+ #include "graphics_memory.h"
+ #include "ground_effect.h"
+ #include "ground_event.h"
+@@ -556,6 +557,31 @@ bool8 GroundMainGroundRequest(s32 r0, s32 r1, s32 r2)
      return FALSE;
  }
  
 +#ifdef PLATFORM_3DS
-+// For the port's second screen: whether the ground is fading out to the
-+// friend areas map (requested by sub_8098D80).
-+bool8 Port_GroundFriendAreasRequested(void)
++// For the port's second screen: what the ground is fading out for.
++// 1: the friend areas map (sub_8098D80) or a visit to a friend area (a ground
++// request to one of their maps); 2: a dungeon, or the world map to pick one;
++// 0: anything else.
++s32 Port_GroundExitRequest(void)
 +{
-+    return sUnknown_20398A8 == Unk_20398A8_UNK3;
++    switch (sUnknown_20398A8) {
++        case Unk_20398A8_UNK1:
++            if (sUnknown_20398AC == 1 && MapIdToFriendAreaId(sUnknown_20398BE) != FRIEND_AREA_NONE)
++                return 1;
++            return 0;
++        case Unk_20398A8_UNK3:
++            return 1;
++        case Unk_20398A8_UNK4: // the world map, to pick a dungeon (sub_8098DCC)
++        case Unk_20398A8_UNK5:
++        case Unk_20398A8_UNK6:
++        case Unk_20398A8_UNK7:
++        case Unk_20398A8_UNK8:
++            return 2;
++    }
++    return 0;
 +}
 +#endif
 +

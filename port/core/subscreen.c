@@ -26,6 +26,7 @@
 #include "ground_place.h"
 #include "string_format.h"
 #include "dungeon_util.h"
+#include "dungeon_vram.h"
 #include "items.h"
 #include "pokemon.h"
 #include "strings.h"
@@ -39,7 +40,7 @@
 extern Dungeon *gDungeon;
 extern const DungeonPos gDungeonCoordinates[64]; // world_map.c
 extern struct FriendAreasMap *gFriendAreasMapPtr; // friend_areas_map.c (NULL when not showing)
-bool8 Port_GroundFriendAreasRequested(void);     // ground_main.c
+s32 Port_GroundExitRequest(void);                 // ground_main.c
 u16 Port_GroundBrightness(void);                  // palette_util.c
 bool8 Port_FriendAreaMapPos(u8 areaId, DungeonPos *pos); // friend_areas_map.c
 
@@ -885,50 +886,101 @@ static bool8 DrawWorldMap(void)
     return TRUE;
 }
 
-// --- Friend areas map ------------------------------------------------------------
+// --- Transitions -----------------------------------------------------------------
 //
-// While the friend areas map is up, the second screen is black: it fades out
-// along with the town when the map is asked for, and back in along with the
-// town afterwards.
+// The second screen goes black with the main screen around some changes of
+// scene, and comes back with the new one:
+// - the friend areas map, and visiting a friend area: fades out and in with
+//   the town, black while the map is up;
+// - entering a dungeon: fades out with the town, black on the world map and
+//   the dungeon's name banner, fades in with the first floor;
+// - closing the dungeon results window: cuts to black with the main screen,
+//   fades in with the town.
 
-enum { FA_NONE, FA_FADING_OUT, FA_MAP, FA_FADING_IN };
-static int sFriendAreasPhase;
+enum {
+    TR_NONE,
+    TR_TOWN_OUT,   // the town is fading out (friend areas)
+    TR_FRIEND_MAP, // the friend areas map is up
+    TR_DUNGEON,    // on the way into a dungeon
+    TR_CUT,        // the results window was closed; still in the dungeon
+    TR_TOWN_IN,    // following the town's fade in
+};
+static int sTransition;
+
+void Port_SubScreenCutToBlack(void)
+{
+    sTransition = TR_CUT;
+}
+
+static int GroundLevel(void) { return Port_GroundBrightness(); } // 0-0x100
 
 // The brightness (0-0x100) to show the second screen at, or -1 for normal.
-static int FriendAreasBrightness(void)
+static int TransitionBrightness(void)
 {
-    bool8 mapUp = gFriendAreasMapPtr != NULL;
-    switch (sFriendAreasPhase) {
-        case FA_NONE:
-            if (mapUp)
-                sFriendAreasPhase = FA_MAP;
-            else if (Port_GroundFriendAreasRequested())
-                sFriendAreasPhase = FA_FADING_OUT;
+    s32 request = gDungeon == NULL ? Port_GroundExitRequest() : 0;
+    bool8 friendMap = gFriendAreasMapPtr != NULL;
+
+    switch (sTransition) {
+        case TR_NONE:
+            if (friendMap)
+                sTransition = TR_FRIEND_MAP;
+            else if (request == 1)
+                sTransition = TR_TOWN_OUT;
+            else if (request == 2)
+                sTransition = TR_DUNGEON;
             else
                 return -1;
             break;
-        case FA_FADING_OUT:
-            if (mapUp)
-                sFriendAreasPhase = FA_MAP;
-            else if (!Port_GroundFriendAreasRequested())
-                sFriendAreasPhase = FA_FADING_IN; // the ground went on without the map
+        case TR_TOWN_OUT:
+            if (friendMap)
+                sTransition = TR_FRIEND_MAP;
+            else if (request == 2)
+                sTransition = TR_DUNGEON;
+            else if (request == 0)
+                sTransition = TR_TOWN_IN; // the new place is loading
             break;
-        case FA_MAP:
-            if (!mapUp)
-                sFriendAreasPhase = FA_FADING_IN;
+        case TR_FRIEND_MAP:
+            if (!friendMap)
+                sTransition = TR_TOWN_IN;
             break;
-        case FA_FADING_IN:
-            if (mapUp) {
-                sFriendAreasPhase = FA_MAP;
-            } else if (Port_GroundBrightness() >= 0x100 && !Port_GroundFriendAreasRequested()) {
-                sFriendAreasPhase = FA_NONE;
-                return -1;
+        case TR_DUNGEON:
+            if (gDungeon != NULL) {
+                // Black through the name banner; then the first floor fades
+                // in (gUnknown_203B40C: the floor is ready).
+                if (!gUnknown_203B40C)
+                    return 0;
+                if (gDungeonBrightness >= 31) {
+                    sTransition = TR_NONE;
+                    return -1;
+                }
+                return gDungeonBrightness * 0x100 / 31;
             }
+            if (request == 2)
+                return GroundLevel(); // the town fading out
+            if (GroundLevel() > 0) // no dungeon after all: the town is back
+                sTransition = TR_TOWN_IN;
+            else
+                return 0; // the world map
+            break;
+        case TR_CUT:
+            if (gDungeon != NULL)
+                return 0;
+            sTransition = TR_TOWN_IN;
             break;
     }
-    if (sFriendAreasPhase == FA_MAP)
+    if (sTransition == TR_FRIEND_MAP)
         return 0;
-    return Port_GroundBrightness();
+    if (sTransition == TR_TOWN_IN) {
+        if (gDungeon != NULL) { // straight into a dungeon
+            sTransition = TR_NONE;
+            return -1;
+        }
+        if (GroundLevel() >= 0x100 && Port_GroundExitRequest() == 0) {
+            sTransition = TR_NONE;
+            return -1;
+        }
+    }
+    return GroundLevel();
 }
 
 static void Darken(u16 *out, int brightness)
@@ -940,67 +992,24 @@ static void Darken(u16 *out, int brightness)
     }
 }
 
-// --- Cut to black ------------------------------------------------------------------
-//
-// When the dungeon results window is closed, the main screen cuts to black at
-// once, and so does the second screen. It comes back with the next screen,
-// following the town's fade in.
-
-enum { CUT_NONE, CUT_DUNGEON, CUT_AFTER };
-static int sCutPhase;
-
-void Port_SubScreenCutToBlack(void)
-{
-    sCutPhase = CUT_DUNGEON;
-}
-
-// The brightness (0-0x100) to show the second screen at, or -1 for normal.
-static int CutBrightness(void)
-{
-    switch (sCutPhase) {
-        case CUT_DUNGEON:
-            if (gDungeon != NULL)
-                return 0;
-            sCutPhase = CUT_AFTER;
-            // fall through
-        case CUT_AFTER:
-            if (gDungeon != NULL) { // straight into another dungeon
-                sCutPhase = CUT_NONE;
-                return -1;
-            }
-            if (Port_GroundBrightness() >= 0x100) {
-                sCutPhase = CUT_NONE;
-                return -1;
-            }
-            return Port_GroundBrightness();
-    }
-    return -1;
-}
-
 bool Port_RenderSubScreen(u16 *out)
 {
     int brightness;
 
     sOut = sOutFrame = out;
-    brightness = CutBrightness();
+    if (gDungeon == NULL)
+        sInDungeon = FALSE;
+    brightness = TransitionBrightness();
     if (brightness == 0) {
         memset(out, 0, W * H * sizeof(u16));
         return TRUE;
     }
     if (gDungeon != NULL) {
         DrawTeamPanel();
-        return TRUE;
+    } else {
+        if (!DrawWorldMap())
+            return FALSE;
     }
-    sInDungeon = FALSE;
-
-    if (brightness < 0)
-        brightness = FriendAreasBrightness();
-    if (brightness == 0) {
-        memset(out, 0, W * H * sizeof(u16));
-        return TRUE;
-    }
-    if (!DrawWorldMap())
-        return FALSE;
     if (brightness >= 0 && brightness < 0x100)
         Darken(out, brightness);
     return TRUE;
