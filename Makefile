@@ -47,7 +47,10 @@ $(CORE_OBJ)/sound.o: port/core/sound.c port/core/port.h
 $(CORE_OBJ)/m4a_1.o: $(UPSTREAM)/src/m4a_1.s
 	@mkdir -p $(dir $@)
 	@$(GAME_CC) -E -x assembler-with-cpp -iquote $(UPSTREAM)/include -I $(UPSTREAM)/include -DPLATFORM_3DS -DMODERN=1 $< -o $(CORE_OBJ)/m4a_1.i.s
-	@cd $(UPSTREAM) && $(GAME_AS) -march=armv6k -mfloat-abi=hard -I include --defsym MODERN=1 -o $@ $(CORE_OBJ)/m4a_1.i.s
+	@# 3dsxtool rejects any relocation at an address that is not 4-byte aligned,
+	@# including Thumb `bl` calls. Align each one, padding with Thumb nops.
+	@sed -E 's/^([[:space:]]*)bl([[:space:]])/\1.balign 4\n\1bl\2/' $(CORE_OBJ)/m4a_1.i.s > $(CORE_OBJ)/m4a_1.aligned.s
+	@cd $(UPSTREAM) && $(GAME_AS) -march=armv6k -mfloat-abi=hard -I include --defsym MODERN=1 -o $@ $(CORE_OBJ)/m4a_1.aligned.s
 	@echo "  AS   m4a_1.s"
 
 PORT_OBJS := $(CORE_SRCS:port/core/%.c=$(CORE_OBJ)/%.o) $(CORE_OBJ)/sound.o $(CORE_OBJ)/m4a_1.o
@@ -64,7 +67,7 @@ $(HARNESS_OBJ)/%.o: port/harness/%.S
 
 harness: $(HARNESS_ELF)
 
-$(HARNESS_ELF): $(GAME_OBJS) $(PORT_OBJS) $(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/backend.o port/harness/harness.ld port/game_init_sections.ld port/game_bss_sections.ld
+$(HARNESS_ELF): $(GAME_OBJS) $(PORT_OBJS) $(GAME_SONG_OBJS) $(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/backend.o port/harness/harness.ld port/game_init_sections.ld port/game_bss_sections.ld
 	@# Link against newlib's ARM-mode hard-float build (armv5te+fp runs on the 3DS's ARMv6K).
 	@$(GAME_CC) -marm -march=armv5te+fp -mfloat-abi=hard -nostartfiles -T port/harness/harness.ld -L port \
 		-Wl,--no-warn-rwx-segments -Wl,-Map,$(BUILD)/pmd-red-harness.map -o $@ \
@@ -85,7 +88,7 @@ PRELINK := $(BUILD)/pmd-red-game.o
 
 # A plain target, not a file rule: `make 3ds` must use an existing
 # pmd-red-game.o as is, never try to rebuild it.
-prelink: $(GAME_OBJS) $(PORT_OBJS)
+prelink: $(GAME_OBJS) $(PORT_OBJS) $(GAME_SONG_OBJS)
 	@$(PREFIX)ld -r -S -o $(PRELINK) $(PORT_OBJS) $(GAME_OBJS) $(GAME_DATA_OBJS)
 	@echo "  LD   $(PRELINK) (partial)"
 

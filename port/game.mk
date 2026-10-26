@@ -34,12 +34,23 @@ GAME_OBJS    := $(patsubst $(UPSTREAM)/src/%.c,$(GAME_OBJ)/%.o,$(GAME_C_SRCS))
 # Data and music are target-independent: reuse the objects upstream's modern
 # build assembled from your ROM's extracted assets.
 UP_BUILD     := $(UPSTREAM)/build/pmd_red_modern
-GAME_DATA_OBJS := $(wildcard $(UP_BUILD)/data/*.o) $(wildcard $(UP_BUILD)/sound/songs/*.o)
+GAME_SONG_OBJS := $(patsubst $(UPSTREAM)/sound/songs/%.s,$(GAME_OBJ)/songs/%.o,$(wildcard $(UPSTREAM)/sound/songs/*.s))
+GAME_DATA_OBJS := $(wildcard $(UP_BUILD)/data/*.o) $(GAME_SONG_OBJS)
+
+# Songs are reassembled with self-relative jump targets (see tools/port_song.py).
+$(GAME_OBJ)/songs/%.o: $(UPSTREAM)/sound/songs/%.s $(ROOT)/tools/port_song.py
+	@mkdir -p $(dir $@)
+	@python3 $(ROOT)/tools/port_song.py $< $(GAME_OBJ)/songs/$*.port.s
+	@$(GAME_CC) -E -x assembler-with-cpp -iquote $(UPSTREAM)/include -Wno-trigraphs -DMODERN=1 $(GAME_OBJ)/songs/$*.port.s -o $(GAME_OBJ)/songs/$*.i.s
+	@cd $(UPSTREAM) && $(GAME_AS) -mcpu=arm7tdmi --defsym MODERN=1 -o $@ $(GAME_OBJ)/songs/$*.i.s
 
 $(GAME_OBJ)/%.o: $(UPSTREAM)/src/%.c
 	@mkdir -p $(dir $@)
-	@$(GAME_CC) -E $(GAME_CPPFLAGS) $< -o $(GAME_OBJ)/$*.i
+	@$(GAME_CC) -E $(GAME_CPPFLAGS) -MMD -MP -MT $@ -MF $(GAME_OBJ)/$*.d $< -o $(GAME_OBJ)/$*.i
 	@# preproc reads INCBIN files relative to the upstream tree, so run it there.
 	@cd $(UPSTREAM) && $(GAME_PREPROC) $(GAME_OBJ)/$*.i $(GAME_CHARMAP) | $(GAME_CC1) -quiet $(GAME_CFLAGS) -o $(GAME_OBJ)/$*.s
 	@$(GAME_AS) -march=armv6k -mfloat-abi=hard -o $@ $(GAME_OBJ)/$*.s
 	@echo "  CC   $*.c"
+
+# Header dependencies, so edits to patched headers rebuild what uses them.
+-include $(GAME_OBJS:.o=.d)
