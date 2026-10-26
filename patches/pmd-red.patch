@@ -235,10 +235,10 @@ index deddec5b..db4551d5 100644
  #endif // GUARD_GBA_SYSCALL_H
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..3678c221
+index 00000000..7c4c4f89
 --- /dev/null
 +++ b/include/port_screen_menu.h
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,12 @@
 +#ifndef GUARD_PORT_SCREEN_MENU_H
 +#define GUARD_PORT_SCREEN_MENU_H
 +
@@ -249,9 +249,22 @@ index 00000000..3678c221
 +u32 PortScreenMenu_Update(void);
 +void PortScreenMenu_Destroy(void);
 +bool8 PortScreenMenu_Changed(void);
-+void PortScreenMenu_Finish(bool8 apply);
 +
 +#endif
+diff --git a/include/save.h b/include/save.h
+index 11c4fadc..37d2ff42 100644
+--- a/include/save.h
++++ b/include/save.h
+@@ -85,6 +85,9 @@ void sub_8011C40(s32 in);
+ void sub_8011CA8(u32 *out, s32 size);
+ u32 ReadSaveFromPak(u32 *a);
+ u32 WriteSavetoPak(s32 *param_1, u32 param_2);
++#ifdef PLATFORM_3DS
++void Port_WriteGameOptionsToPak(void);
++#endif
+ u32 sub_8011F9C(s32 *r0, u8 *dest, s32 size);
+ u32 sub_8011FA8(void);
+ bool8 IsSaveCorrupted(void);
 diff --git a/src/code_800D090.c b/src/code_800D090.c
 index 002fa3c7..406bee8e 100644
 --- a/src/code_800D090.c
@@ -710,20 +723,27 @@ index 372641a7..97c3fbad 100644
  
  // arm9.bin::0200CA1C
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..d60eea11 100644
+index 86f582c2..13bd342a 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
-@@ -9,6 +9,9 @@
+@@ -1,3 +1,4 @@
++#include <string.h>
+ #include "global.h"
+ #include "globaldata.h"
+ #include "code_8099360.h"
+@@ -9,6 +10,11 @@
  #include "menu_input.h"
  #include "options_menu1.h"
  #include "options_menu2.h"
 +#ifdef PLATFORM_3DS
 +#include "port_screen_menu.h"
++#include "port_game.h"
++#include "save.h"
 +#endif
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +21,8 @@ enum
+@@ -18,7 +24,8 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -733,7 +753,7 @@ index 86f582c2..d60eea11 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +35,7 @@ enum OptionsMenuStates
+@@ -31,6 +38,7 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -741,13 +761,22 @@ index 86f582c2..d60eea11 100644
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +53,13 @@ static void sub_801DED0(void);
+@@ -48,6 +56,22 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
 +#ifdef PLATFORM_3DS
 +static void HandleScreenMenu(void);
++static void ApplyNewOptions(void);
++static void LeaveSettings(bool8 portConfigChanged);
++static void HandleChangesSaved(void);
 +ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Screen/Layout Options");
++ALIGNED(4) static const u8 sChangesSaved[] = _("Changes saved.");
++// 3DS port: settings take effect as soon as a toggle changes; leaving the
++// Game Options or Screen/Layout Options window then writes them and says
++// "Changes saved." (instead of asking "Change settings?").
++static GameOptions sOpenedOptions;
++static bool8 sSaveGameOptions, sSavePortConfig;
 +#define OTHERS_MENU_WIDTH 14
 +#else
 +#define OTHERS_MENU_WIDTH 10
@@ -755,9 +784,15 @@ index 86f582c2..d60eea11 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -78,6 +90,11 @@ u32 sub_801DCE8(void)
+@@ -76,8 +100,17 @@ u32 sub_801DCE8(void)
+             sub_801E0FC();
+             break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
++#ifdef PLATFORM_3DS
++            HandleChangesSaved();
++#else
              HandleChangeSettingsMenu();
++#endif
              break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
@@ -767,7 +802,7 @@ index 86f582c2..d60eea11 100644
          default:
              break;
      }
-@@ -122,7 +139,7 @@ static void sub_801DD84(void)
+@@ -122,7 +155,7 @@ static void sub_801DD84(void)
  
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
@@ -776,7 +811,7 @@ index 86f582c2..d60eea11 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -132,7 +149,7 @@ static void sub_801DD84(void)
+@@ -132,7 +165,7 @@ static void sub_801DD84(void)
  
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
@@ -785,20 +820,39 @@ index 86f582c2..d60eea11 100644
              break;
          default:
              for (i = 0; i < 4; i++)
-@@ -166,6 +183,12 @@ static void sub_801DED0(void)
+@@ -164,12 +197,31 @@ static void sub_801DED0(void)
+         case 6:
+             // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
++#ifdef PLATFORM_3DS
++            sOpenedOptions = *gGameOptionsRef;
++#endif
              sub_801E198(&sUnknown_203B25C->newOptions);
              break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
 +            sUnknown_203B25C->newOptions = *gGameOptionsRef;
++            sOpenedOptions = *gGameOptionsRef;
 +            PortScreenMenu_Create(&sUnknown_203B25C->newOptions);
 +            break;
-+#endif
++        case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
++            // write what changed, then say so (like "Save completed.")
++            if (sSaveGameOptions)
++                Port_WriteGameOptionsToPak();
++            if (sSavePortConfig)
++                Port_SaveConfig();
++            CreateDialogueBoxAndPortrait(sChangesSaved, 0, NULL, 0x101);
++            break;
++#else
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
              CreateChangeSettingsConfirmMenu();
              CreateMenuDialogueBoxAndPortrait(sChangeSettingsPrompt, 0, 4, sUnknown_203B25C->menuItems, 0, 4, 0, 0, 32);
-@@ -183,6 +206,12 @@ static void CreateOthersMenu(void)
+             break;
++#endif
+     }
+ }
+ 
+@@ -183,6 +235,12 @@ static void CreateOthersMenu(void)
      sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
      sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
  
@@ -811,7 +865,7 @@ index 86f582c2..d60eea11 100644
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = sHints;
      sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_HINTS;
-@@ -229,6 +258,11 @@ static void HandleOthersMenu(void)
+@@ -229,6 +287,11 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -823,50 +877,81 @@ index 86f582c2..d60eea11 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -288,6 +322,24 @@ static void sub_801E0FC(void)
-     }
- }
- 
+@@ -272,6 +335,16 @@ static void sub_801E0E0(void)
+ static void sub_801E0FC(void)
+ {
+     switch (sub_801E218()) {
 +#ifdef PLATFORM_3DS
++        case 1:
++            ApplyNewOptions();
++            break;
++        case 2:
++        case 3:
++            sub_801E2C4();
++            LeaveSettings(FALSE);
++            break;
++#else
+         case 2:
+         case 3:
+             sub_801E2C4();
+@@ -282,12 +355,57 @@ static void sub_801E0FC(void)
+             else
+                 SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
+             break;
++        case 1:
++#endif
+         case 0:
++            break;
++    }
++}
++
++#ifdef PLATFORM_3DS
++// A toggle changed: the new options take effect now.
++static void ApplyNewOptions(void)
++{
++    if (memcmp(gGameOptionsRef, &sUnknown_203B25C->newOptions, sizeof(GameOptions)) == 0)
++        return;
++    *gGameOptionsRef = sUnknown_203B25C->newOptions;
++    SetWindowBGColor();
++    sub_8099690(0);
++}
++
++static void LeaveSettings(bool8 portConfigChanged)
++{
++    sSaveGameOptions = memcmp(gGameOptionsRef, &sOpenedOptions, sizeof(GameOptions)) != 0;
++    sSavePortConfig = portConfigChanged;
++    if (sSaveGameOptions || sSavePortConfig)
++        SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
++    else
++        SetOptionsMenuState(OPTIONS_MENU_MAIN);
++}
++
 +static void HandleScreenMenu(void)
 +{
 +    switch (PortScreenMenu_Update()) {
+         case 1:
++            ApplyNewOptions();
++            break;
 +        case 2:
 +        case 3:
 +            PortScreenMenu_Destroy();
-+            if (GameOptionsNotChange(&sUnknown_203B25C->newOptions) && !PortScreenMenu_Changed()) {
-+                PortScreenMenu_Finish(FALSE);
-+                SetOptionsMenuState(OPTIONS_MENU_MAIN);
-+            }
-+            else
-+                SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
-+            break;
-+    }
++            LeaveSettings(PortScreenMenu_Changed());
+             break;
+     }
+ }
+ 
++static void HandleChangesSaved(void)
++{
++    s32 menuAction;
++
++    if (sub_80144A4(&menuAction) == 0)
++        SetOptionsMenuState(OPTIONS_MENU_MAIN);
 +}
 +#endif
 +
  static void HandleChangeSettingsMenu(void)
  {
      s32 menuAction;
-@@ -299,12 +351,18 @@ static void HandleChangeSettingsMenu(void)
-         case MENU_OPTION_YES:
-             // Save our option changes??
-             *gGameOptionsRef = sUnknown_203B25C->newOptions;
-+#ifdef PLATFORM_3DS
-+            PortScreenMenu_Finish(TRUE);
-+#endif
-             SetWindowBGColor();
-             sub_8099690(0);
-             SetOptionsMenuState(OPTIONS_MENU_MAIN);
-             break;
-         case MENU_OPTION_DEFAULT:
-         case MENU_OPTION_NO:
-+#ifdef PLATFORM_3DS
-+            PortScreenMenu_Finish(FALSE);
-+#endif
-             SetOptionsMenuState(OPTIONS_MENU_MAIN);
-             break;
-     }
 diff --git a/src/palette_util.c b/src/palette_util.c
 index 926d28d1..684b3d20 100644
 --- a/src/palette_util.c
@@ -889,10 +974,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..53a1c2c8
+index 00000000..abba2877
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,254 @@
+@@ -0,0 +1,242 @@
 +// 3DS port: Others > Screen/Layout Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -903,9 +988,9 @@ index 00000000..53a1c2c8
 +//                          Scale (None/Full/Stretch), placeholders for now
 +//   Sub-Screen Settings    Enabled? (Yes/No: turns the second screen on/off),
 +//                          then the same Size and Scale placeholders
-+// The page settings live in the port's own config file (gPortConfig). Like the
-+// game's options, they are changed on a copy, and only take effect (and are
-+// saved) once "Change settings?" is answered Yes.
++// The page settings live in the port's own config file (gPortConfig). Every
++// toggle takes effect as soon as it changes; the file is written when the
++// menu is left (options_menu1.c, "Changes saved.").
 +#include <string.h>
 +#include "global.h"
 +#include "globaldata.h"
@@ -935,8 +1020,7 @@ index 00000000..53a1c2c8
 +    u32 windowId;
 +    WindowTemplates windows;
 +    s32 page;
-+    struct PortConfig config; // the settings being changed
-+    bool8 pending;
++    struct PortConfig startConfig; // the settings when the menu was opened
 +} sMenu;
 +
 +static const WindowTemplate sNoWindow = { 0, 3, 0, 0, 0, 0, 0, 0, NULL };
@@ -999,8 +1083,8 @@ index 00000000..53a1c2c8
 +{
 +    s32 screen = sMenu.page == PAGE_MAIN_SCREEN ? 0 : 1;
 +    if (setting == SETTING_ENABLED)
-+        return &sMenu.config.subScreenDisabled;
-+    return &sMenu.config.layout[screen][setting - SETTING_SIZE];
++        return &gPortConfig.subScreenDisabled;
++    return &gPortConfig.layout[screen][setting - SETTING_SIZE];
 +}
 +
 +static void Draw(void)
@@ -1060,25 +1144,14 @@ index 00000000..53a1c2c8
 +    sMenu.options = options;
 +    sMenu.windowId = 0;
 +    sMenu.page = PAGE_TOP;
-+    sMenu.config = gPortConfig;
-+    sMenu.pending = TRUE;
++    sMenu.startConfig = gPortConfig;
 +    ShowPage(0);
 +}
 +
++// Whether the port settings changed since the menu was opened.
 +bool8 PortScreenMenu_Changed(void)
 +{
-+    return sMenu.pending && memcmp(&sMenu.config, &gPortConfig, sizeof(gPortConfig)) != 0;
-+}
-+
-+// After "Change settings?" (or when nothing changed): applies and saves the
-+// port settings if `apply`, else drops them.
-+void PortScreenMenu_Finish(bool8 apply)
-+{
-+    if (sMenu.pending && apply && PortScreenMenu_Changed()) {
-+        gPortConfig = sMenu.config;
-+        Port_SaveConfig();
-+    }
-+    sMenu.pending = FALSE;
++    return memcmp(&sMenu.startConfig, &gPortConfig, sizeof(gPortConfig)) != 0;
 +}
 +
 +// 0: still open; 1: redrawn; 2: closed with B; 3: closed with A.
@@ -1163,6 +1236,62 @@ index e6872a26..c6368b99 100644
      SoundBiasSet();
  
      REG_IME = 0;
+diff --git a/src/save.c b/src/save.c
+index ee2ca650..032da776 100644
+--- a/src/save.c
++++ b/src/save.c
+@@ -10,6 +10,7 @@
+ #include "flash.h"
+ #include "friend_area.h"
+ #include "game_options.h"
++#include "data_serializer.h"
+ #include "memory.h"
+ #include "music_util.h"
+ #include "pokemon_3.h"
+@@ -365,6 +366,43 @@ u32 WriteSavetoPak(s32 *param_1, u32 param_2)
+   return SAVE_COMPLETED;
+ }
+ 
++#ifdef PLATFORM_3DS
++// 3DS port: puts the current game options into the adventure saved on the
++// cartridge (both copies), leaving everything else in it as it was. Used when
++// leaving the options menus, which take effect at once.
++void Port_WriteGameOptionsToPak(void)
++{
++    // where WriteSavetoPak puts the adventure data (game options first)
++    const u32 offset = 0x4650 + 150 * 4 + 0x1D8 + 0x10 + 0x8;
++    // not from the game's heap, which has no room for it while in a menu
++    static struct UnkStruct_sub_8011DAC sBuffer;
++    struct UnkStruct_sub_8011DAC *playerSave = &sBuffer;
++    DataSerializer seri;
++    u8 bits[4];
++    s32 copy, sector = 0;
++
++    InitBitWriter(&seri, bits, sizeof(bits));
++    WriteGameOptionsBits(&seri);
++
++    for (copy = 0; copy < 2; copy++) {
++        s32 at = sector, readAt = sector;
++        u32 n = seri.unkC; // bits written
++        u8 *dst = playerSave->unk448 + offset;
++        s32 i;
++
++        sub_8011CA8((u32 *)&sector, sizeof(*playerSave));
++        if (ReadSaveSector(&readAt, (u8 *)playerSave, sizeof(*playerSave)) != READ_SAVE_VALID
++            || playerSave->checksum != 0x5071412)
++            continue;
++        for (i = 0; i < n; i++) {
++            u8 mask = 1 << (i & 7);
++            dst[i >> 3] = (dst[i >> 3] & ~mask) | (bits[i >> 3] & mask);
++        }
++        WriteSaveSector(&at, (u8 *)playerSave, sizeof(*playerSave));
++    }
++}
++#endif
++
+ s32 sub_80121D4(s32 *a, u8 *src, s32 size)
+ {
+     return WriteSaveSector(a, src, size);
 diff --git a/src/text_4.c b/src/text_4.c
 index f20880c5..b44ac671 100644
 --- a/src/text_4.c
