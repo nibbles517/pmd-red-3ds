@@ -1,8 +1,9 @@
 // Nintendo 3DS backend (libctru).
 //
 // Faithful mode: the game's 240x160 picture on the top screen, either 1:1 in
-// the centre or stretched 1.5x to 360x240 (toggle with Y). The bottom screen
-// shows a short status text. Sound goes through the DSP (needs
+// the centre or stretched 1.5x to 360x240 (toggle with Y). The other screen
+// shows a short status text. The in-game option Others > Game Options >
+// Screen moves the picture to the bottom screen (1:1, or 4/3x to 320x213). Sound goes through the DSP (needs
 // sdmc:/3ds/dspfirm.cdc, which most custom firmware setups already have).
 // The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save.
 
@@ -23,7 +24,10 @@ void AgbMain(void);
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
 static int sScaled;
+static int sBottom; // picture on the bottom screen
 static FILE *sLog;
+static PrintConsole sConsole;
+static int sAudioOn;
 
 // --- Video -------------------------------------------------------------------
 
@@ -38,16 +42,30 @@ static void BuildLut(void)
 
 void Backend_Present(const uint16_t *frame)
 {
-    // The top framebuffer is 240 pixels per column, columns left to right,
-    // each column stored bottom to top.
-    uint16_t *fb = (uint16_t *)gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+    // Framebuffers are 240 pixels per column, columns left to right, each
+    // column stored bottom to top. Top: 400 columns; bottom: 320.
+    gfxScreen_t screen = sBottom ? GFX_BOTTOM : GFX_TOP;
+    const int width = sBottom ? 320 : 400;
+    uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
 
     if (!sScaled) {
-        const int ox = (400 - GBA_W) / 2, oy = (240 - GBA_H) / 2;
+        const int ox = (width - GBA_W) / 2, oy = (240 - GBA_H) / 2;
         for (int x = 0; x < GBA_W; x++) {
             uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
             for (int y = 0; y < GBA_H; y++)
                 col[-y] = sLut[frame[y * GBA_W + x] & 0x7FFF];
+        }
+        return;
+    }
+
+    if (sBottom) {
+        // 4/3x to 320x213: every source pixel becomes 1 or 2 screen pixels.
+        const int oy = (240 - 213) / 2;
+        for (int sx = 0; sx < 320; sx++) {
+            int x = sx * 3 / 4;
+            uint16_t *col = fb + sx * 240 + (239 - oy);
+            for (int sy = 0; sy < 213; sy++)
+                col[-sy] = sLut[frame[(sy * 3 / 4) * GBA_W + x] & 0x7FFF];
         }
         return;
     }
@@ -62,13 +80,40 @@ void Backend_Present(const uint16_t *frame)
     }
 }
 
-static void ClearTop(void)
+static void ClearGameScreen(void)
 {
+    gfxScreen_t screen = sBottom ? GFX_BOTTOM : GFX_TOP;
+    size_t size = (sBottom ? 320 : 400) * 240 * 2;
     for (int i = 0; i < 2; i++) {
-        memset(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL), 0, 400 * 240 * 2);
+        memset(gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL), 0, size);
         gfxFlushBuffers();
         gfxSwapBuffers();
     }
+}
+
+static void PrintStatus(void)
+{
+    consoleClear();
+    printf("\x1b[1mPokemon Mystery Dungeon: Red Rescue Team\x1b[0m\n");
+    printf("pmd-red-3ds (early test build)\n\n");
+    printf("Y      : 1:1 / larger picture\n");
+    printf("HOME   : exit (save in-game first)\n\n");
+    printf("Screen : Others > Game Options\n\n");
+    printf("Save: %s\n", SAVE_PATH);
+    if (!sAudioOn)
+        printf("\n\x1b[33mNo sound: sdmc:/3ds/dspfirm.cdc missing.\x1b[0m\n");
+}
+
+// Puts the picture on one screen and the status text on the other.
+static void SetGameScreen(int bottom)
+{
+    sBottom = bottom;
+    gfxScreen_t game = bottom ? GFX_BOTTOM : GFX_TOP;
+    consoleInit(bottom ? GFX_TOP : GFX_BOTTOM, &sConsole);
+    gfxSetScreenFormat(game, GSP_RGB565_OES);
+    gfxSetDoubleBuffering(game, true);
+    ClearGameScreen();
+    PrintStatus();
 }
 
 // --- Input -------------------------------------------------------------------
@@ -96,7 +141,6 @@ uint16_t Backend_PollKeys(void)
 #define AUDIO_BUFS 8
 #define AUDIO_MAX_SAMPLES 1024
 
-static int sAudioOn;
 static int sAudioRate;
 static ndspWaveBuf sWave[AUDIO_BUFS];
 static int16_t *sWaveData;
@@ -200,8 +244,10 @@ void Backend_EndFrame(void)
     hidScanInput();
     if (hidKeysDown() & KEY_Y) {
         sScaled = !sScaled;
-        ClearTop();
+        ClearGameScreen();
     }
+    if (Port_WantsBottomScreen() != sBottom)
+        SetGameScreen(Port_WantsBottomScreen());
     FlushSave();
     gfxFlushBuffers();
     gfxSwapBuffers();
@@ -243,9 +289,6 @@ void Backend_Fatal(const char *msg)
 int main(void)
 {
     gfxInitDefault();
-    gfxSetScreenFormat(GFX_TOP, GSP_RGB565_OES);
-    gfxSetDoubleBuffering(GFX_TOP, true);
-    consoleInit(GFX_BOTTOM, NULL);
     osSetSpeedupEnable(true); // 804 MHz on New 3DS models
 
     mkdir("sdmc:/3ds", 0777);
@@ -254,16 +297,8 @@ int main(void)
     if (flag) { fclose(flag); sLog = fopen(LOG_PATH, "w"); }
 
     BuildLut();
-    ClearTop();
     AudioInit();
-
-    printf("\x1b[1mPokemon Mystery Dungeon: Red Rescue Team\x1b[0m\n");
-    printf("pmd-red-3ds (early test build)\n\n");
-    printf("Y      : 1:1 / 1.5x picture\n");
-    printf("HOME   : exit (save in-game first)\n\n");
-    printf("Save: %s\n", SAVE_PATH);
-    if (!sAudioOn)
-        printf("\n\x1b[33mNo sound: sdmc:/3ds/dspfirm.cdc missing.\x1b[0m\n");
+    SetGameScreen(0);
 
     Port_Init();
     AgbMain();

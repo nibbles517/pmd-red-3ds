@@ -45,6 +45,9 @@ const uint16_t *Port_Framebuffer(void); // 240x160 BGR555, last completed frame
 // sound.c
 void Sound_EndFrame(void);
 
+// Port settings kept in the game's own options (port/core/options.c).
+bool Port_WantsBottomScreen(void); // Others > Game Options > Screen
+
 // Backend: implemented once per platform.
 void Backend_Present(const uint16_t *frame);   // 240x160 BGR555
 uint16_t Backend_PollKeys(void);               // active-high GBA key bits

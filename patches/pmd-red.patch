@@ -433,6 +433,85 @@ index 8a40a25c..8c094343 100644
  	str r0, [r1, o_MusicPlayerTrack_cmdPtr]
  	pop {r0}
  	bx r0
+diff --git a/src/options_menu2.c b/src/options_menu2.c
+index 03531690..4db82be0 100644
+--- a/src/options_menu2.c
++++ b/src/options_menu2.c
+@@ -18,6 +18,18 @@ static EWRAM_INIT struct unkStruct_203B260 *sUnknown_203B260 = {NULL};
+ static void CreateOptionsMenu(void);
+ static void nullsub_38(void);
+ 
++#ifdef PLATFORM_3DS
++// 3DS port: a second entry picks the screen the game is drawn on. It is kept
++// in the save's game options, in the bit the DS version uses for its touch
++// screen setting (unused on the GBA).
++#define NUM_OPTIONS_ENTRIES 2
++ALIGNED(4) static const u8 sScreenOption[] = _("Screen{MOVE_X_POSITION_BY_80}Top{MOVE_X_POSITION_BY_120}Bottom");
++ALIGNED(4) static const u8 sTop[] = _("Top");
++ALIGNED(4) static const u8 sBottom[] = _("Bottom");
++#else
++#define NUM_OPTIONS_ENTRIES 1
++#endif
++
+ bool8 sub_801E198(GameOptions *optionsMenu)
+ {
+     sUnknown_203B260 = MemoryAlloc(sizeof(struct unkStruct_203B260), MEMALLOC_GROUP_8);
+@@ -27,10 +39,10 @@ bool8 sub_801E198(GameOptions *optionsMenu)
+     sUnknown_203B260->unk48 = &sUnknown_203B260->unk4C.id[0];
+     RestoreSavedWindows(&sUnknown_203B260->unk4C);
+     sUnknown_203B260->unk4C.id[sUnknown_203B260->unk44] = sUnknown_80DC03C;
+-    sub_8012D08(sUnknown_203B260->unk48, 1);
++    sub_8012D08(sUnknown_203B260->unk48, NUM_OPTIONS_ENTRIES);
+     ResetUnusedInputStruct();
+     ShowWindows(&sUnknown_203B260->unk4C, TRUE, TRUE);
+-    CreateMenuOnWindow(&sUnknown_203B260->input, 1, 1, sUnknown_203B260->unk44);
++    CreateMenuOnWindow(&sUnknown_203B260->input, NUM_OPTIONS_ENTRIES, NUM_OPTIONS_ENTRIES, sUnknown_203B260->unk44);
+     nullsub_38();
+     CreateOptionsMenu();
+     return TRUE;
+@@ -59,6 +71,13 @@ u32 sub_801E218(void)
+                 PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
+                 flag = TRUE;
+             }
++#ifdef PLATFORM_3DS
++            else if (sUnknown_203B260->input.menuIndex == 1) {
++                sUnknown_203B260->optionsMenu->touchScreen = !sUnknown_203B260->optionsMenu->touchScreen;
++                PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
++                flag = TRUE;
++            }
++#endif
+             break;
+         case INPUT_DPAD_RIGHT:
+             if (sUnknown_203B260->input.menuIndex == 0) {
+@@ -70,6 +89,13 @@ u32 sub_801E218(void)
+                 PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
+                 flag = TRUE;
+             }
++#ifdef PLATFORM_3DS
++            else if (sUnknown_203B260->input.menuIndex == 1) {
++                sUnknown_203B260->optionsMenu->touchScreen = !sUnknown_203B260->optionsMenu->touchScreen;
++                PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
++                flag = TRUE;
++            }
++#endif
+             break;
+     }
+ 
+@@ -124,5 +150,14 @@ static void CreateOptionsMenu(void)
+             break;
+     }
+ 
++#ifdef PLATFORM_3DS
++    y = GetMenuEntryYCoord(&sUnknown_203B260->input, 1);
++    PrintStringOnWindow(8, y, sScreenOption, sUnknown_203B260->unk44, 0);
++    if (sUnknown_203B260->optionsMenu->touchScreen)
++        AddDoubleUnderScoreHighlight(sUnknown_203B260->unk44, 120, y + 10, GetStringLineWidth(sBottom), COLOR_WHITE_2);
++    else
++        AddDoubleUnderScoreHighlight(sUnknown_203B260->unk44, 80, y + 10, GetStringLineWidth(sTop), COLOR_WHITE_2);
++#endif
++
+     sub_80073E0(sUnknown_203B260->unk44);
+ }
 diff --git a/src/reg_control.c b/src/reg_control.c
 index e6872a26..c6368b99 100644
 --- a/src/reg_control.c

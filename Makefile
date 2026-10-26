@@ -54,7 +54,13 @@ $(CORE_OBJ)/m4a_1.o: $(UPSTREAM)/src/m4a_1.s
 	@cd $(UPSTREAM) && $(GAME_AS) -march=armv6k -mfloat-abi=hard -I include --defsym MODERN=1 -o $@ $(CORE_OBJ)/m4a_1.aligned.s
 	@echo "  AS   m4a_1.s"
 
-PORT_OBJS := $(CORE_SRCS:port/core/%.c=$(CORE_OBJ)/%.o) $(CORE_OBJ)/sound.o $(CORE_OBJ)/m4a_1.o
+# options.c reads the game's options, so it builds like game code too.
+$(CORE_OBJ)/options.o: port/core/options.c port/core/port.h
+	@mkdir -p $(dir $@)
+	@$(GAME_CC) $(ARCH_FLAGS) $(GAME_ABI_FLAGS) -O2 -g -w $(GAME_CPPFLAGS) -c $< -o $@
+	@echo "  CC   $<"
+
+PORT_OBJS := $(CORE_SRCS:port/core/%.c=$(CORE_OBJ)/%.o) $(CORE_OBJ)/sound.o $(CORE_OBJ)/options.o $(CORE_OBJ)/m4a_1.o
 
 HARNESS_OBJ := $(BUILD)/harness
 HARNESS_ELF := $(BUILD)/pmd-red-harness.elf
