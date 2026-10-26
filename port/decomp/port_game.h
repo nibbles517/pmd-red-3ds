@@ -20,4 +20,15 @@ struct PortStatusSymbol
 // Fills up to 2 symbols; returns how many.
 s32 Port_GetStatusSymbols(s32 dungeonSpriteId, struct PortStatusSymbol *out);
 
+// Port settings that have no room in the game's save (Others > Screen/Layout
+// Options). Kept by the backend in a file of their own.
+struct PortConfig
+{
+    u8 version;
+    u8 subScreenDisabled;   // Sub-Screen Settings > Enabled? (0 = Yes)
+    u8 layout[2][2];        // [main, sub][size, scale]: placeholders for now
+};
+extern struct PortConfig gPortConfig;
+void Port_SaveConfig(void);
+
 #endif

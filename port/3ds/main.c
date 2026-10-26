@@ -20,11 +20,12 @@
 #define DATA_DIR "sdmc:/3ds/pmd-red-3ds"
 #define SAVE_PATH DATA_DIR "/pmd-red.sav"
 #define LOG_PATH DATA_DIR "/port.log"
+#define CONFIG_PATH DATA_DIR "/config.bin"
 #define DEBUG_FLAG DATA_DIR "/debug.txt"
 
 void AgbMain(void);
 
-const int Backend_Version4_UpdateRepoIfMissing = 4;
+const int Backend_Version5_UpdateRepoIfMissing = 5;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -290,6 +291,24 @@ void Backend_StoreSave(const uint8_t *data, uint32_t size)
     sSaveData = data;
     sSaveSize = size;
     sSaveDirty = 1;
+}
+
+bool Backend_LoadConfig(uint8_t *data, uint32_t size)
+{
+    FILE *f = fopen(CONFIG_PATH, "rb");
+    if (!f)
+        return false;
+    size_t n = fread(data, 1, size, f);
+    fclose(f);
+    return n == size;
+}
+
+void Backend_StoreConfig(const uint8_t *data, uint32_t size)
+{
+    FILE *f = fopen(CONFIG_PATH, "wb");
+    if (!f) { Backend_Log("config: cannot open for writing"); return; }
+    fwrite(data, 1, size, f);
+    fclose(f);
 }
 
 static void FlushSave(void)

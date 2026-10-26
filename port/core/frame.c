@@ -81,7 +81,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version4_UpdateRepoIfMissing != 4)
+    if (Backend_Version5_UpdateRepoIfMissing != 5)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -92,6 +92,7 @@ void Port_Init(void)
     Dma_Reset();
     sFrames = 0;
     sVirtualLine = 0;
+    Port_LoadConfig();
 }
 
 uint64_t Port_FrameCount(void) { return sFrames; }

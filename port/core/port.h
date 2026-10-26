@@ -46,7 +46,8 @@ const uint16_t *Port_Framebuffer(void); // 240x160 BGR555, last completed frame
 void Sound_EndFrame(void);
 
 // Port settings kept in the game's own options (port/core/options.c).
-bool Port_WantsBottomScreen(void); // Others > Game Options > Main Screen
+bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Screen
+void Port_LoadConfig(void);
 
 // subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
 // true when there is something to show.
@@ -63,11 +64,14 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version4_UpdateRepoIfMissing;
+extern const int Backend_Version5_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
 bool Backend_LoadSave(uint8_t *data, uint32_t size);
 void Backend_StoreSave(const uint8_t *data, uint32_t size);
+// The port's own settings (options.c), a few bytes kept apart from the save.
+bool Backend_LoadConfig(uint8_t *data, uint32_t size);
+void Backend_StoreConfig(const uint8_t *data, uint32_t size);
 
 #endif

@@ -1044,14 +1044,36 @@ static void Darken(u16 *out, int brightness)
     }
 }
 
+// Sub-Screen Settings > Enabled?: the screen fades out over this many frames
+// when turned off (then shows the status text), and back in when turned on.
+#define ENABLE_FADE_FRAMES 16
+static int sEnableLevel = -1; // 0 (off) .. ENABLE_FADE_FRAMES (on)
+
+static int EnableBrightness(void)
+{
+    int target = gPortConfig.subScreenDisabled ? 0 : ENABLE_FADE_FRAMES;
+    if (sEnableLevel < 0)
+        sEnableLevel = target; // the setting as loaded: no fade at boot
+    else if (sEnableLevel < target)
+        sEnableLevel++;
+    else if (sEnableLevel > target)
+        sEnableLevel--;
+    return sEnableLevel * 0x100 / ENABLE_FADE_FRAMES;
+}
+
 bool Port_RenderSubScreen(u16 *out)
 {
-    int brightness;
+    int brightness, enabled;
 
     sOut = sOutFrame = out;
     if (gDungeon == NULL)
         sInDungeon = FALSE;
     brightness = TransitionBrightness();
+    enabled = EnableBrightness();
+    if (enabled == 0)
+        return FALSE;
+    if (enabled < 0x100)
+        brightness = (brightness < 0 ? 0x100 : brightness) * enabled >> 8;
     if (brightness == 0) {
         memset(out, 0, W * H * sizeof(u16));
         return TRUE;

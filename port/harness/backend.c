@@ -19,7 +19,7 @@ enum {
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
 
-const int Backend_Version4_UpdateRepoIfMissing = 4;
+const int Backend_Version5_UpdateRepoIfMissing = 5;
 
 void AgbMain(void);
 
@@ -73,6 +73,9 @@ bool Backend_LoadSave(uint8_t *data, uint32_t size)
     IO[IO_CMD] = CMD_SAVE_LOAD;
     return IO[IO_RESULT] != 0;
 }
+
+bool Backend_LoadConfig(uint8_t *data, uint32_t size) { (void)data; (void)size; return false; }
+void Backend_StoreConfig(const uint8_t *data, uint32_t size) { (void)data; (void)size; }
 
 void Backend_StoreSave(const uint8_t *data, uint32_t size)
 {
