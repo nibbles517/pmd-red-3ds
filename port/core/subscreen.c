@@ -534,7 +534,8 @@ static void DrawRow(int y0, const PanelRow *row)
     DrawNumberRight(136, y0 + 17, row->hp);
     DrawText(136, y0 + 17, sSlash, COLOR_TEXT);
     DrawNumberRight(160, y0 + 17, row->maxHp);
-    DrawHpBar(163, y0 + 20, 52, row->hp, row->maxHp);
+    // As on the DS, the bar is one pixel per max HP, up to 60.
+    DrawHpBar(163, y0 + 20, row->maxHp < 1 ? 1 : row->maxHp > 60 ? 60 : row->maxHp, row->hp, row->maxHp);
 
     x = DrawText(60, y0 + 29, sItem, COLOR_TEXT);
     DrawText(x, y0 + 29, row->item != NULL ? row->item : sNone, COLOR_TEXT);
