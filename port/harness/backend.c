@@ -14,6 +14,7 @@ enum {
     IO_BUF = 5, IO_LEN = 6, IO_CMD = 7, IO_RESULT = 8,
     IO_AUDIO_L = 9, IO_AUDIO_R = 10, IO_AUDIO_RATE = 11, IO_AUDIO_COUNT = 12,
     IO_CAPTURE = 13, // read: nonzero = capture the next frame; write: buffer address when done
+    IO_DUMPMAPS = 15, // read at start: nonzero = render both world maps (written back at IO_SUBSCREEN... see HarnessMain)
     IO_SUBSCREEN = 14, // read: nonzero = render the second screen; write: its buffer (0 = nothing)
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2 };
@@ -113,6 +114,18 @@ void HarnessMain(void)
 {
     Port_Init();
     gPortLineHook = CaptureLine;
+    if (IO[IO_DUMPMAPS]) {
+        static uint16_t map[512 * 512];
+        void Port_DebugRenderFullMap(int set, uint16_t *out);
+        for (int set = 0; set < 2; set++) {
+            Port_DebugRenderFullMap(set, map);
+            IO[IO_DUMPMAPS] = (uint32_t)(uintptr_t)map;
+        }
+        void Port_DebugRenderMapSprites(uint16_t *out);
+        static uint16_t sprites[SUBSCREEN_W * SUBSCREEN_H];
+        Port_DebugRenderMapSprites(sprites);
+        IO[IO_SUBSCREEN] = (uint32_t)(uintptr_t)sprites;
+    }
     Backend_Log("pmd-red-3ds harness: entering AgbMain");
     AgbMain();
     Backend_Fatal("AgbMain returned");

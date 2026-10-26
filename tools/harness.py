@@ -219,6 +219,8 @@ class Harness:
             val = self.keys()
         elif reg == 13:  # capture this frame?
             val = 1 if self.frame in self.captures else 0
+        elif reg == 15:  # dump the world maps?
+            val = 1 if self.args.dump_maps else 0
         elif reg == 14:  # render the second screen this frame?
             val = 1 if self.wants_shot() else 0
         else:
@@ -265,6 +267,9 @@ class Harness:
             open(path, 'wb').write(bytes(uc.mem_read(value, size)))
             # the PNG of the same frame is the reference output
             self.pending_capture_png = path[:-4] + '.png'
+        elif reg == 15:  # a world map rendered (512x512)
+            self.maps_dumped = getattr(self, 'maps_dumped', 0) + 1
+            write_png(os.path.join(self.args.out, f'worldmap{self.maps_dumped}.png'), bytes(uc.mem_read(value, 512 * 512 * 2)), 512, 512)
         elif reg == 14 and value:  # second screen rendered (256x192)
             write_png(os.path.join(self.args.out, f'sub_{self.frame:05d}.png'), bytes(uc.mem_read(value, 256 * 192 * 2)), 256, 192)
         elif reg == 12:  # audio chunk: `value` interleaved 16-bit stereo samples
@@ -368,6 +373,7 @@ def main():
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')
     ap.add_argument('--capture', type=int, action='append', default=[], help='capture this frame for renderer tests')
+    ap.add_argument('--dump-maps', action='store_true', help='write both world maps as PNGs at startup')
     ap.add_argument('--trace', action='append', default=[], help='log calls to this function (frame, r0-r3, lr)')
     ap.add_argument('--watch', action='append', default=[], help='log writes to SYMBOL+OFFSET[:LEN]')
     ap.add_argument('--profile', type=int, default=0, help='sample the PC every N instructions')

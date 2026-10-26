@@ -18,6 +18,8 @@
 #include "decompress_sir.h"
 #include "def_filearchives.h"
 #include "event_flag.h"
+#include "game_options.h"
+#include "graphics_memory.h"
 #include "ground_place.h"
 #include "string_format.h"
 #include "dungeon_util.h"
@@ -238,6 +240,72 @@ static int AnimLength(const ax_anim *a)
     return n;
 }
 
+// Draws one pose (a list of OAM-style pieces) with its anchor at (ax, ay).
+// Tile graphics come from `tiles` (already in VRAM order, as for effect and
+// map sprite files) followed by the pieces' own graphics chunks (monsters).
+// `pals` holds the 16 OBJ palettes; pieces use palNum unless they name their
+// own (as AddAxSprite does).
+static void DrawPose(const ax_pose *first, const ax_sprite *const *spriteData,
+                     const u32 *tiles, int tileCount, const u16 *pals, int palNum, int ax, int ay)
+{
+    const ax_pose *piece, *last;
+    int tilesUsed = 0;
+
+    if (tiles != NULL) {
+        tilesUsed = tileCount * 32;
+        if (tilesUsed > (int)sizeof(sTiles))
+            return;
+        memcpy(sTiles, tiles, tilesUsed);
+    }
+    // First load the pieces' graphics in order, as the game does.
+    for (piece = first; (u16)piece->sprite != 0xFFFF || *(const u16 *)&piece->unk2 != 0xFFFF; piece++) {
+        const ax_sprite *s;
+        if (piece->sprite < 0 || spriteData == NULL)
+            continue;
+        for (s = spriteData[piece->sprite]; s->byteCount != 0; s++) {
+            if (tilesUsed + s->byteCount > (int)sizeof(sTiles))
+                return;
+            if (s->gfx != NULL)
+                memcpy(sTiles + tilesUsed, s->gfx, s->byteCount);
+            else
+                memset(sTiles + tilesUsed, 0, s->byteCount);
+            tilesUsed += s->byteCount;
+        }
+    }
+    last = piece;
+
+    // Then draw the pieces, last first so the first ends up on top (like OAM).
+    for (piece = last - 1; piece >= first; piece--) {
+        u16 a0 = piece->flags1, a1 = piece->flags2, a2 = piece->flags3;
+        int shape = (a0 >> 14) & 3, size = (a1 >> 14) & 3;
+        int tw, th, px, py, hflip, vflip, tile;
+        if (shape == 3)
+            continue;
+        tw = sObjSizes[shape][size][0];
+        th = sObjSizes[shape][size][1];
+        px = ax + (a1 & 0x1FF) - 0x100;
+        py = ay + (a0 & 0x3FF) - 0x200;
+        hflip = (a1 >> 12) & 1;
+        vflip = (a1 >> 13) & 1;
+        tile = a2 & 0x3FF;
+        const u16 *pal = &pals[(((a1 >> 10) & 1) ? (a2 >> 12) : palNum) * 16];
+        for (int y = 0; y < th * 8; y++) {
+            int sy = vflip ? th * 8 - 1 - y : y;
+            for (int x = 0; x < tw * 8; x++) {
+                int sx = hflip ? tw * 8 - 1 - x : x;
+                int t = tile + (sy / 8) * tw + sx / 8; // 1D mapping
+                int off = t * 32 + (sy & 7) * 4 + (sx & 7) / 2;
+                int c;
+                if (off >= tilesUsed)
+                    continue;
+                c = (sTiles[off] >> ((sx & 1) * 4)) & 0xF;
+                if (c)
+                    Plot(px + x, py + y, pal[c] & 0x7FFF);
+            }
+        }
+    }
+}
+
 // Draws a monster's current animation frame, facing down-left, with its
 // anchor (the point the game positions it by) at (ax, ay).
 static void DrawMonSprite(Entity *entity, int ax, int ay)
@@ -245,9 +313,7 @@ static void DrawMonSprite(Entity *entity, int ax, int ay)
     axObject *obj = &entity->axObj;
     const axmain *m;
     const ax_anim *cur, *sw;
-    const ax_pose *piece;
-    int frame, n, tilesUsed = 0;
-    const u16 *pal;
+    int frame, n;
 
     if (obj->spriteFile == NULL || obj->axdata.activeAnimData == NULL)
         return;
@@ -270,60 +336,9 @@ static void DrawMonSprite(Entity *entity, int ax, int ay)
     if (frame >= n)
         frame = n - 1;
 
-    pal = &sPltt[0x100 + obj->axdata.sub1.paletteNum * 16];
-    ax += sw[frame].offset.x;
-    ay += sw[frame].offset.y;
-
-    // First load the pieces' graphics in order, as the game does.
-    for (piece = m->poses[sw[frame].poseId]; (u16)piece->sprite != 0xFFFF || *(const u16 *)&piece->unk2 != 0xFFFF; piece++) {
-        const ax_sprite *s;
-        if (piece->sprite < 0)
-            continue;
-        for (s = m->spriteData[piece->sprite]; s->byteCount != 0; s++) {
-            if (tilesUsed + s->byteCount > (int)sizeof(sTiles))
-                return;
-            if (s->gfx != NULL)
-                memcpy(sTiles + tilesUsed, s->gfx, s->byteCount);
-            else
-                memset(sTiles + tilesUsed, 0, s->byteCount);
-            tilesUsed += s->byteCount;
-        }
-    }
-
-    // Then draw the pieces, last first so the first ends up on top (like OAM).
-    {
-        const ax_pose *first = m->poses[sw[frame].poseId], *last = first;
-        while ((u16)last->sprite != 0xFFFF || *(const u16 *)&last->unk2 != 0xFFFF)
-            last++;
-        for (piece = last - 1; piece >= first; piece--) {
-            u16 a0 = piece->flags1, a1 = piece->flags2, a2 = piece->flags3;
-            int shape = (a0 >> 14) & 3, size = (a1 >> 14) & 3;
-            int tw, th, px, py, hflip, vflip, tile;
-            if (shape == 3)
-                continue;
-            tw = sObjSizes[shape][size][0];
-            th = sObjSizes[shape][size][1];
-            px = ax + (a1 & 0x1FF) - 0x100;
-            py = ay + (a0 & 0x3FF) - 0x200;
-            hflip = (a1 >> 12) & 1;
-            vflip = (a1 >> 13) & 1;
-            tile = a2 & 0x3FF;
-            for (int y = 0; y < th * 8; y++) {
-                int sy = vflip ? th * 8 - 1 - y : y;
-                for (int x = 0; x < tw * 8; x++) {
-                    int sx = hflip ? tw * 8 - 1 - x : x;
-                    int t = tile + (sy / 8) * tw + sx / 8; // 1D mapping
-                    int off = t * 32 + (sy & 7) * 4 + (sx & 7) / 2;
-                    int c;
-                    if (off >= tilesUsed)
-                        continue;
-                    c = (sTiles[off] >> ((sx & 1) * 4)) & 0xF;
-                    if (c)
-                        Plot(px + x, py + y, pal[c] & 0x7FFF);
-                }
-            }
-        }
-    }
+    DrawPose(m->poses[sw[frame].poseId], m->spriteData, NULL, 0,
+             &sPltt[0x100], obj->axdata.sub1.paletteNum,
+             ax + sw[frame].offset.x, ay + sw[frame].offset.y);
 }
 
 // --- Team panel -----------------------------------------------------------------------
@@ -417,7 +432,6 @@ static u8 sMapGfx[0x10000]; // charblocks 2-3, where the game decompresses it
 // decompresses both in one go, into two adjacent arrays.
 static u16 sMapTilemap[2][MAP_TILES][MAP_TILES];
 static u16 sMapPal[256];
-static bool8 sMapLoaded, sMapMissing;
 
 // Looks a file up in an archive without opening it (OpenFile would take a
 // slot in the game's file cache).
@@ -439,16 +453,21 @@ static const void *FindFile(const FileArchive *arc, const char *name)
     }
 }
 
-static bool8 LoadMap(void)
+static const char *sMapFiles[2][3] = {
+    { "wmapfont", "wmapmcc", "wmappal" }, // the friend areas map (the DS version's look)
+    { "wmp2font", "wmp2mcc", "wmp2pal" }, // the map shown on the way to a dungeon
+};
+
+static bool8 LoadMapSet(int set)
 {
     File f;
     OpenedFile of;
     const RGB_Struct *pal;
-    const void *gfx = FindFile(&gTitleMenuFileArchive, "wmp2font");
-    const void *map = FindFile(&gTitleMenuFileArchive, "wmp2mcc");
+    const void *gfx = FindFile(&gTitleMenuFileArchive, sMapFiles[set][0]);
+    const void *map = FindFile(&gTitleMenuFileArchive, sMapFiles[set][1]);
     int i;
 
-    pal = FindFile(&gTitleMenuFileArchive, "wmp2pal");
+    pal = FindFile(&gTitleMenuFileArchive, sMapFiles[set][2]);
     if (gfx == NULL || map == NULL || pal == NULL)
         return FALSE;
     of.file = &f;
@@ -461,8 +480,71 @@ static bool8 LoadMap(void)
     return TRUE;
 }
 
+// The map's marker sprites ("wmapspr": location markers, arrows). Their
+// colours are OBJ palette 0 as the map scenes set it, from "palet".
+static const EfoFileData *sMapSprites;
+static u16 sMapSpritePals[256];
+
+static bool8 LoadMapSprites(void)
+{
+    const RGB_Struct *pal = FindFile(&gMonsterFileArchive, "palet");
+    sMapSprites = FindFile(&gTitleMenuFileArchive, "wmapspr");
+    if (sMapSprites == NULL || pal == NULL)
+        return FALSE;
+    for (int i = 0; i < 240; i++)
+        sMapSpritePals[i] = Rgb(pal[i].r, pal[i].g, pal[i].b);
+    return TRUE;
+}
+
+static void DrawMapSpriteFrame(int anim, int frame, int x, int y)
+{
+    const ax_anim *a = sMapSprites->animations[anim][0];
+    DrawPose(sMapSprites->poses[a[frame].poseId], NULL, sMapSprites->tiles, sMapSprites->tileCount,
+             sMapSpritePals, 0, x + a[frame].offset.x, y + a[frame].offset.y);
+}
+
+// Development aid (test harness): every frame of every marker animation, one
+// animation per row.
+void Port_DebugRenderMapSprites(u16 *out)
+{
+    u16 *saved = sOut;
+    sOut = out;
+    LoadMapSprites();
+    for (int i = 0; i < W * H; i++)
+        out[i] = Rgb(0, 96, 160);
+    for (int anim = 0; anim < sMapSprites->animCount && anim < 12 + 1; anim++) {
+        const ax_anim *a = sMapSprites->animations[anim][0];
+        int n = AnimLength(a);
+        for (int f = 0; f < n && f < 10; f++)
+            DrawMapSpriteFrame(anim, f, 12 + f * 24, 8 + anim * 14);
+    }
+    sOut = saved;
+}
+
+// Development aid (test harness): the whole 512x512 map of a set.
+void Port_DebugRenderFullMap(int set, u16 *out)
+{
+    LoadMapSet(set);
+    for (int my = 0; my < 512; my++)
+        for (int mx = 0; mx < 512; mx++) {
+            int layer, c = 0, palBase = 0;
+            for (layer = 1; layer >= 0; layer--) {
+                u16 e = sMapTilemap[layer][my >> 3][mx >> 3];
+                int tx = mx & 7, ty = my & 7;
+                if (e & 0x400) tx = 7 - tx;
+                if (e & 0x800) ty = 7 - ty;
+                c = (sMapGfx[(e & 0x3FF) * 32 + ty * 4 + tx / 2] >> ((tx & 1) * 4)) & 0xF;
+                palBase = (e >> 12) * 16;
+                if (c != 0)
+                    break;
+            }
+            out[my * 512 + mx] = c ? sMapPal[(palBase + c) & 0xFF] : sMapPal[0];
+        }
+}
+
 // Where each place outside dungeons is on the world map: the dungeon it is
-// part of, or the town.
+// part of, or the town (shown on the friend areas map, at the team base).
+#define PLACE_TOWN 1000
 static s32 PlaceDungeon(s32 place)
 {
     switch (place) {
@@ -471,7 +553,7 @@ static s32 PlaceDungeon(s32 place)
         case GROUND_PLACE_PELIPPER_POST_OFFICE_INSIDE: case GROUND_PLACE_MAKUHITA_DOJO:
         case GROUND_PLACE_MAKUHITA_DOJO_INSIDE: case GROUND_PLACE_LUMINOUS_CAVE:
         case GROUND_PLACE_FRIEND_AREAS: case GROUND_PLACE_TEAM_BASE: case GROUND_PLACE_TEAM_BASE_INSIDE:
-            return DUNGEON_OUT_ON_RESCUE; // the town: where the world map starts from it
+            return PLACE_TOWN;
         case GROUND_PLACE_TINY_WOODS: return DUNGEON_TINY_WOODS;
         case GROUND_PLACE_THUNDERWAVE_CAVE: return DUNGEON_THUNDERWAVE_CAVE;
         case GROUND_PLACE_MT_STEEL: return DUNGEON_MT_STEEL;
@@ -497,14 +579,21 @@ static s32 PlaceDungeon(s32 place)
     return -1; // not a place on the map (title screen, cutscene backgrounds...)
 }
 
+// Both maps fill the top-left 480x320 of their 512x512 tilemaps.
+#define MAP_W 480
+#define MAP_H 320
+
+static int sViewLeft, sViewTop;
+
 static void DrawMapArea(int cx, int cy)
 {
-    const int mapPx = MAP_TILES * 8;
     int left = cx - W / 2, top = cy - H / 2;
     if (left < 0) left = 0;
     if (top < 0) top = 0;
-    if (left > mapPx - W) left = mapPx - W;
-    if (top > mapPx - H) top = mapPx - H;
+    if (left > MAP_W - W) left = MAP_W - W;
+    if (top > MAP_H - H) top = MAP_H - H;
+    sViewLeft = left;
+    sViewTop = top;
 
     for (int y = 0; y < H; y++) {
         int my = top + y;
@@ -524,67 +613,126 @@ static void DrawMapArea(int cx, int cy)
             sOut[y * W + x] = c ? sMapPal[(palBase + c) & 0xFF] : sMapPal[0]; // else the backdrop
         }
     }
-
-    // The yellow dot.
-    {
-        int dx = cx - left, dy = cy - top;
-        for (int j = -3; j <= 3; j++)
-            for (int i = -3; i <= 3; i++) {
-                int d = i * i + j * j;
-                if (d <= 6)
-                    Plot(dx + i, dy + j, Rgb(248, 232, 40));
-                else if (d <= 12)
-                    Plot(dx + i, dy + j, Rgb(56, 40, 0));
-            }
-    }
 }
 
-// A window like the game's, with the text centred.
-static void DrawNameBox(const u8 *name)
+// --- Game windows ----------------------------------------------------------------
+//
+// Drawn from the same pieces as the game's own (text_1.c, WINDOW_TYPE_NORMAL):
+// border tiles on BG0 over the fill tile on BG1, from the "font" graphics the
+// game loads at tile 0x278, in BG palette 15 as it is outside dungeons
+// (sub_8099690: gFontPalette, whose colours follow the window colour option
+// and the player's gender).
+
+#define FONT_FIRST_TILE 0x278
+#define TILE_CORNER 0x2D8
+#define TILE_EDGE_H 0x2D9
+#define TILE_EDGE_V 0x2DA
+#define TILE_FILL   0x2DB
+
+static u16 sWindowPal[16];
+
+// Returns whether the colours changed since the last call.
+static bool8 LoadWindowPalette(void)
 {
-    const int x0 = 62, y0 = 150, w = 164, h = 30;
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            u16 c;
-            if (OutsideRounded(x, y, w, h, 4))
-                continue;
-            if (x == 0 || y == 0 || x == w - 1 || y == h - 1)
-                c = Rgb(40, 48, 120);
-            else if (x == 1 || y == 1 || x == w - 2 || y == h - 2)
-                c = Rgb(168, 184, 248);
-            else
-                c = Rgb(Lerp(64, 32, y, h), Lerp(88, 56, y, h), Lerp(216, 168, y, h));
-            Plot(x0 + x, y0 + y, c);
+    const RGB_Struct *p = &gFontPalette[gGameOptionsRef->playerGender != MALE ? 0x50 : 0x10];
+    bool8 changed = FALSE;
+    for (int i = 0; i < 16; i++) {
+        u16 c = Rgb(p[i].r, p[i].g, p[i].b);
+        changed |= c != sWindowPal[i];
+        sWindowPal[i] = c;
+    }
+    return changed;
+}
+
+// The colour index of a pixel of a font tile (0 = transparent).
+static int FontTilePixel(const u8 *font, int tile, bool8 hflip, bool8 vflip, int x, int y)
+{
+    if (hflip) x = 7 - x;
+    if (vflip) y = 7 - y;
+    return (font[(tile - FONT_FIRST_TILE) * 32 + y * 4 + x / 2] >> ((x & 1) * 4)) & 0xF;
+}
+
+// A window at tile-sized cells: (x, y) is the top-left of its border, and
+// w x h the size of its inside in tiles.
+static void DrawGameWindow(int px, int py, int w, int h)
+{
+    const u8 *font = FindFile(&gSystemFileArchive, "font");
+    if (font == NULL)
+        return;
+    font += 4; // tile count, then the tiles
+
+    for (int ty = 0; ty < h + 2; ty++) {
+        for (int tx = 0; tx < w + 2; tx++) {
+            bool8 top = ty == 0, bottom = ty == h + 1, left = tx == 0, right = tx == w + 1;
+            int tile = 0;
+            bool8 hf = FALSE, vf = FALSE;
+            if ((top || bottom) && (left || right)) { tile = TILE_CORNER; hf = right; vf = bottom; }
+            else if (top || bottom) { tile = TILE_EDGE_H; vf = bottom; }
+            else if (left || right) { tile = TILE_EDGE_V; hf = right; }
+            for (int y = 0; y < 8; y++) {
+                for (int x = 0; x < 8; x++) {
+                    int c = tile ? FontTilePixel(font, tile, hf, vf, x, y) : 0;
+                    if (c == 0)
+                        c = FontTilePixel(font, TILE_FILL, FALSE, FALSE, x, y);
+                    if (c != 0)
+                        Plot(px + tx * 8 + x, py + ty * 8 + y, sWindowPal[c] & 0x7FFF);
+                }
+            }
         }
     }
-    DrawText(x0 + (w - TextWidth(name)) / 2, y0 + 9, name, COLOR_TEXT);
 }
+
+// The place's name in a window, centred, as the DS version shows it.
+static void DrawNameBox(const u8 *name)
+{
+    const int w = 20, h = 2; // inside, in tiles
+    const int px = (W - (w + 2) * 8) / 2, py = H - (h + 2) * 8 - 8;
+    DrawGameWindow(px, py, w, h);
+    DrawText(px + 8 + (w * 8 - TextWidth(name)) / 2, py + 8 + 2, name, COLOR_TEXT);
+}
+
+#define TEAM_BASE_X 0x163 // LOCATION_TEAM_BASE on the friend areas map
+#define TEAM_BASE_Y 0xA1
+#define MARKER_YELLOW_DOT 1 // wmapspr animation
 
 static bool8 DrawWorldMap(void)
 {
-    // The picture only changes with the place, so it is drawn once per place.
+    // The map only changes with the place, so it is drawn once per place;
+    // the marker goes on top every frame.
     static u16 sCache[W * H];
     static s32 sCachedPlace = -1;
+    static int sLoadedSet = -1, sDotX, sDotY;
+    static bool8 sSpritesLoaded;
     s32 place = GetScriptVarValue(NULL, GROUND_PLACE);
     s32 dungeon = PlaceDungeon(place);
     u8 name[128];
 
     if (dungeon < 0)
         return FALSE;
-    if (place != sCachedPlace) {
-        if (!sMapLoaded && !sMapMissing) {
-            sMapLoaded = LoadMap();
-            sMapMissing = !sMapLoaded;
+    bool8 newColors = LoadWindowPalette();
+    if (place != sCachedPlace || newColors) {
+        int set = dungeon == PLACE_TOWN ? 0 : 1;
+        int x = dungeon == PLACE_TOWN ? TEAM_BASE_X : gDungeonCoordinates[dungeon].x;
+        int y = dungeon == PLACE_TOWN ? TEAM_BASE_Y : gDungeonCoordinates[dungeon].y;
+        if (set != sLoadedSet) {
+            if (!LoadMapSet(set))
+                return FALSE;
+            sLoadedSet = set;
         }
-        if (!sMapLoaded)
+        if (!sSpritesLoaded && !LoadMapSprites())
             return FALSE;
+        sSpritesLoaded = TRUE;
         sOut = sCache;
-        DrawMapArea(gDungeonCoordinates[dungeon].x, gDungeonCoordinates[dungeon].y);
+        DrawMapArea(x, y);
+        sDotX = x - sViewLeft;
+        sDotY = y - sViewTop;
         FormatString(GetGroundPlaceName(place), name, name + sizeof(name) - 1, 0);
         DrawNameBox(name);
         sCachedPlace = place;
+        sOut = sOutFrame;
     }
     memcpy(sOutFrame, sCache, sizeof(sCache));
+    DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
     return TRUE;
 }
 
