@@ -36,9 +36,11 @@ enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_3DS };
 #define PORT_DS_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS)
 
 // Text windows (BG0/BG1): 20 rows on the GBA; 24 for the wide view, which
-// moves them down 4 rows to keep them as far from the screen's bottom.
+// moves them down 2 rows (16 lines), nearer the taller screen's bottom.
 #define TEXT_ROWS ((SCREEN_H + 7) / 8)
-#define WINDOW_SHIFT_TILES ((SCREEN_H - 160) / 8)
+#define WINDOW_SHIFT_TILES 2
+// Lines of window backgrounds (text_2.c DrawWindowBg, per-line WIN0H)
+#define WINDOW_BG_LINES SCREEN_H
 
 extern bool8 gPortGroundNarrow; // ground_bg.c
 bool8 Port_GroundViewIsNarrow(void); // ground_map.c

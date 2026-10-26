@@ -265,6 +265,22 @@ index 11c4fadc..37d2ff42 100644
  u32 sub_8011F9C(s32 *r0, u8 *dest, s32 size);
  u32 sub_8011FA8(void);
  bool8 IsSaveCorrupted(void);
+diff --git a/include/text_1.h b/include/text_1.h
+index 9e8438d2..abd8d911 100644
+--- a/include/text_1.h
++++ b/include/text_1.h
+@@ -43,7 +43,11 @@ extern void (*ScrollUpWindowFunc)(s32 windowId);
+ extern void (*gIwramTextFunc3)(s32 a0);
+ extern void (*gIwramTextFunc4)(s32 a0);
+ 
++#ifdef PLATFORM_3DS
++extern s16 gWindowBg[];
++#else
+ extern s16 gWindowBg[161];
++#endif
+ 
+ extern const u32 gUnknown_80B853C[16];
+ extern const unkShiftData gCharMasksOffsets[8];
 diff --git a/src/code_800D090.c b/src/code_800D090.c
 index 002fa3c7..406bee8e 100644
 --- a/src/code_800D090.c
@@ -2117,20 +2133,30 @@ index 812df38d..e3029ee1 100644
          // Set size to 1
          *oam++ = 0x4000;
 diff --git a/src/text_1.c b/src/text_1.c
-index e6612f2c..2b4eb33c 100644
+index e6612f2c..3eb5c085 100644
 --- a/src/text_1.c
 +++ b/src/text_1.c
-@@ -1,4 +1,9 @@
+@@ -1,4 +1,10 @@
  #include "global.h"
 +#ifdef PLATFORM_3DS
 +#include "port_game.h"
 +#else
 +#define TEXT_ROWS 20
++#define WINDOW_BG_LINES 160
 +#endif
  #include "globaldata.h"
  #include "structs/str_text.h"
  #include "bg_palette_buffer.h"
-@@ -148,7 +153,7 @@ void LoadCharmaps(void)
+@@ -37,7 +43,7 @@ EWRAM_INIT void (*ScrollUpWindowFunc)(s32 windowId) = ScrollUpWindow;
+ EWRAM_INIT void (*gIwramTextFunc3)(s32 a0) = sub_82729A4;
+ EWRAM_INIT void (*gIwramTextFunc4)(s32 a0) = sub_8272A78;
+ 
+-IWRAM_DATA ALIGNED(4) s16 gWindowBg[161] = {0};
++IWRAM_DATA ALIGNED(4) s16 gWindowBg[WINDOW_BG_LINES + 1 + 12] = {0}; // + 12: DrawWindowBg's headers can write past the end
+ 
+ const u32 gUnknown_80B853C[16] =
+ {
+@@ -148,7 +154,7 @@ void LoadCharmaps(void)
  
      gCharacterSpacing = 0;
  
@@ -2139,7 +2165,7 @@ index e6612f2c..2b4eb33c 100644
          gBgTilemaps[0][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x279);
          gBgTilemaps[1][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x27A);
  
-@@ -163,7 +168,7 @@ void LoadCharmaps(void)
+@@ -163,7 +169,7 @@ void LoadCharmaps(void)
      gWindowBgCopy = NULL;
      gUnknown_20274A5 = FALSE;
      gUnknown_202B020 = 1;
@@ -2148,19 +2174,66 @@ index e6612f2c..2b4eb33c 100644
      UpdateFadeInTile(0);
  }
  
-@@ -320,6 +325,12 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
+@@ -258,6 +264,15 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+         winTemplates = &sDummyWindows;
+     if (a2)
+         sub_8009388();
++#ifdef PLATFORM_3DS
++    // DS size, wide view (port_view.h): the windows (and their backgrounds,
++    // DrawWindowBg) go WINDOW_SHIFT_TILES rows down, nearer the bottom of
++    // the taller screen.
++    DungeonPos shifted = *positionModifier;
++    if (PORT_DS_SIZE && gPortWideView)
++        shifted.y += WINDOW_SHIFT_TILES;
++    positionModifier = &shifted;
++#endif
+ 
+     ResetWindowBgData();
+ 
+@@ -320,6 +335,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
      newWindow = &windows[windowId];
      x = winTemplate->pos.x + positionModifier->x;
      y =  winTemplate->pos.y + positionModifier->y;
-+#ifdef PLATFORM_3DS
-+    // DS size, wide view (port_view.h): the windows keep their distance from
-+    // the bottom of the screen, which is 32 lines further down.
-+    if (PORT_DS_SIZE && gPortWideView)
-+        y += WINDOW_SHIFT_TILES;
-+#endif
++
      newWindow->x = x;
      newWindow->y = y;
      newWindow->width = winTemplate->width;
+diff --git a/src/text_2.c b/src/text_2.c
+index 463ed0b6..36b23ef3 100644
+--- a/src/text_2.c
++++ b/src/text_2.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "graphics_memory.h"
+ #include "cpu.h"
+ #include "decompress_at.h"
+@@ -1107,7 +1110,11 @@ void ResetWindowBgData(void)
+ {
+     s32 i;
+ 
++#ifdef PLATFORM_3DS
++    for (i = 0; i < WINDOW_BG_LINES + 1; i++) {
++#else
+     for (i = 0; i < ARRAY_COUNT_INT(gWindowBg); i++) {
++#endif
+         gWindowBg[i] = 0xF0F0;
+     }
+ }
+@@ -1115,7 +1122,11 @@ void ResetWindowBgData(void)
+ void DrawWindowBg(const WindowTemplate *window, DungeonPos *pos)
+ {
+     const u8 WINH_DEFAULT = 0xF0;
++#ifdef PLATFORM_3DS
++    const s32 Y_MAX = WINDOW_BG_LINES;
++#else
+     const s32 Y_MAX = 160;
++#endif
+     u8 *windowArr;
+ 
+     if (window->flags & WINTEMPLATE_FLAG_x40)
 diff --git a/src/text_3.c b/src/text_3.c
 index dc4d10d1..a0b23c26 100644
 --- a/src/text_3.c
@@ -2299,7 +2372,7 @@ index 3a78e6d7..f223d603 100644
                      SpriteSetY(&gUnknown_202EDC0, spriteY);
                      SpriteSetX(&gUnknown_202EDC0, spriteX);
 diff --git a/src/window_buffer.c b/src/window_buffer.c
-index 90053fbc..942a7f61 100644
+index 90053fbc..e7f2b769 100644
 --- a/src/window_buffer.c
 +++ b/src/window_buffer.c
 @@ -17,8 +17,17 @@ EWRAM_DATA static bool32 sBoolUnk = FALSE;      // Toggled but is never read
@@ -2322,18 +2395,21 @@ index 90053fbc..942a7f61 100644
  
  EWRAM_INIT s16 *gWindowBgCopy = NULL;
  
-@@ -104,6 +113,19 @@ void WindowBgBufferInit(void)
+@@ -104,6 +113,22 @@ void WindowBgBufferInit(void)
      gWindowBgCopy = NULL;
  }
  
 +#ifdef PLATFORM_3DS
 +#define ROOM_Y_MAX BUF_LINES
-+// The lines past 159 repeat line 159's values (dst: just past it).
-+static void ExtendLines(s16 *dst)
++// The lines past 159 (dst: just past line 159): WIN0H (the windows'
++// backgrounds) from win0, WIN1H repeating line 159's.
++static void ExtendLines(s16 *dst, const s16 *win0)
 +{
 +    s32 i;
-+    for (i = 0; i < LINES_PAST * 2; i++)
-+        dst[i] = dst[i - 2];
++    for (i = 0; i < LINES_PAST; i++) {
++        dst[i * 2] = win0[160 + i];
++        dst[i * 2 + 1] = dst[i * 2 - 1];
++    }
 +}
 +#else
 +#define ROOM_Y_MAX Y_MAX
@@ -2342,34 +2418,50 @@ index 90053fbc..942a7f61 100644
  // arm9.bin::02005758
  void CopyWindowBgBuffer(s32 *pos, u8 kind)
  {
-@@ -130,6 +152,10 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -119,6 +144,15 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+     src1 = gWindowBgCopy;
+     if (src1 == NULL)
+         src1 = sDefaultBgH;
++#ifdef PLATFORM_3DS
++    // WIN0H for every line (and as far as UNK4/UNK5 read): the windows'
++    // backgrounds (gWindowBg) reach the wide view's bottom; the 160-line
++    // tables repeat their last line
++    s16 win0[240];
++    for (i = 0; i < 240; i++)
++        win0[i] = src1[src1 == sDefaultBgH ? (i < 160 ? i : 159) : (i <= WINDOW_BG_LINES ? i : WINDOW_BG_LINES)];
++    src1 = win0;
++#endif
+ 
+     sBufferPtr = dst;
+ 
+@@ -130,6 +164,10 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                      *dst++ = 0;         // WIN1H (disabled)
                  );
              }
 +#ifdef PLATFORM_3DS
-+            ExtendLines(dst);
++            ExtendLines(dst, win0);
 +            dst += LINES_PAST * 2;
 +#endif
              break;
          case COPY_WINDOW_BG_BUFFER_DIM2:
              src2 = sCorridorDim2;
-@@ -139,6 +165,10 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -139,6 +177,10 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                      *dst++ = *src2++;   // WIN1H (dim)
                  );
              }
 +#ifdef PLATFORM_3DS
-+            ExtendLines(dst);
++            ExtendLines(dst, win0);
 +            dst += LINES_PAST * 2;
 +#endif
              break;
          case COPY_WINDOW_BG_BUFFER_DIM1:
              src2 = sCorridorDim1;
-@@ -148,21 +178,34 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -148,21 +190,28 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                      *dst++ = *src2++;   // WIN1H (dim)
                  );
              }
 +#ifdef PLATFORM_3DS
-+            ExtendLines(dst);
++            ExtendLines(dst, win0);
 +            dst += LINES_PAST * 2;
 +#endif
              break;
@@ -2384,19 +2476,13 @@ index 90053fbc..942a7f61 100644
                      UNROLL16(*dst++ = *src1++; *dst++ = 0xF0;);
                  }
 +#ifdef PLATFORM_3DS
-+                ExtendLines(dst);
++                ExtendLines(dst, win0);
 +#endif
              }
              else {
                  s32 left;
                  s32 right;
 -                for (i = 0; i < Y_MAX; i++) {
-+#ifdef PLATFORM_3DS
-+                s16 win0[BUF_LINES]; // WIN0H, past line 159 repeating line 159
-+                for (i = 0; i < BUF_LINES; i++)
-+                    win0[i] = src1[i < 160 ? i : 159];
-+                src1 = win0;
-+#endif
 +                for (i = 0; i < ROOM_Y_MAX; i++) {
                      if (pos[1] > i) {
                          *dst++ = *src1++;
