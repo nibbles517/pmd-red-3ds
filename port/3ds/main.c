@@ -1,9 +1,9 @@
 // Nintendo 3DS backend (libctru).
 //
-// Faithful mode: the game's 240x160 picture on the top screen, either 1:1 in
-// the centre or stretched 1.5x to 360x240 (toggle with Y). The other screen
-// shows a short status text. The in-game option Others > Game Options >
-// Screen moves the picture to the bottom screen (1:1, or 4/3x to 320x213). Sound goes through the DSP (needs
+// The game's 240x160 picture goes on the bottom screen by default, as on the
+// DS (1:1, or 4/3x to 320x213), or on the top screen (1:1, or 1.5x to
+// 360x240), chosen in Others > Game Options > Main Screen. Y toggles the
+// size. The other screen shows a short status text. Sound goes through the DSP (needs
 // sdmc:/3ds/dspfirm.cdc, which most custom firmware setups already have).
 // The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save.
 
@@ -25,6 +25,8 @@ void AgbMain(void);
 const int Backend_Version3_UpdateRepoIfMissing = 3;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
+static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
+static const uint16_t *sPresentLut = sLut;
 static int sScaled;
 static int sBottom; // picture on the bottom screen
 static FILE *sLog;
@@ -42,8 +44,31 @@ static void BuildLut(void)
     }
 }
 
+// Switching screens fades the picture to black, moves it, and fades it back
+// in, like the game's own fades.
+#define FADE_FRAMES 16
+static int sFadeLevel = FADE_FRAMES; // FADE_FRAMES = full brightness
+static int sFadeDir;                 // -1 fading out, +1 fading in
+
+static void SetFadeLevel(int level)
+{
+    sFadeLevel = level;
+    if (level >= FADE_FRAMES) {
+        sPresentLut = sLut;
+        return;
+    }
+    for (unsigned c = 0; c < 0x8000; c++) {
+        unsigned r = (c & 31) * level / FADE_FRAMES;
+        unsigned g = ((c >> 5) & 31) * level / FADE_FRAMES;
+        unsigned b = ((c >> 10) & 31) * level / FADE_FRAMES;
+        sDimLut[c] = sLut[r | (g << 5) | (b << 10)];
+    }
+    sPresentLut = sDimLut;
+}
+
 void Backend_Present(const uint16_t *frame)
 {
+    const uint16_t *lut = sPresentLut;
     // Framebuffers are 240 pixels per column, columns left to right, each
     // column stored bottom to top. Top: 400 columns; bottom: 320.
     gfxScreen_t screen = sBottom ? GFX_BOTTOM : GFX_TOP;
@@ -55,7 +80,7 @@ void Backend_Present(const uint16_t *frame)
         for (int x = 0; x < GBA_W; x++) {
             uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
             for (int y = 0; y < GBA_H; y++)
-                col[-y] = sLut[frame[y * GBA_W + x] & 0x7FFF];
+                col[-y] = lut[frame[y * GBA_W + x] & 0x7FFF];
         }
         return;
     }
@@ -67,7 +92,7 @@ void Backend_Present(const uint16_t *frame)
             int x = sx * 3 / 4;
             uint16_t *col = fb + sx * 240 + (239 - oy);
             for (int sy = 0; sy < 213; sy++)
-                col[-sy] = sLut[frame[(sy * 3 / 4) * GBA_W + x] & 0x7FFF];
+                col[-sy] = lut[frame[(sy * 3 / 4) * GBA_W + x] & 0x7FFF];
         }
         return;
     }
@@ -78,7 +103,7 @@ void Backend_Present(const uint16_t *frame)
         int x = sx * 2 / 3;
         uint16_t *col = fb + (ox + sx) * 240 + 239;
         for (int sy = 0; sy < 240; sy++)
-            col[-sy] = sLut[frame[(sy * 2 / 3) * GBA_W + x] & 0x7FFF];
+            col[-sy] = lut[frame[(sy * 2 / 3) * GBA_W + x] & 0x7FFF];
     }
 }
 
@@ -100,7 +125,7 @@ static void PrintStatus(void)
     printf("pmd-red-3ds (early test build)\n\n");
     printf("Y      : 1:1 / larger picture\n");
     printf("HOME   : exit (save in-game first)\n\n");
-    printf("Screen : Others > Game Options\n\n");
+    printf("Main Screen: Others > Game Options\n\n");
     printf("Save: %s\n", SAVE_PATH);
     if (!sAudioOn)
         printf("\n\x1b[33mNo sound: sdmc:/3ds/dspfirm.cdc missing.\x1b[0m\n");
@@ -248,8 +273,19 @@ void Backend_EndFrame(void)
         sScaled = !sScaled;
         ClearGameScreen();
     }
-    if (Port_WantsBottomScreen() != sBottom)
-        SetGameScreen(Port_WantsBottomScreen());
+    if (sFadeDir == 0 && Port_WantsBottomScreen() != sBottom)
+        sFadeDir = -1;
+    if (sFadeDir < 0) {
+        SetFadeLevel(sFadeLevel - 1);
+        if (sFadeLevel == 0) {
+            SetGameScreen(Port_WantsBottomScreen());
+            sFadeDir = 1;
+        }
+    } else if (sFadeDir > 0) {
+        SetFadeLevel(sFadeLevel + 1);
+        if (sFadeLevel == FADE_FRAMES)
+            sFadeDir = 0;
+    }
     FlushSave();
     gfxFlushBuffers();
     gfxSwapBuffers();
@@ -300,7 +336,7 @@ int main(void)
 
     BuildLut();
     AudioInit();
-    SetGameScreen(0);
+    SetGameScreen(Port_WantsBottomScreen());
 
     Port_Init();
     AgbMain();

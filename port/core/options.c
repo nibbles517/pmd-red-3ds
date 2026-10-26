@@ -5,9 +5,11 @@
 #include "game_options.h"
 #include "../core/port.h"
 
-// Others > Game Options > Screen (outside dungeons). Stored in the bit the DS
-// version uses for its touch screen option, which the GBA game never reads.
+// Others > Game Options > Main Screen (outside dungeons). Stored in the bit
+// the DS version uses for its touch screen option, which the GBA game never
+// reads: clear (new games, saves from a GBA) means the bottom screen, as on
+// the DS; set means the top screen.
 bool Port_WantsBottomScreen(void)
 {
-    return gGameOptionsRef != NULL && gGameOptionsRef->touchScreen;
+    return gGameOptionsRef == NULL || !gGameOptionsRef->touchScreen;
 }
