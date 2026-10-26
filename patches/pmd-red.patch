@@ -235,14 +235,14 @@ index deddec5b..db4551d5 100644
  #endif // GUARD_GBA_SYSCALL_H
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..7c4c4f89
+index 00000000..f4d4d1bb
 --- /dev/null
 +++ b/include/port_screen_menu.h
 @@ -0,0 +1,12 @@
 +#ifndef GUARD_PORT_SCREEN_MENU_H
 +#define GUARD_PORT_SCREEN_MENU_H
 +
-+// 3DS port: Others > Screen/Layout Options (src/port_screen_menu.c).
++// 3DS port: Others > Screen Options (src/port_screen_menu.c).
 +#include "game_options.h"
 +
 +void PortScreenMenu_Create(GameOptions *options);
@@ -372,6 +372,48 @@ index 000bd33a..0517662f 100644
  
      REG_WININ = WININ_WIN0_ALL | WININ_WIN1_ALL;
      REG_WINOUT = WINOUT_WIN01_OBJ | WINOUT_WIN01_CLR | WINOUT_WIN01_BG3 | WINOUT_WIN01_BG2 | WINOUT_WIN01_BG0;
+diff --git a/src/data/options_menu1.h b/src/data/options_menu1.h
+index d7099dca..985c92a9 100644
+--- a/src/data/options_menu1.h
++++ b/src/data/options_menu1.h
+@@ -19,5 +19,9 @@ static const WindowTemplate sUnknown_80DBFCC = {
+ 
+ ALIGNED(4) static const u8 sOthers[] = _("Others");
+ ALIGNED(4) static const u8 sChangeSettingsPrompt[] = _("Change settings?");
++#ifdef PLATFORM_3DS
++ALIGNED(4) static const u8 sGameOptions[] = _("Windows Options"); // 3DS port: renamed
++#else
+ ALIGNED(4) static const u8 sGameOptions[] = _("Game Options");
++#endif
+ ALIGNED(4) static const u8 sHints[] = _("Hints");
+diff --git a/src/data/options_menu2.h b/src/data/options_menu2.h
+index 55f3b5f3..3eec994a 100644
+--- a/src/data/options_menu2.h
++++ b/src/data/options_menu2.h
+@@ -7,7 +7,11 @@ static const WindowTemplate sUnknown_80DC020 = {
+     NULL
+ };
+ 
++#ifdef PLATFORM_3DS
++static const WindowHeader sUnknown_80DC038 = {1, 0, 11, 0}; // room for "Windows Options"
++#else
+ static const WindowHeader sUnknown_80DC038 = {1, 0, 10, 0};
++#endif
+ static const WindowTemplate sUnknown_80DC03C = {
+     0,
+     6,
+@@ -17,7 +21,11 @@ static const WindowTemplate sUnknown_80DC03C = {
+     &sUnknown_80DC038
+ };
+ 
++#ifdef PLATFORM_3DS
++ALIGNED(4) static const u8 sGameOptions[] = _("Windows Options"); // 3DS port: renamed
++#else
+ ALIGNED(4) static const u8 sGameOptions[] = _("Game Options");
++#endif
+ ALIGNED(4) static const u8 sUnknown_80DC064[] = _("Windows{MOVE_X_POSITION_BY_80}Blue{MOVE_X_POSITION_BY_120}Red{MOVE_X_POSITION_BY_160}Green");
+ ALIGNED(4) static const u8 sBlue[] = _("Blue");
+ ALIGNED(4) static const u8 sRed[] = _("Red");
 diff --git a/src/dungeon_cleared_window.c b/src/dungeon_cleared_window.c
 index 28b04fb0..368ffdc7 100644
 --- a/src/dungeon_cleared_window.c
@@ -1477,7 +1519,7 @@ index d24034e1..9478c71b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..13bd342a 100644
+index 86f582c2..45ee20fb 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -1503,7 +1545,7 @@ index 86f582c2..13bd342a 100644
      MENU_OPTION_YES,
 -    MENU_OPTION_NO
 +    MENU_OPTION_NO,
-+    MENU_OPTION_SCREEN, // 3DS port: Screen/Layout Options
++    MENU_OPTION_SCREEN, // 3DS port: Screen Options
  };
  
  enum OptionsMenuStates
@@ -1524,14 +1566,14 @@ index 86f582c2..13bd342a 100644
 +static void ApplyNewOptions(void);
 +static void LeaveSettings(bool8 portConfigChanged);
 +static void HandleChangesSaved(void);
-+ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Screen/Layout Options");
++ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Screen Options");
 +ALIGNED(4) static const u8 sChangesSaved[] = _("Changes saved.");
 +// 3DS port: settings take effect as soon as a toggle changes; leaving the
-+// Game Options or Screen/Layout Options window then writes them and says
++// Windows Options or Screen Options window then writes them and says
 +// "Changes saved." (instead of asking "Change settings?").
 +static GameOptions sOpenedOptions;
 +static bool8 sSaveGameOptions, sSavePortConfig;
-+#define OTHERS_MENU_WIDTH 14
++#define OTHERS_MENU_WIDTH 11
 +#else
 +#define OTHERS_MENU_WIDTH 10
 +#endif
@@ -1606,19 +1648,19 @@ index 86f582c2..13bd342a 100644
      }
  }
  
-@@ -183,6 +235,12 @@ static void CreateOthersMenu(void)
+@@ -180,6 +232,12 @@ static void CreateOthersMenu(void)
+     MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
+     loopMax = 0;
+ 
++#ifdef PLATFORM_3DS
++    // 3DS port: Screen Options first
++    sUnknown_203B25C->menuItems[loopMax].text = sScreenLayoutOptions;
++    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SCREEN;
++    loopMax++;
++#endif
      sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
      sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
  
-+#ifdef PLATFORM_3DS
-+    loopMax++;
-+    sUnknown_203B25C->menuItems[loopMax].text = sScreenLayoutOptions;
-+    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SCREEN;
-+#endif
-+
-     loopMax++;
-     sUnknown_203B25C->menuItems[loopMax].text = sHints;
-     sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_HINTS;
 @@ -229,6 +287,11 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
@@ -1728,11 +1770,11 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..abba2877
+index 00000000..8402baa6
 --- /dev/null
 +++ b/src/port_screen_menu.c
 @@ -0,0 +1,242 @@
-+// 3DS port: Others > Screen/Layout Options (outside dungeons).
++// 3DS port: Others > Screen Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
 +//   Main Screen            Top / Bottom (kept in the save's game options, in the
@@ -1788,7 +1830,7 @@ index 00000000..abba2877
 +    &sHeader
 +};
 +
-+ALIGNED(4) static const u8 sTitleTop[] = _("Screen/Layout Options");
++ALIGNED(4) static const u8 sTitleTop[] = _("Screen Options");
 +ALIGNED(4) static const u8 sTitleMain[] = _("Main Screen Settings");
 +ALIGNED(4) static const u8 sTitleSub[] = _("Sub-Screen Settings");
 +ALIGNED(4) static const u8 sMainScreen[] = _("Main Screen{MOVE_X_POSITION_BY_80}Top{MOVE_X_POSITION_BY_120}Bottom");
