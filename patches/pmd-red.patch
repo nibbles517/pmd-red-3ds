@@ -235,6 +235,30 @@ index 002fa3c7..406bee8e 100644
      u32 *spAsU32 = (u32 *)sp0;
  
      *spAsU32 = func();
+diff --git a/src/cpu.c b/src/cpu.c
+index 000bd33a..0517662f 100644
+--- a/src/cpu.c
++++ b/src/cpu.c
+@@ -65,6 +65,11 @@ void CpuFill(void *dest, void *value, s32 size)
+ 
+ void VBlank_CB(void)
+ {
++#ifdef PLATFORM_3DS
++    // Stops last frame's HBlank window DMA. The original pokes DMA0CNT_H
++    // directly, which the port's software DMA would not see.
++    DmaStop(0);
++#else
+     // Looks like a macro?
+     u16 cnt = REG_DMA0CNT_H;
+     cnt |= DMA_ENABLE;
+@@ -75,6 +80,7 @@ void VBlank_CB(void)
+     asm("mov \tr8, r8");
+     asm("mov \tr8, r8");
+     REG_DMA0CNT_H = cnt & ~(DMA_ENABLE);
++#endif
+ 
+     REG_WININ = WININ_WIN0_ALL | WININ_WIN1_ALL;
+     REG_WINOUT = WINOUT_WIN01_OBJ | WINOUT_WIN01_CLR | WINOUT_WIN01_BG3 | WINOUT_WIN01_BG2 | WINOUT_WIN01_BG0;
 diff --git a/src/dungeon_map_access.c b/src/dungeon_map_access.c
 index 4a9a72ad..9b88378e 100644
 --- a/src/dungeon_map_access.c
