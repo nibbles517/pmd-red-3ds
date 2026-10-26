@@ -7,7 +7,8 @@
 //   -e N            dump every Nth frame
 //   -l STATE / -w STATE   load / write an mGBA savestate (frame count restarts at -f)
 //   -f F            starting frame number (when loading a state)
-//   -a WAV          write the audio (stereo 16-bit, 32768 Hz)
+//   -a WAV          write the audio (stereo 16-bit, 65536 Hz)
+//   -d ADDR:LEN:FILE  dump bus memory after the last frame
 //   -m MASK         audio channels to keep: bits 0-3 PSG, 4-5 Direct Sound A/B
 #include <mgba/core/core.h>
 #include <mgba/core/serialize.h>
@@ -41,6 +42,7 @@ int main(int argc, char **argv)
     const char *rom = argv[1], *sav = argv[2], *out = argv[3];
     int frames = atoi(argv[4]), every = 0, first = 0;
     int shots[256], nshot = 0;
+    const char *dumpspec = NULL; // ADDR:LEN:FILE, dumped after the last frame
     int chmask = 0x3F; // audio channels: bits 0-3 PSG, 4-5 FIFO A/B
     const char *loadst = NULL, *writest = NULL, *wav = NULL;
     for (int i = 5; i < argc; i++) {
@@ -57,6 +59,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-w")) writest = argv[++i];
         else if (!strcmp(argv[i], "-f")) first = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-a")) wav = argv[++i];
+        else if (!strcmp(argv[i], "-d")) dumpspec = argv[++i];
         else if (!strcmp(argv[i], "-m")) chmask = strtol(argv[++i], NULL, 0);
     }
 
@@ -120,8 +123,15 @@ int main(int argc, char **argv)
         fclose(sf);
         free(st);
     }
+    if (dumpspec) {
+        char spec[512]; snprintf(spec, sizeof spec, "%s", dumpspec);
+        uint32_t addr = strtoul(strtok(spec, ":"), NULL, 0), len = strtoul(strtok(NULL, ":"), NULL, 0);
+        FILE *df = fopen(strtok(NULL, ":"), "wb");
+        for (uint32_t i = 0; i < len; i++) fputc(core->busRead8(core, addr + i), df);
+        fclose(df);
+    }
     if (aw) {
-        unsigned rate = 32768, bytes = asamples * 4;
+        unsigned rate = 65536, bytes = asamples * 4;
         unsigned char h[44] = "RIFF";
         memcpy(h + 8, "WAVEfmt ", 8);
         uint32_t v; uint16_t s;
