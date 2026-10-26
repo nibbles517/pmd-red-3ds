@@ -987,6 +987,13 @@ static int TransitionBrightness(void)
     s32 request = gDungeon == NULL ? Port_GroundExitRequest() : 0;
     bool8 friendMap = gFriendAreasMapPtr != NULL;
 
+    // Back on the title menu (quicksaved, say): whatever was going on is
+    // over, and the ground's last exit request (into the dungeon) is old.
+    if (gPortTitleMenu && gDungeon == NULL) {
+        sTransition = TR_NONE;
+        return PlaceOnMap() ? Port_TitleBrightness() * 0x100 / 32 : -1; // the title menu's fades
+    }
+
     switch (sTransition) {
         case TR_NONE:
             if (friendMap)
