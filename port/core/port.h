@@ -33,6 +33,8 @@ extern void (*gPortLineHook)(int line);
 void Ppu_BeginFrame(void);
 void Ppu_RenderLine(int line, uint16_t *dst);
 void Ppu_SetView(int wide); // wide: SCREEN_W-pixel lines, lines past 159 too (port_view.h)
+int Ppu_FullScreenEffect(void); // the wide view: a full-screen move effect showed last frame
+void Ppu_SetClip(int on);       // the wide view: draw only the GBA screen's columns
 
 // dma.c
 void Dma_HBlank(void);

@@ -155,6 +155,11 @@ static void RunFrame(void)
         memset(sFrame, 0, sizeof(sFrame)); // the framed view's border is black
     }
 
+    // Full-screen move effects (Psychic's picture...) in the wide view are
+    // drawn at the GBA screen's size, in its place, with black around: the
+    // effect stacks several full-screen layers, too slow to draw wider.
+    int effect = wide && !skip && Ppu_FullScreenEffect();
+
     // Lines 0-159: visible. The wide view also draws lines below, as if the
     // screen went on (no VCount events there, but the HBlank DMA continues).
     if (!skip)
@@ -170,6 +175,19 @@ static void RunFrame(void)
         }
         else if (mode == VIEW_GBA) {
             Ppu_RenderLine(line, &sFrame[line * GBA_W]);
+        }
+        else if (effect) {
+            uint16_t *row = &sFrame[line * SCREEN_W];
+            if (line < GBA_H) {
+                Ppu_SetClip(1);
+                Ppu_RenderLine(line, row);
+                Ppu_SetClip(0);
+                memset(row, 0, WIDE_OX * sizeof(uint16_t));
+                memset(row + WIDE_OX + GBA_W, 0, (SCREEN_W - WIDE_OX - GBA_W) * sizeof(uint16_t));
+            }
+            else {
+                memset(row, 0, SCREEN_W * sizeof(uint16_t));
+            }
         }
         else if (wide) {
             Ppu_RenderLine(line, &sFrame[line * SCREEN_W]);

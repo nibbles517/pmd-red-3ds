@@ -27,6 +27,8 @@
 
 #define W SCREEN_W // buffer size; the line drawn is sW pixels
 static int sW = GBA_W, sOx = 0, sWide = 0;
+static int sTiledShown, sTiledShownLast; // a full-screen move effect showed: this frame, the last one
+static unsigned sTiledLayers; // this line: the tiled layers with something in them
 struct PortWideBg gPortWideBg[4];
 uint8_t gPortTileBg[4];
 #define TILE_OY ((SCREEN_H - GBA_H) / 2)
@@ -105,6 +107,8 @@ static int sObjCount;
 
 void Ppu_BeginFrame(void)
 {
+    sTiledShownLast = sTiledShown;
+    sTiledShown = 0;
     sObjCount = 0;
     for (int n = 0; n < 128; n++) {
         const uint8_t *o = &gPortOam[n * 8];
@@ -326,18 +330,35 @@ static int RenderTextBg(int bg, int line, uint16_t *out);
 
 // Wide view, gPortTileBg: the background's GBA-sized picture repeated, with
 // one copy in the middle of the screen (full-screen move effects).
+
+// Whether a full-screen move effect showed on the last frame drawn.
+int Ppu_FullScreenEffect(void)
+{
+    return sTiledShownLast;
+}
+
+// Wide view: draw only the GBA screen's columns (sOx .. sOx + GBA_W - 1) of
+// the lines that follow, or all of them again.
+void Ppu_SetClip(int on)
+{
+    if (sWide)
+        sW = on ? sOx + GBA_W : SCREEN_W;
+}
+
 static int RenderTiledBg(int bg, int line, uint16_t *out)
 {
     static uint16_t gbaLine[GBA_W];
     int gy = ((line - TILE_OY) % GBA_H + GBA_H) % GBA_H;
     int any;
 
+    int savedW = sW;
     sWide = 0; sW = GBA_W; sOx = 0;
     any = RenderTextBg(bg, gy, gbaLine);
-    sWide = 1; sW = SCREEN_W; sOx = WIDE_OX;
+    sWide = 1; sW = savedW; sOx = WIDE_OX;
     sLastMask = ALL_GROUPS; sLastFull = 0;
     if (!any)
         return 0; // nothing to show: compositing skips the layer
+    sTiledLayers |= 1u << bg; // shown, if it ends up on top somewhere (Compose)
     int gx = ((-sOx) % GBA_W + GBA_W) % GBA_W;
     for (int sx = 0; sx < sW; sx++) {
         out[sx] = gbaLine[gx];
@@ -365,9 +386,10 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         // system's fill tile, which in dungeons is the darkness (blended over
         // the floor): to the sides BG1 is that tile, so the darkness reaches
         // the edges.
+        int savedW = sW;
         sW = sOx + GBA_W;
         int any = RenderTextBgVram(bg, line, out, cnt);
-        sW = SCREEN_W;
+        sW = savedW;
         if (bg == 0) {
             for (int x = 0; x < sOx; x++) out[x] = TRANSPARENT;
             for (int x = sOx + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
@@ -851,6 +873,16 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
         }
     }
 
+    // A tiled layer (full-screen move effect) on top anywhere: it shows.
+    if (sTiledLayers && !sTiledShown) {
+        for (int x = 0; x < sW; x++) {
+            if ((sTiledLayers >> topL[x]) & 1) {
+                sTiledShown = 1;
+                break;
+            }
+        }
+    }
+
     // Colour effects, on the groups where the top layer can be a target.
     if (effect == 0 && !sObjSemiAny)
         return;
@@ -901,6 +933,7 @@ void Ppu_RenderLine(int line, uint16_t *dst)
 {
     uint16_t dispcnt = R16(0x00);
     sPalTBuilt = 0;
+    sTiledLayers = 0;
     int mode = dispcnt & 7;
 
     sVLimit = sWide ? SCREEN_H : GBA_H;
