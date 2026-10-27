@@ -61,14 +61,6 @@ static inline u16 Rgb(int r, int g, int b)
     return (u16)((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10));
 }
 
-static inline u16 Blend50(u16 a, u16 b)
-{
-    int r = ((a & 31) + (b & 31)) >> 1;
-    int g = (((a >> 5) & 31) + ((b >> 5) & 31)) >> 1;
-    int bl = (((a >> 10) & 31) + ((b >> 10) & 31)) >> 1;
-    return (u16)(r | (g << 5) | (bl << 10));
-}
-
 static inline void Plot(int x, int y, u16 c)
 {
     if ((unsigned)x < W && (unsigned)y < H)
@@ -937,13 +929,7 @@ static void DrawGameWindow(int px, int py, int w, int h)
                     if (c == 0)
                         continue;
                     int sx = px + tx * 8 + x, sy = py + ty * 8 + y;
-                    u16 color = sWindowPal[c] & 0x7FFF;
-                    // Windows Options > BG Shading: Translucent, as on the main
-                    // screen: the background blended half and half over what
-                    // is behind it (the game's alpha, 8/16 + 8/16)
-                    if (fill && gPortConfig.windowShading && (unsigned)sx < W && (unsigned)sy < H)
-                        color = Blend50(color, sOut[sy * W + sx]);
-                    Plot(sx, sy, color);
+                    Plot(sx, sy, sWindowPal[c] & 0x7FFF);
                 }
             }
         }
@@ -1084,7 +1070,6 @@ static bool8 DrawMapAndTeam(void)
     StartDungeonLayout(PORT_SUB_LAYOUT_MT, &k);
     LoadWindowPalette();
     KeyAdd(&k, sWindowPal, sizeof(sWindowPal));
-    KeyAdd(&k, &gPortConfig.windowShading, 1);
     if (KeyChanged(&sLastBase, &k)) {
         sOut = sMtBase;
         DrawGrid();
@@ -1251,7 +1236,6 @@ static bool8 DrawMessageLog(void)
     StartDungeonLayout(PORT_SUB_LAYOUT_LOG, &k);
     LoadWindowPalette();
     KeyAdd(&k, sWindowPal, sizeof(sWindowPal));
-    KeyAdd(&k, &gPortConfig.windowShading, 1);
     KeyAdd(&k, &gDungeon->unk16, sizeof(gDungeon->unk16));
     KeyAdd(&k, gDungeon->messageLogStrings, sizeof(gDungeon->messageLogStrings));
     if (!KeyChanged(&sLast, &k))
@@ -1329,9 +1313,7 @@ static bool8 DrawWorldMap(void)
         if (area == FRIEND_AREA_NONE || area >= FRIEND_AREA_COUNT || !Port_FriendAreaMapPos(area, &areaPos))
             area = FRIEND_AREA_NONE;
     }
-    static u8 sCachedShading;
-    bool8 newColors = LoadWindowPalette() || sCachedShading != gPortConfig.windowShading;
-    sCachedShading = gPortConfig.windowShading;
+    bool8 newColors = LoadWindowPalette();
     sWorldMapChanged = sLayoutDrawn != -2;
     sLayoutDrawn = -2;
     if (place != sCachedPlace || area != sCachedArea || newColors) {

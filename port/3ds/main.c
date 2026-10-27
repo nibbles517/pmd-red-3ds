@@ -28,7 +28,7 @@
 
 void AgbMain(void);
 
-const int Backend_Version7_UpdateRepoIfMissing = 7;
+const int Backend_Version8_UpdateRepoIfMissing = 8;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -231,11 +231,51 @@ static void PresentSub(void)
     }
 }
 
+static int sMainPresented; // this frame drew the main screen (else it keeps its buffers)
+
 void Backend_Present(const uint16_t *frame, int width, int height)
 {
     (void)height;
-    PresentMain(frame, width);
+    // NULL: a frame Frame Skip did not draw. During the screen change fade
+    // the last picture is shown again (the fade changes its colours).
+    if (frame == NULL && sFadeDir != 0)
+        frame = Port_Framebuffer();
+    sMainPresented = frame != NULL;
+    if (frame != NULL)
+        PresentMain(frame, width);
     PresentSub();
+}
+
+// --- Pacing ------------------------------------------------------------------
+//
+// Each frame should be done by the next VBlank (60 a second). One that is
+// not is "late": the next frame then starts at once, without waiting for a
+// VBlank, and Frame Skip: Auto leaves out its drawing, so that the game
+// catches up (port/core/frame.c).
+
+#define FRAME_TICKS ((u64)SYSCLOCK_ARM11 * 1000 / 59831) // the screens' refresh: 59.831 Hz
+static u64 sDeadline;
+static bool sLate;
+
+bool Backend_FrameLate(void)
+{
+    return sLate;
+}
+
+static void WaitForFrame(void)
+{
+    u64 now = svcGetSystemTick();
+    if (sDeadline == 0)
+        sDeadline = now + FRAME_TICKS;
+    sLate = now > sDeadline;
+    if (sLate && now - sDeadline > 2 * FRAME_TICKS)
+        sDeadline = now; // too far behind to catch up: carry on from now
+    if (sLate) {
+        sDeadline += FRAME_TICKS;
+        return;
+    }
+    gspWaitForVBlank();
+    sDeadline = svcGetSystemTick() + FRAME_TICKS;
 }
 
 static void ClearGameScreen(void)
@@ -437,8 +477,11 @@ void Backend_EndFrame(void)
     }
     FlushSave();
     gfxFlushBuffers();
-    gfxSwapBuffers();
-    gspWaitForVBlank();
+    // A skipped frame leaves the main screen's buffers as they are.
+    if (sMainPresented)
+        gfxScreenSwapBuffers(sBottom ? GFX_BOTTOM : GFX_TOP, false);
+    gfxScreenSwapBuffers(sBottom ? GFX_TOP : GFX_BOTTOM, false);
+    WaitForFrame();
     if (!aptMainLoop()) {
         Shutdown();
         exit(0);

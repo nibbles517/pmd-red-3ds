@@ -16,10 +16,11 @@ enum {
     IO_CAPTURE = 13, // read: nonzero = capture the next frame; write: buffer address when done
     IO_DUMPMAPS = 15, // read at start: nonzero = render both world maps (written back at IO_SUBSCREEN... see HarnessMain)
     IO_SUBSCREEN = 14, // read: nonzero = render the second screen; write: its buffer (0 = nothing)
+    IO_LATE = 16,      // read: nonzero = report the last frame as late (Frame Skip: Auto)
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4 };
 
-const int Backend_Version7_UpdateRepoIfMissing = 7;
+const int Backend_Version8_UpdateRepoIfMissing = 8;
 
 void AgbMain(void);
 
@@ -49,8 +50,21 @@ void Backend_Fatal(const char *msg)
     for (;;) {}
 }
 
+bool Backend_FrameLate(void) { return IO[IO_LATE] != 0; }
+
 void Backend_Present(const uint16_t *frame, int width, int height)
 {
+    static const uint16_t *sLast;
+    static int sLastW;
+    if (frame == NULL) { // skipped: the last picture again
+        frame = sLast;
+        width = sLastW;
+        height = width == GBA_W ? GBA_H : SCREEN_H;
+        if (frame == NULL)
+            return;
+    }
+    sLast = frame;
+    sLastW = width;
     // the harness always takes 256x192: a GBA-size picture goes in the middle
     static uint16_t ds[SCREEN_W * SCREEN_H];
     if (width == GBA_W) {

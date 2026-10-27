@@ -85,7 +85,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version7_UpdateRepoIfMissing != 7)
+    if (Backend_Version8_UpdateRepoIfMissing != 8)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -132,6 +132,22 @@ static void RunFrame(void)
         memset(gPortTileBg, 0, sizeof(gPortTileBg));
     }
 
+    // Performance Settings > Frame Skip: the game runs every frame, but the
+    // picture is not drawn on some (the main screen keeps the last one).
+    // Always: every other frame. Auto: after a frame that took too long (so
+    // the game keeps its speed when drawing is too slow), at most
+    // MAX_SKIPPED frames in a row.
+    enum { MAX_SKIPPED = 2 };
+    static int sSkipped; // frames skipped in a row
+    int skip = 0;
+    switch (Port_FrameSkipMode()) {
+        case 1: skip = Backend_FrameLate() && sSkipped < MAX_SKIPPED; break;
+        case 2: skip = sSkipped == 0; break;
+    }
+    if (mode != sViewMode)
+        skip = 0; // a new view is drawn at once
+    sSkipped = skip ? sSkipped + 1 : 0;
+
     sInFrame = 1;
     if (mode != sViewMode) {
         sViewMode = mode;
@@ -141,14 +157,18 @@ static void RunFrame(void)
 
     // Lines 0-159: visible. The wide view also draws lines below, as if the
     // screen went on (no VCount events there, but the HBlank DMA continues).
-    Ppu_BeginFrame();
+    if (!skip)
+        Ppu_BeginFrame();
     for (int line = 0; line < (wide ? SCREEN_H : GBA_H); line++) {
         if (line < GBA_H) {
             SetLine(line);
             if (gPortLineHook)
                 gPortLineHook(line);
         }
-        if (mode == VIEW_GBA) {
+        if (skip) {
+            // not drawn
+        }
+        else if (mode == VIEW_GBA) {
             Ppu_RenderLine(line, &sFrame[line * GBA_W]);
         }
         else if (wide) {
@@ -160,11 +180,12 @@ static void RunFrame(void)
         }
         Dma_HBlank();
     }
-    memcpy(sShown, sFrame, sizeof(sShown));
+    if (!skip)
+        memcpy(sShown, sFrame, sizeof(sShown));
     if (mode == VIEW_GBA)
-        Backend_Present(sShown, GBA_W, GBA_H);
+        Backend_Present(skip ? NULL : sShown, GBA_W, GBA_H);
     else
-        Backend_Present(sShown, SCREEN_W, SCREEN_H);
+        Backend_Present(skip ? NULL : sShown, SCREEN_W, SCREEN_H);
 
     // Lines 160-227: VBlank.
     SetLine(160);

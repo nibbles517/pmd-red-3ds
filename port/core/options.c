@@ -7,54 +7,27 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 1
-struct PortConfig gPortConfig = { PORT_CONFIG_VERSION };
+#define PORT_CONFIG_VERSION 2
+struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO };
 
 void Port_LoadConfig(void)
 {
     // An older, shorter file loads too (the backend fills the rest with 0).
     struct PortConfig c;
-    if (Backend_LoadConfig((uint8_t *)&c, sizeof(c)) && c.version == PORT_CONFIG_VERSION)
+    if (!Backend_LoadConfig((uint8_t *)&c, sizeof(c)))
+        return;
+    if (c.version == 1) { // before Frame Skip: Auto
+        c.version = PORT_CONFIG_VERSION;
+        c.frameSkip = PORT_FRAMESKIP_AUTO;
+    }
+    if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
+    memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));
 }
 
-void Port_GetDungeonWindows(u8 *bgColor, u8 *shading, u8 *border)
+int Port_FrameSkipMode(void)
 {
-    if (gPortConfig.dungeonWindowsSet) {
-        *bgColor = gPortConfig.dungeonBgColor;
-        *shading = gPortConfig.dungeonShading & 1;
-        *border = gPortConfig.dungeonBorder & 1;
-    }
-    else {
-        *bgColor = gGameOptionsRef->windowColor;
-        *shading = 1;
-        *border = gGameOptionsRef->playerGender != MALE;
-    }
-}
-
-u8 Port_WindowColor(void)
-{
-    u8 c, s, b;
-    if (gDungeon == NULL)
-        return gGameOptionsRef->windowColor;
-    Port_GetDungeonWindows(&c, &s, &b);
-    return c;
-}
-
-bool8 Port_PinkBorders(void)
-{
-    u8 c, s, b;
-    if (gDungeon == NULL)
-        return gGameOptionsRef->playerGender != MALE;
-    Port_GetDungeonWindows(&c, &s, &b);
-    return b;
-}
-
-bool8 Port_SolidDungeonWindows(void)
-{
-    u8 c, s, b;
-    Port_GetDungeonWindows(&c, &s, &b);
-    return !s;
+    return gPortConfig.frameSkip;
 }
 
 void Port_SaveConfig(void)

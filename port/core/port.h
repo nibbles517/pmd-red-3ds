@@ -51,6 +51,7 @@ void Sound_EndFrame(void);
 bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Screen
 bool Port_DsSize(void);            // ... > Main Screen Settings > Size is DS (port_view.h)
 void Port_LoadConfig(void);
+int Port_FrameSkipMode(void);       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
 
 // subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
 // true when there is something to show.
@@ -63,7 +64,13 @@ bool Port_SubScreenChanged(void);
 void Port_SubScreenChangedArea(int *x0, int *y0, int *x1, int *y1); // what changed (x1/y1 exclusive)
 
 // Backend: implemented once per platform.
-void Backend_Present(const uint16_t *frame, int width, int height); // BGR555: 240x160 (GBA size) or SCREEN_W x SCREEN_H (DS size)
+// BGR555: 240x160 (GBA size) or SCREEN_W x SCREEN_H (DS size). frame is NULL
+// on a frame skipped by Frame Skip: the main screen keeps its last picture
+// (the second screen is still updated).
+void Backend_Present(const uint16_t *frame, int width, int height);
+// Whether the last frame took longer than a 60th of a second (Frame Skip:
+// Auto then skips drawing the next one).
+bool Backend_FrameLate(void);
 uint16_t Backend_PollKeys(void);               // active-high GBA key bits
 void Backend_EndFrame(void);                   // pacing; may also service the OS
 void Backend_Log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -71,7 +78,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version7_UpdateRepoIfMissing;
+extern const int Backend_Version8_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
