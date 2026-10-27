@@ -2251,7 +2251,7 @@ index d24034e1..9478c71b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..8135b283 100644
+index 86f582c2..fecec5d8 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -2277,7 +2277,7 @@ index 86f582c2..8135b283 100644
      MENU_OPTION_YES,
 -    MENU_OPTION_NO
 +    MENU_OPTION_NO,
-+    MENU_OPTION_SCREEN, // 3DS port: Screen Options
++    MENU_OPTION_SCREEN, // 3DS port: Graphics Options
  };
  
  enum OptionsMenuStates
@@ -2298,10 +2298,10 @@ index 86f582c2..8135b283 100644
 +static void ApplyNewOptions(void);
 +static void LeaveSettings(bool8 portConfigChanged);
 +static void HandleChangesSaved(void);
-+ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Screen Options");
++ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Graphics Options");
 +ALIGNED(4) static const u8 sChangesSaved[] = _("Changes saved.");
 +// 3DS port: settings take effect as soon as a toggle changes; leaving the
-+// Windows Options or Screen Options window then writes them and says
++// Windows Options or Graphics Options window then writes them and says
 +// "Changes saved." (instead of asking "Change settings?").
 +static GameOptions sOpenedOptions;
 +static struct PortConfig sOpenedConfig; // the port's settings in Windows Options
@@ -2387,7 +2387,7 @@ index 86f582c2..8135b283 100644
      loopMax = 0;
  
 +#ifdef PLATFORM_3DS
-+    // 3DS port: Screen Options first
++    // 3DS port: Graphics Options first
 +    sUnknown_203B25C->menuItems[loopMax].text = sScreenLayoutOptions;
 +    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SCREEN;
 +    loopMax++;
@@ -2594,13 +2594,14 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..8a561087
+index 00000000..e65a3c03
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,296 @@
-+// 3DS port: Others > Screen Options (outside dungeons).
+@@ -0,0 +1,304 @@
++// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
++//   Frame Skip             Off / Auto / Always (port/core/frame.c)
 +//   Main Screen            Top / Bottom (kept in the save's game options, in the
 +//                          bit the DS version uses for its touch screen option:
 +//                          clear = bottom, set = top)
@@ -2608,7 +2609,6 @@ index 00000000..8a561087
 +//                          Scale (None/Full/Stretch), placeholders for now
 +//   Sub-Screen Settings    Enabled? (Yes/No: turns the second screen on/off),
 +//                          then the same Size and Scale placeholders
-+//   Performance Settings   Frame Skip (Off/Auto/Always, port/core/frame.c)
 +// The page settings live in the port's own config file (gPortConfig). Every
 +// toggle takes effect as soon as it changes; the file is written when the
 +// menu is left (options_menu1.c, "Changes saved.").
@@ -2628,7 +2628,9 @@ index 00000000..8a561087
 +
 +#ifdef PLATFORM_3DS
 +
-+enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN, PAGE_PERFORMANCE };
++enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN };
++// First page entries
++enum { TOP_FRAMESKIP, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
 +
 +#define TOP_ENTRIES 4
 +#define MAX_CHOICES 4
@@ -2655,10 +2657,9 @@ index 00000000..8a561087
 +    &sHeader
 +};
 +
-+ALIGNED(4) static const u8 sTitleTop[] = _("Screen Options");
++ALIGNED(4) static const u8 sTitleTop[] = _("Graphics Options");
 +ALIGNED(4) static const u8 sTitleMain[] = _("Main Screen Settings");
 +ALIGNED(4) static const u8 sTitleSub[] = _("Sub-Screen Settings");
-+ALIGNED(4) static const u8 sTitlePerformance[] = _("Performance Settings");
 +ALIGNED(4) static const u8 sFrameSkip[] = _("Frame Skip");
 +ALIGNED(4) static const u8 sOff[] = _("Off");
 +ALIGNED(4) static const u8 sAuto[] = _("Auto");
@@ -2690,14 +2691,14 @@ index 00000000..8a561087
 +    [SETTING_SCALE] = { sScale, 3, { sScaleNone, sScaleFull, sScaleStretch } },
 +    [SETTING_FRAMESKIP] = { sFrameSkip, 3, { sOff, sAuto, sAlways } },
 +};
-+#define CHOICE_X(i) ((sMenu.page == PAGE_PERFORMANCE ? 80 : 64) + (i) * 40) // (past "Frame Skip")
++#define CHOICE_X(i) (64 + (i) * 40)
++#define FRAMESKIP_X(i) (80 + (i) * 40) // as Main Screen's choices
 +
 +static s32 EntryCount(void)
 +{
 +    switch (sMenu.page) {
 +        case PAGE_TOP: return TOP_ENTRIES;
 +        case PAGE_SUB_SCREEN: return 3;
-+        case PAGE_PERFORMANCE: return 1;
 +        default: return 2;
 +    }
 +}
@@ -2705,8 +2706,6 @@ index 00000000..8a561087
 +// Which setting entry `i` of the current settings page is.
 +static s32 EntrySetting(s32 i)
 +{
-+    if (sMenu.page == PAGE_PERFORMANCE)
-+        return SETTING_FRAMESKIP;
 +    return sMenu.page == PAGE_SUB_SCREEN ? i : i + 1;
 +}
 +
@@ -2764,20 +2763,24 @@ index 00000000..8a561087
 +    sub_80073B8(win);
 +
 +    if (sMenu.page == PAGE_TOP) {
++        s32 c, skip = gPortConfig.frameSkip < 3 ? gPortConfig.frameSkip : PORT_FRAMESKIP_AUTO;
 +        PrintStringOnWindow(16, 0, sTitleTop, win, 0);
-+        y = GetMenuEntryYCoord(&sMenu.input, 0);
++        y = GetMenuEntryYCoord(&sMenu.input, TOP_FRAMESKIP);
++        PrintStringOnWindow(8, y, sFrameSkip, win, 0);
++        for (c = 0; c < 3; c++)
++            PrintStringOnWindow(FRAMESKIP_X(c), y, sSettings[SETTING_FRAMESKIP].choices[c], win, 0);
++        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(skip), y + 10, GetStringLineWidth(sSettings[SETTING_FRAMESKIP].choices[skip]), COLOR_WHITE_2);
++        y = GetMenuEntryYCoord(&sMenu.input, TOP_MAIN_SCREEN);
 +        PrintStringOnWindow(8, y, sMainScreen, win, 0);
 +        if (sMenu.options->touchScreen)
 +            AddDoubleUnderScoreHighlight(win, 80, y + 10, GetStringLineWidth(sTop), COLOR_WHITE_2);
 +        else
 +            AddDoubleUnderScoreHighlight(win, 120, y + 10, GetStringLineWidth(sBottom), COLOR_WHITE_2);
-+        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, 1), sMainScreenSettings, win, 0);
-+        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, 2), sSubScreenSettings, win, 0);
-+        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, 3), sTitlePerformance, win, 0);
++        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, TOP_MAIN_SETTINGS), sMainScreenSettings, win, 0);
++        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, TOP_SUB_SETTINGS), sSubScreenSettings, win, 0);
 +    }
 +    else {
-+        PrintStringOnWindow(16, 0, sMenu.page == PAGE_MAIN_SCREEN ? sTitleMain
-+                                 : sMenu.page == PAGE_SUB_SCREEN ? sTitleSub : sTitlePerformance, win, 0);
++        PrintStringOnWindow(16, 0, sMenu.page == PAGE_MAIN_SCREEN ? sTitleMain : sTitleSub, win, 0);
 +        for (i = 0; i < EntryCount(); i++) {
 +            s32 setting = EntrySetting(i);
 +            s32 c, value = *SettingValue(setting), first = FirstChoice(setting);
@@ -2841,14 +2844,14 @@ index 00000000..8a561087
 +            if (sMenu.page != PAGE_TOP) {
 +                // back to the first page, on the entry that led here
 +                PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
-+                index = sMenu.page; // the entries are in page order
++                index = sMenu.page == PAGE_MAIN_SCREEN ? TOP_MAIN_SETTINGS : TOP_SUB_SETTINGS;
 +                sMenu.page = PAGE_TOP;
 +                ShowPage(index);
 +                return 1;
 +            }
-+            if (accept && index != 0) {
++            if (accept && (index == TOP_MAIN_SETTINGS || index == TOP_SUB_SETTINGS)) {
 +                PlayMenuSoundEffect(MENU_SFX_ACCEPT);
-+                sMenu.page = index; // PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN, PAGE_PERFORMANCE
++                sMenu.page = index == TOP_MAIN_SETTINGS ? PAGE_MAIN_SCREEN : PAGE_SUB_SCREEN;
 +                ShowPage(0);
 +                return 1;
 +            }
@@ -2859,7 +2862,12 @@ index 00000000..8a561087
 +        case INPUT_DPAD_RIGHT: {
 +            s32 step = input == INPUT_DPAD_LEFT ? -1 : 1;
 +            if (sMenu.page == PAGE_TOP) {
-+                if (index == 0) {
++                if (index == TOP_FRAMESKIP) {
++                    s32 v = gPortConfig.frameSkip < 3 ? gPortConfig.frameSkip : PORT_FRAMESKIP_AUTO;
++                    gPortConfig.frameSkip = (u8)((v + 3 + step) % 3);
++                    changed = TRUE;
++                }
++                else if (index == TOP_MAIN_SCREEN) {
 +                    sMenu.options->touchScreen = !sMenu.options->touchScreen;
 +                    changed = TRUE;
 +                }
