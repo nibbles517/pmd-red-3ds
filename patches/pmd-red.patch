@@ -1845,7 +1845,7 @@ index 1179e657..13c8e87f 100644
  // arm9.bin::0200A178
  void InitGraphics(void)
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..d89393fd 100644
+index 069cfc94..67646a9e 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -1856,7 +1856,7 @@ index 069cfc94..d89393fd 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,132 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,149 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -1891,28 +1891,45 @@ index 069cfc94..d89393fd 100644
 +        if (bg < 2 || bg > 3)
 +            continue;
 +        dst = sPortWideMaps[bg - 2];
-+        for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++) {
++        if (cd == 0 || chunks == NULL) {
++            for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++)
++                for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++)
++                    dst[(ty & 31) * 64 + (tx & 63)] = 0;
++        }
++        else {
++            // Each column's chunk and place in it, worked out once (no
++            // divisions in the loop: this runs every frame).
++            s16 colChunk[SCREEN_W / 8 + 1], colIn[SCREEN_W / 8 + 1];
 +            for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++) {
-+                s32 mx = tx, my = ty;
-+                u16 e;
-+
-+                if (cd == 0 || chunks == NULL) {
-+                    e = 0;
++                s32 mx = tx, i = tx - tx0;
++                if (mapRender->wrapAround)
++                    mx = ((mx % mapW) + mapW) % mapW;
++                if (mx < 0 || mx >= mapW) {
++                    colChunk[i] = -1;
++                    colIn[i] = 0;
++                } else {
++                    colChunk[i] = mx / cd;
++                    colIn[i] = mx % cd;
 +                }
-+                else {
-+                    if (mapRender->wrapAround) {
-+                        mx = ((mx % mapW) + mapW) % mapW;
-+                        my = ((my % mapH) + mapH) % mapH;
-+                    }
-+                    if (mx < 0 || my < 0 || mx >= mapW || my >= mapH) {
-+                        e = PORT_WIDE_BLACK;
-+                    }
-+                    else {
-+                        u16 chunk = chunks[(my / cd) * 64 + mx / cd];
-+                        e = mapRender->tileMappings[chunk * 9 + (my % cd) * cd + mx % cd];
-+                    }
++            }
++            for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++) {
++                s32 my = ty;
++                u16 *out = &dst[(ty & 31) * 64];
++                const u16 *chunkRow;
++                const u16 *tiles;
++                if (mapRender->wrapAround)
++                    my = ((my % mapH) + mapH) % mapH;
++                if (my < 0 || my >= mapH) {
++                    for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++)
++                        out[tx & 63] = PORT_WIDE_BLACK;
++                    continue;
 +                }
-+                dst[(ty & 31) * 64 + (tx & 63)] = e;
++                chunkRow = &chunks[(my / cd) * 64];
++                tiles = &mapRender->tileMappings[(my % cd) * cd];
++                for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++) {
++                    s32 i = tx - tx0;
++                    out[tx & 63] = colChunk[i] < 0 ? PORT_WIDE_BLACK : tiles[chunkRow[colChunk[i]] * 9 + colIn[i]];
++                }
 +            }
 +        }
 +        gPortWideBg[bg].map = dst;

@@ -222,7 +222,7 @@ class Harness:
         elif reg == 15:  # dump the world maps?
             val = 1 if self.args.dump_maps else 0
         elif reg == 14:  # render the second screen this frame?
-            val = 1 if self.wants_shot() else 0
+            val = 1 if self.wants_shot() or self.args.sub_always else 0
         else:
             val = self.regs[reg]
         uc.mem_write(addr, struct.pack('<I', val)[:size])
@@ -280,7 +280,7 @@ class Harness:
         elif reg == 15:  # a world map rendered (512x512)
             self.maps_dumped = getattr(self, 'maps_dumped', 0) + 1
             write_png(os.path.join(self.args.out, f'worldmap{self.maps_dumped}.png'), bytes(uc.mem_read(value, 512 * 512 * 2)), 512, 512)
-        elif reg == 14 and value:  # second screen rendered (256x192)
+        elif reg == 14 and value and self.wants_shot():  # second screen rendered (256x192)
             write_png(os.path.join(self.args.out, f'sub_{self.frame:05d}.png'), bytes(uc.mem_read(value, 256 * 192 * 2)), 256, 192)
         elif reg == 12:  # audio chunk: `value` interleaved 16-bit stereo samples
             self.audio += bytes(uc.mem_read(self.regs[9], value * 4))
@@ -293,6 +293,7 @@ class Harness:
         from unicorn.arm_const import UC_ARM_REG_CPSR
         samples = collections.Counter()
         callers = collections.Counter()
+        pcs = collections.Counter()
         self.stopped_by_hook = False
         pc = start
         while self.exit_code is None and self.frame < self.args.frames:
@@ -304,12 +305,18 @@ class Harness:
             if self.frame == frame_before or True:
                 name = where(self.syms, pc & ~1).split('+')[0]
                 samples[name] += 1
+                pcs[pc & ~1] += 1
                 lr = self.uc.reg_read(UC_ARM_REG_LR)
                 callers[(name, where(self.syms, lr & ~1).split('+')[0])] += 1
         total = sum(samples.values())
         print(f'\nprofile: {total} samples, {self.args.profile} instructions each')
         for name, n in samples.most_common(30):
             print(f'  {100 * n / total:5.1f}%  {name}')
+        if self.args.profile_pcs:
+            with open(self.args.profile_pcs, 'w') as f:
+                for addr, n in pcs.most_common():
+                    f.write(f'{addr:#x} {n}\n')
+        print(f'instructions per frame: {total * self.args.profile / max(1, self.frame - self.first_frame):.0f}')
         print('top (function <- caller):')
         for (f, c), n in callers.most_common(15):
             print(f'  {100 * n / total:5.1f}%  {f} <- {c}')
@@ -318,10 +325,12 @@ class Harness:
         t0 = time.time()
         start = self.entry
         first = self.frame
+        self.first_frame = first
         if self.args.load_state:
             start = self.load_state(self.args.load_state)
             first = self.frame
             self.args.frames += self.frame  # --frames counts frames to run
+        self.first_frame = first
         try:
             if self.args.profile:
                 self.run_profiled(start)
@@ -387,6 +396,8 @@ def main():
     ap.add_argument('--dump-maps', action='store_true', help='write both world maps as PNGs at startup')
     ap.add_argument('--trace', action='append', default=[], help='log calls to this function (frame, r0-r3, lr)')
     ap.add_argument('--watch', action='append', default=[], help='log writes to SYMBOL+OFFSET[:LEN]')
+    ap.add_argument('--sub-always', action='store_true', help='render the second screen every frame (as on the 3DS)')
+    ap.add_argument('--profile-pcs', help='write the sampled PCs here (address count)')
     ap.add_argument('--profile', type=int, default=0, help='sample the PC every N instructions')
     return Harness(ap.parse_args()).run()
 

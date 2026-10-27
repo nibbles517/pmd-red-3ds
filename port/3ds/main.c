@@ -30,9 +30,17 @@ void AgbMain(void);
 
 const int Backend_Version7_UpdateRepoIfMissing = 7;
 
-static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565
+static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
-static const uint16_t *sPresentLut = sLut;
+static const uint16_t *sPresentLut; // NULL: full brightness (ToRgb565)
+
+// GBA BGR555 to RGB565, as sLut holds it. Worked out per pixel rather than
+// looked up: the 64 KiB table does not stay in the CPU's cache.
+static inline uint16_t ToRgb565(uint16_t c)
+{
+    return (uint16_t)(((c & 0x1F) << 11) | ((c & 0x3E0) << 1) | ((c >> 4) & 0x20) | ((c >> 10) & 0x1F));
+}
+#define PIX(c) (lut ? lut[(c) & 0x7FFF] : ToRgb565(c))
 static int sScaled;
 static int sBottom; // picture on the bottom screen
 static FILE *sLog;
@@ -60,7 +68,7 @@ static void SetFadeLevel(int level)
 {
     sFadeLevel = level;
     if (level >= FADE_FRAMES) {
-        sPresentLut = sLut;
+        sPresentLut = NULL;
         return;
     }
     for (unsigned c = 0; c < 0x8000; c++) {
@@ -83,7 +91,7 @@ static void PresentGba(const uint16_t *frame, uint16_t *fb, int width, const uin
         for (int x = 0; x < GBA_W; x++) {
             uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
             for (int y = 0; y < GBA_H; y++)
-                col[-y] = lut[frame[y * GBA_W + x] & 0x7FFF];
+                col[-y] = PIX(frame[y * GBA_W + x]);
         }
         return;
     }
@@ -95,7 +103,7 @@ static void PresentGba(const uint16_t *frame, uint16_t *fb, int width, const uin
             int x = sx * 3 / 4;
             uint16_t *col = fb + sx * 240 + (239 - oy);
             for (int sy = 0; sy < 213; sy++)
-                col[-sy] = lut[frame[(sy * 3 / 4) * GBA_W + x] & 0x7FFF];
+                col[-sy] = PIX(frame[(sy * 3 / 4) * GBA_W + x]);
         }
         return;
     }
@@ -106,7 +114,7 @@ static void PresentGba(const uint16_t *frame, uint16_t *fb, int width, const uin
         int x = sx * 2 / 3;
         uint16_t *col = fb + (ox + sx) * 240 + 239;
         for (int sy = 0; sy < 240; sy++)
-            col[-sy] = lut[frame[(sy * 2 / 3) * GBA_W + x] & 0x7FFF];
+            col[-sy] = PIX(frame[(sy * 2 / 3) * GBA_W + x]);
     }
 }
 
@@ -118,7 +126,7 @@ static void PresentDs(const uint16_t *frame, uint16_t *fb, int width, const uint
         for (int x = 0; x < SCREEN_W; x++) {
             uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
             for (int y = 0; y < SCREEN_H; y++)
-                col[-y] = lut[frame[y * SCREEN_W + x] & 0x7FFF];
+                col[-y] = PIX(frame[y * SCREEN_W + x]);
         }
         return;
     }
@@ -129,7 +137,7 @@ static void PresentDs(const uint16_t *frame, uint16_t *fb, int width, const uint
         const uint16_t *src = frame + sx * 4 / 5;
         uint16_t *col = fb + (ox + sx) * 240 + 239;
         for (int sy = 0; sy < 240; sy++)
-            col[-sy] = lut[src[(sy * 4 / 5) * SCREEN_W] & 0x7FFF];
+            col[-sy] = PIX(src[(sy * 4 / 5) * SCREEN_W]);
     }
 }
 
@@ -175,7 +183,14 @@ static void PresentSub(void)
         }
         return;
     }
+    // The second screen is drawn into both of its buffers after a change (the
+    // other one shows next frame), and left alone while nothing changes.
+    static int sSubWrites, sSubFade = -1;
+    if (Port_SubScreenChanged() || sFadeLevel != sSubFade)
+        sSubWrites = 2;
+    sSubFade = sFadeLevel;
     if (sSubMode != SUB_PICTURE) {
+        sSubWrites = 2;
         gfxSetScreenFormat(screen, GSP_RGB565_OES);
         gfxSetDoubleBuffering(screen, true);
         for (int i = 0; i < 2; i++) { // both buffers, so the border stays black
@@ -184,6 +199,9 @@ static void PresentSub(void)
         }
         sSubMode = SUB_PICTURE;
     }
+    if (sSubWrites == 0)
+        return;
+    sSubWrites--;
 
     const uint16_t *lut = sPresentLut;
     uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
@@ -191,7 +209,7 @@ static void PresentSub(void)
     for (int x = 0; x < SUBSCREEN_W; x++) {
         uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
         for (int y = 0; y < SUBSCREEN_H; y++)
-            col[-y] = lut[sSubFrame[y * SUBSCREEN_W + x] & 0x7FFF];
+            col[-y] = PIX(sSubFrame[y * SUBSCREEN_W + x]);
     }
 }
 

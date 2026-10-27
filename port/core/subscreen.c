@@ -557,14 +557,10 @@ static void DrawNumberRight(int xRight, int y, int v)
     }
 }
 
-static void DrawRow(int y0, const PanelRow *row)
+static void DrawRowText(int y0, const PanelRow *row)
 {
     u8 buf[16];
     int x;
-
-    DrawSpriteBox(y0, FALSE);
-    DrawInfoPanel(y0);
-    DrawRowSprite(row, 23, y0 + 41); // feet on the middle of the floor
 
     DrawText(56, y0 + 5, row->name, COLOR_NAME);
 
@@ -591,20 +587,104 @@ static void DrawRow(int y0, const PanelRow *row)
 
 static bool8 sInDungeon;
 
-static void DrawTeamPanel(void)
+// --- Redrawing only what changed -----------------------------------------------
+//
+// Each layout describes what it shows in a key; when the key is the same as
+// last frame's, the picture is too, and nothing is drawn.
+
+#define KEY_MAX 4096
+typedef struct { u8 data[KEY_MAX]; int size; } DrawKey;
+
+static void KeyAdd(DrawKey *k, const void *p, int n)
+{
+    if (k->size + n <= KEY_MAX)
+        memcpy(&k->data[k->size], p, n);
+    k->size += n;
+}
+
+// Whether `k` differs from `last` (then `last` becomes `k`).
+static bool8 KeyChanged(DrawKey *last, const DrawKey *k)
+{
+    if (k->size == last->size && memcmp(k->data, last->data, k->size < KEY_MAX ? k->size : KEY_MAX) == 0)
+        return FALSE;
+    memcpy(last->data, k->data, k->size < KEY_MAX ? k->size : KEY_MAX);
+    last->size = k->size;
+    return TRUE;
+}
+
+static int sLayoutDrawn = -1; // the layout the picture holds (-1: none)
+
+static void StartDungeonLayout(int layout, DrawKey *k)
 {
     if (!sInDungeon) { // a new dungeon: forget the last one's team
         memset(sRows, 0, sizeof(sRows));
         sInDungeon = TRUE;
     }
     UpdateRows();
-    Fill(0, 0, W, H, Rgb(74, 74, 116));
+    k->size = 0;
+    KeyAdd(k, &layout, sizeof(layout));
+    KeyAdd(k, &sLayoutDrawn, sizeof(sLayoutDrawn));
+}
+
+// The rows' text (all the panels show of them, but for the sprites).
+static void AddRowsText(DrawKey *k)
+{
     for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
-        if (sRows[i].used)
-            DrawRow(i * ROW_H, &sRows[i]);
-        else
-            DrawSpriteBox(i * ROW_H, TRUE);
+        const PanelRow *row = &sRows[i];
+        KeyAdd(k, &row->used, sizeof(row->used));
+        KeyAdd(k, &row->leader, sizeof(row->leader));
+        KeyAdd(k, row->name, sizeof(row->name));
+        KeyAdd(k, &row->level, sizeof(row->level));
+        KeyAdd(k, &row->hp, sizeof(row->hp));
+        KeyAdd(k, &row->maxHp, sizeof(row->maxHp));
+        KeyAdd(k, &row->item, sizeof(row->item));
+        KeyAdd(k, &row->tactic, sizeof(row->tactic));
     }
+}
+
+// Blue: the boxes and text are drawn once into sTeamBg, the sprites over
+// them when a frame changes.
+static void DrawRowText(int y0, const PanelRow *row);
+
+static bool8 DrawTeamPanel(void)
+{
+    static u16 sTeamBg[W * H];
+    static DrawKey sLastBg, sLast, k;
+    u16 *canvas = sOut;
+
+    StartDungeonLayout(PORT_SUB_LAYOUT_BLUE, &k);
+    AddRowsText(&k);
+    if (KeyChanged(&sLastBg, &k)) {
+        sOut = sTeamBg;
+        Fill(0, 0, W, H, Rgb(74, 74, 116));
+        for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
+            if (sRows[i].used) {
+                DrawSpriteBox(i * ROW_H, FALSE);
+                DrawInfoPanel(i * ROW_H);
+                DrawRowText(i * ROW_H, &sRows[i]);
+            } else {
+                DrawSpriteBox(i * ROW_H, TRUE);
+            }
+        }
+        sOut = canvas;
+        sLast.size = -1; // the sprites go on again
+    }
+    for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
+        const PanelRow *row = &sRows[i];
+        KeyAdd(&k, &row->sprite, sizeof(row->sprite));
+        KeyAdd(&k, &row->anim, sizeof(row->anim));
+        KeyAdd(&k, &row->palNum, sizeof(row->palNum));
+        KeyAdd(&k, &row->frame, sizeof(row->frame));
+        KeyAdd(&k, &row->symbolCount, sizeof(row->symbolCount));
+        KeyAdd(&k, row->symbols, sizeof(row->symbols[0]) * row->symbolCount);
+    }
+    if (!KeyChanged(&sLast, &k))
+        return FALSE;
+    memcpy(canvas, sTeamBg, sizeof(sTeamBg));
+    for (int i = 0; i < MAX_TEAM_MEMBERS; i++)
+        if (sRows[i].used)
+            DrawRowSprite(&sRows[i], 23, i * ROW_H + 41); // feet on the middle of the floor
+    return TRUE;
 }
 
 
@@ -976,16 +1056,29 @@ static void DrawSubMap(void)
 #define TEAM_WIN_H 6
 #define TEAM_WIN_Y (H - (TEAM_WIN_H + 2) * 8)
 
-static void DrawMapAndTeam(void)
+static bool8 DrawMapAndTeam(void)
 {
+    static DrawKey sLast, k;
     u8 buf[12];
     int x, y;
+    DungeonPos dot;
+    bool8 dotOn;
 
-    if (!sInDungeon) {
-        memset(sRows, 0, sizeof(sRows));
-        sInDungeon = TRUE;
+    StartDungeonLayout(PORT_SUB_LAYOUT_MT, &k);
+    AddRowsText(&k);
+    LoadWindowPalette();
+    KeyAdd(&k, sWindowPal, sizeof(sWindowPal));
+    KeyAdd(&k, &gPortConfig.windowShading, 1);
+    KeyAdd(&k, gPortSubMap, sizeof(gPortSubMap));
+    KeyAdd(&k, &(const void *){ Port_MinimapPalette() }, sizeof(void *));
+    dotOn = ((sDotFrames + 1) & 8) == 0 && Port_MinimapLeaderDot(&dot);
+    KeyAdd(&k, &dotOn, sizeof(dotOn));
+    if (dotOn)
+        KeyAdd(&k, &dot, sizeof(dot));
+    if (!KeyChanged(&sLast, &k)) {
+        sDotFrames++;
+        return FALSE;
     }
-    UpdateRows();
     DrawGrid();
     DrawSubMap();
     LoadWindowPalette();
@@ -1006,6 +1099,7 @@ static void DrawMapAndTeam(void)
         DrawText(slashX, y, sSlash, COLOR_TEXT);
         DrawNumberRight(maxRight, y, row->maxHp);
     }
+    return TRUE;
 }
 
 
@@ -1085,10 +1179,20 @@ static void DrawLogText(int x0, int y, const u8 *str)
     }
 }
 
-static void DrawMessageLog(void)
+static bool8 DrawMessageLog(void)
 {
+    static DrawKey sLast, k;
     const struct MessageLogString *lines[LOG_LINES];
     int count = 0, id = gDungeon->unk16;
+
+    StartDungeonLayout(PORT_SUB_LAYOUT_LOG, &k);
+    LoadWindowPalette();
+    KeyAdd(&k, sWindowPal, sizeof(sWindowPal));
+    KeyAdd(&k, &gPortConfig.windowShading, 1);
+    KeyAdd(&k, &gDungeon->unk16, sizeof(gDungeon->unk16));
+    KeyAdd(&k, gDungeon->messageLogStrings, sizeof(gDungeon->messageLogStrings));
+    if (!KeyChanged(&sLast, &k))
+        return FALSE;
 
     // the latest lines, newest last
     for (int i = 0; i < MESSAGE_LOG_STRINGS_COUNT && count < LOG_LINES; i++) {
@@ -1112,6 +1216,7 @@ static void DrawMessageLog(void)
         }
         DrawLogText(LOG_WIN_X + 16, y, line->str);
     }
+    return TRUE;
 }
 
 #define TEAM_BASE_X 0x163 // LOCATION_TEAM_BASE on the friend areas map
@@ -1130,6 +1235,8 @@ static s32 TitleQuickSaveDungeon(void)
         return -1;
     return gPortTitleQuickSave;
 }
+
+static bool8 sWorldMapChanged;
 
 static bool8 DrawWorldMap(void)
 {
@@ -1162,6 +1269,8 @@ static bool8 DrawWorldMap(void)
     static u8 sCachedShading;
     bool8 newColors = LoadWindowPalette() || sCachedShading != gPortConfig.windowShading;
     sCachedShading = gPortConfig.windowShading;
+    sWorldMapChanged = sLayoutDrawn != -2;
+    sLayoutDrawn = -2;
     if (place != sCachedPlace || area != sCachedArea || newColors) {
         int set = dungeon == PLACE_TOWN ? 0 : 1;
         int x = dungeon == PLACE_TOWN ? TEAM_BASE_X : gDungeonCoordinates[dungeon].x;
@@ -1192,9 +1301,12 @@ static bool8 DrawWorldMap(void)
         sCachedPlace = place;
         sCachedArea = area;
         sOut = sOutFrame;
+        sWorldMapChanged = TRUE;
     }
-    memcpy(sOutFrame, sCache, sizeof(sCache));
-    DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
+    if (sWorldMapChanged) { // (the marker does not move)
+        memcpy(sOutFrame, sCache, sizeof(sCache));
+        DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
+    }
     return TRUE;
 }
 
@@ -1322,10 +1434,10 @@ static int TransitionBrightness(void)
     return GroundLevel();
 }
 
-static void Darken(u16 *out, int brightness)
+static void Darken(u16 *out, const u16 *in, int brightness)
 {
     for (int i = 0; i < W * H; i++) {
-        u16 c = out[i];
+        u16 c = in[i];
         int r = (c & 31) * brightness >> 8, g = ((c >> 5) & 31) * brightness >> 8, b = ((c >> 10) & 31) * brightness >> 8;
         out[i] = (u16)(r | (g << 5) | (b << 10));
     }
@@ -1348,35 +1460,68 @@ static int EnableBrightness(void)
     return sEnableLevel * 0x100 / ENABLE_FADE_FRAMES;
 }
 
+// The picture is drawn into sCanvas, and copied out (darkened during
+// transitions) only when it or the brightness changed.
+static u16 sCanvas[W * H];
+static int sOutBrightness = -2; // what `out` holds: -2 unknown, else the brightness it was made at
+static bool8 sChanged;
+
+bool Port_SubScreenChanged(void)
+{
+    return sChanged;
+}
+
 bool Port_RenderSubScreen(u16 *out)
 {
     int brightness, enabled;
+    bool8 drawn;
 
-    sOut = sOutFrame = out;
+    sChanged = FALSE;
+    sOut = sOutFrame = sCanvas;
     if (gDungeon == NULL)
         sInDungeon = FALSE;
     brightness = TransitionBrightness();
     enabled = EnableBrightness();
-    if (enabled == 0)
+    if (enabled == 0) {
+        sOutBrightness = -2;
+        sLayoutDrawn = -1;
         return FALSE;
+    }
     if (enabled < 0x100)
         brightness = (brightness < 0 ? 0x100 : brightness) * enabled >> 8;
+    if (brightness < 0 || brightness > 0x100)
+        brightness = 0x100;
     if (brightness == 0) {
-        memset(out, 0, W * H * sizeof(u16));
+        if (sOutBrightness != 0) {
+            memset(out, 0, W * H * sizeof(u16));
+            sOutBrightness = 0;
+            sChanged = TRUE;
+        }
         return TRUE;
     }
     if (gDungeon != NULL) {
         if (gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_MT)
-            DrawMapAndTeam();
+            drawn = DrawMapAndTeam();
         else if (gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_LOG)
-            DrawMessageLog();
+            drawn = DrawMessageLog();
         else
-            DrawTeamPanel();
+            drawn = DrawTeamPanel();
+        sLayoutDrawn = gPortConfig.layoutSubScreen;
     } else {
-        if (!DrawWorldMap())
+        if (!DrawWorldMap()) {
+            sOutBrightness = -2;
+            sLayoutDrawn = -1;
             return FALSE;
+        }
+        drawn = sWorldMapChanged;
     }
-    if (brightness >= 0 && brightness < 0x100)
-        Darken(out, brightness);
+    if (!drawn && brightness == sOutBrightness)
+        return TRUE; // out still holds this picture
+    if (brightness == 0x100)
+        memcpy(out, sCanvas, sizeof(sCanvas));
+    else
+        Darken(out, sCanvas, brightness);
+    sOutBrightness = brightness;
+    sChanged = TRUE;
     return TRUE;
 }
