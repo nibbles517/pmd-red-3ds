@@ -50,7 +50,7 @@ bool8 Port_SolidDungeonWindows(void);
 // The dungeon's settings as they are now (whether set or not)
 void Port_GetDungeonWindows(u8 *bgColor, u8 *shading, u8 *border);
 extern struct PortConfig gPortConfig;
-enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_3DS };
+enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_FIT, PORT_SIZE_3DS }; // Fit and 3DS: not yet (as GBA)
 enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_LAYOUT_MT };
 // Main Screen Settings > Size is DS: the 256x192 picture and the wide view
 // (port_view.h). Everything for it is off in the other sizes.

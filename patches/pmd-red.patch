@@ -2726,10 +2726,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..bcc73a93
+index 00000000..dba19705
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,281 @@
+@@ -0,0 +1,282 @@
 +// 3DS port: Others > Screen Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -2762,7 +2762,7 @@ index 00000000..bcc73a93
 +enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN };
 +
 +#define TOP_ENTRIES 3
-+#define MAX_CHOICES 3
++#define MAX_CHOICES 4
 +
 +enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE };
 +
@@ -2781,7 +2781,7 @@ index 00000000..bcc73a93
 +    0,
 +    6,
 +    2, 2,
-+    24, 16,
++    26, 16, // wide enough for four Size choices
 +    18, 0,
 +    &sHeader
 +};
@@ -2801,6 +2801,7 @@ index 00000000..bcc73a93
 +ALIGNED(4) static const u8 sScale[] = _("Scale");
 +ALIGNED(4) static const u8 sSizeGBA[] = _("GBA");
 +ALIGNED(4) static const u8 sSizeDS[] = _("DS");
++ALIGNED(4) static const u8 sSizeFit[] = _("Fit");
 +ALIGNED(4) static const u8 sSize3DS[] = _("3DS");
 +ALIGNED(4) static const u8 sScaleNone[] = _("None");
 +ALIGNED(4) static const u8 sScaleFull[] = _("Full");
@@ -2811,7 +2812,7 @@ index 00000000..bcc73a93
 +    const u8 *choices[MAX_CHOICES];
 +} sSettings[] = {
 +    [SETTING_ENABLED] = { sEnabled, 2, { sYes, sNo } },
-+    [SETTING_SIZE] = { sSize, 3, { sSizeGBA, sSizeDS, sSize3DS } },
++    [SETTING_SIZE] = { sSize, 4, { sSizeGBA, sSizeDS, sSizeFit, sSize3DS } },
 +    [SETTING_SCALE] = { sScale, 3, { sScaleNone, sScaleFull, sScaleStretch } },
 +};
 +#define CHOICE_X(i) (64 + (i) * 40)
@@ -2847,13 +2848,13 @@ index 00000000..bcc73a93
 +}
 +
 +// Settings (setting, or one of its choices) that do nothing yet are shown in
-+// red: Scale; the 3DS size.
++// red: Scale; the Fit and 3DS sizes.
 +static bool8 IsPlaceholder(s32 setting, s32 choice)
 +{
 +    if (setting == SETTING_SCALE)
 +        return TRUE;
 +    if (setting == SETTING_SIZE)
-+        return choice == PORT_SIZE_3DS;
++        return choice == PORT_SIZE_FIT || choice == PORT_SIZE_3DS;
 +    return FALSE;
 +}
 +
