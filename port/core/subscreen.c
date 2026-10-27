@@ -1008,47 +1008,51 @@ static void DrawMapBlock(const u32 *tile, int px, int py, const u16 *pal)
     }
 }
 
-static void DrawSubMap(void)
+// The map tile (two by two dungeon tiles) at block (bx, by), as
+// DrawMinimapTile builds it: each dungeon tile sets one quarter of it,
+// through a mask and its pixels.
+static void BuildMapBlock(int bx, int by, u32 *tile)
 {
-    u16 pal[16];
-    u32 tile[8];
-    DungeonPos dot;
+    memset(tile, 0, 8 * sizeof(u32));
+    for (int q = 0; q < 4; q++) {
+        int x = bx * 2 + (q & 1), yy = by * 2 + (q >> 1), y = yy + SUBMAP_FIRST_ROW;
+        const u32 *src;
+        if (yy >= SUBMAP_ROWS)
+            continue;
+        src = Port_MinimapGfx(gPortSubMap[y][x], q);
+        if (src == NULL)
+            continue;
+        for (int i = 0; i < 8; i++)
+            tile[i] = (tile[i] & src[i * 2]) | src[i * 2 + 1];
+    }
+}
 
-    if (Port_MinimapPalette() == NULL)
+#define SUBMAP_BW (DUNGEON_MAX_SIZE_X / 2)
+#define SUBMAP_BH ((SUBMAP_ROWS + 1) / 2)
+
+// The parts of the picture that changed this frame (Port_RenderSubScreen
+// copies only those when it can).
+static int sDirtyX0, sDirtyY0, sDirtyX1, sDirtyY1;
+
+static void Dirty(int x, int y, int w, int h)
+{
+    if (sDirtyX0 >= sDirtyX1) {
+        sDirtyX0 = x; sDirtyY0 = y; sDirtyX1 = x + w; sDirtyY1 = y + h;
         return;
-    MinimapPalette(pal);
-
-    // As DrawMinimapTile builds them: each dungeon tile sets one quarter of a
-    // map tile, through a mask and its pixels.
-    for (int by = 0; by < (SUBMAP_ROWS + 1) / 2; by++) {
-        for (int bx = 0; bx < DUNGEON_MAX_SIZE_X / 2; bx++) {
-            memset(tile, 0, sizeof(tile));
-            for (int q = 0; q < 4; q++) {
-                int x = bx * 2 + (q & 1), yy = by * 2 + (q >> 1), y = yy + SUBMAP_FIRST_ROW;
-                const u32 *src;
-                if (yy >= SUBMAP_ROWS)
-                    continue;
-                src = Port_MinimapGfx(gPortSubMap[y][x], q);
-                if (src == NULL)
-                    continue;
-                for (int i = 0; i < 8; i++)
-                    tile[i] = (tile[i] & src[i * 2]) | src[i * 2 + 1];
-            }
-            DrawMapBlock(tile, SUBMAP_X + bx * 8, SUBMAP_Y + by * 8, pal);
-        }
     }
+    if (x < sDirtyX0) sDirtyX0 = x;
+    if (y < sDirtyY0) sDirtyY0 = y;
+    if (x + w > sDirtyX1) sDirtyX1 = x + w;
+    if (y + h > sDirtyY1) sDirtyY1 = y + h;
+}
 
-    // The leader's dot, blinking as on the main screen (FlashLeaderIcon).
-    if ((++sDotFrames & 8) == 0 && Port_MinimapLeaderDot(&dot)
-        && dot.y >= SUBMAP_FIRST_ROW && dot.y < SUBMAP_FIRST_ROW + SUBMAP_ROWS) {
-        int yy = dot.y - SUBMAP_FIRST_ROW, q = (dot.x & 1) + (yy & 1) * 2;
-        const u32 *src = Port_MinimapGfx(MAP_GFX_PLAYER, q);
-        if (src != NULL) {
-            for (int i = 0; i < 8; i++)
-                tile[i] = src[i * 2 + 1];
-            DrawMapBlock(tile, SUBMAP_X + (dot.x & ~1) * 4, SUBMAP_Y + (yy & ~1) * 4, pal);
-        }
-    }
+static void DirtyAll(void) { Dirty(0, 0, W, H); }
+
+// Copies a w x h area from `from` (a W x H picture) to sOut.
+static void Restore(const u16 *from, int x, int y, int w, int h)
+{
+    for (int j = y; j < y + h; j++)
+        memcpy(&sOut[j * W + x], &from[j * W + x], w * sizeof(u16));
 }
 
 #define TEAM_WIN_X 16
@@ -1056,52 +1060,111 @@ static void DrawSubMap(void)
 #define TEAM_WIN_H 6
 #define TEAM_WIN_Y (H - (TEAM_WIN_H + 2) * 8)
 
+// M+T, in layers: the grid and the empty window (sMtBase) change only with
+// the window settings; the map, the team's lines and the leader's blinking
+// dot are each drawn over it when they change, and only they are copied out.
 static bool8 DrawMapAndTeam(void)
 {
-    static DrawKey sLast, k;
+    static u16 sMtBase[W * H];
+    static DrawKey sLastBase, sLastMap, sLastText, k;
+    static bool8 sDotShown;
+    static DungeonPos sDotAt;
+    u16 *canvas = sOut;
+    u16 pal[16];
+    u32 tile[8];
     u8 buf[12];
     int x, y;
     DungeonPos dot;
-    bool8 dotOn;
+    bool8 dotOn, mapDrawn = FALSE;
 
+    if (Port_MinimapPalette() == NULL)
+        return FALSE;
+
+    // The grid and the window
     StartDungeonLayout(PORT_SUB_LAYOUT_MT, &k);
-    AddRowsText(&k);
     LoadWindowPalette();
     KeyAdd(&k, sWindowPal, sizeof(sWindowPal));
     KeyAdd(&k, &gPortConfig.windowShading, 1);
-    KeyAdd(&k, gPortSubMap, sizeof(gPortSubMap));
-    KeyAdd(&k, &(const void *){ Port_MinimapPalette() }, sizeof(void *));
-    dotOn = ((sDotFrames + 1) & 8) == 0 && Port_MinimapLeaderDot(&dot);
-    KeyAdd(&k, &dotOn, sizeof(dotOn));
-    if (dotOn)
-        KeyAdd(&k, &dot, sizeof(dot));
-    if (!KeyChanged(&sLast, &k)) {
-        sDotFrames++;
-        return FALSE;
+    if (KeyChanged(&sLastBase, &k)) {
+        sOut = sMtBase;
+        DrawGrid();
+        DrawGameWindow(TEAM_WIN_X, TEAM_WIN_Y, TEAM_WIN_W, TEAM_WIN_H);
+        sOut = canvas;
+        memcpy(canvas, sMtBase, sizeof(sMtBase));
+        DirtyAll();
+        sLastMap.size = sLastText.size = -1; // all drawn again
+        sDotShown = FALSE;
     }
-    DrawGrid();
-    DrawSubMap();
-    LoadWindowPalette();
-    DrawGameWindow(TEAM_WIN_X, TEAM_WIN_Y, TEAM_WIN_W, TEAM_WIN_H);
-    // Positions as on the DS: names at 28, "Level" at 96, and HP as
-    // "hp/max" in three-digit cells ending at 197.
-    y = TEAM_WIN_Y + 8;
-    for (int i = 0; i < MAX_TEAM_MEMBERS; i++, y += 12) {
-        const PanelRow *row = &sRows[i];
-        int maxRight = TEAM_WIN_X + 181, slashX = maxRight - 3 * GlyphWidth('0') - TextWidth(sSlash);
-        if (!row->used)
-            continue;
-        DrawText(TEAM_WIN_X + 12, y, row->name, COLOR_NAME);
-        x = DrawText(TEAM_WIN_X + 80, y, sLevel, COLOR_TEXT);
-        FormatInt(buf, row->level);
-        DrawText(x, y, buf, COLOR_TEXT);
-        DrawNumberRight(slashX, y, row->hp);
-        DrawText(slashX, y, sSlash, COLOR_TEXT);
-        DrawNumberRight(maxRight, y, row->maxHp);
-    }
-    return TRUE;
-}
 
+    // The map
+    MinimapPalette(pal);
+    k.size = 0;
+    KeyAdd(&k, gPortSubMap, sizeof(gPortSubMap));
+    KeyAdd(&k, pal, sizeof(pal));
+    if (KeyChanged(&sLastMap, &k)) {
+        Restore(sMtBase, SUBMAP_X, SUBMAP_Y, SUBMAP_BW * 8, SUBMAP_BH * 8);
+        for (int by = 0; by < SUBMAP_BH; by++) {
+            for (int bx = 0; bx < SUBMAP_BW; bx++) {
+                BuildMapBlock(bx, by, tile);
+                DrawMapBlock(tile, SUBMAP_X + bx * 8, SUBMAP_Y + by * 8, pal);
+            }
+        }
+        Dirty(SUBMAP_X, SUBMAP_Y, SUBMAP_BW * 8, SUBMAP_BH * 8);
+        sDotShown = FALSE; // the dot went with it
+        mapDrawn = TRUE;
+    }
+
+    // The leader's dot, blinking as on the main screen (FlashLeaderIcon)
+    dotOn = (++sDotFrames & 8) == 0 && Port_MinimapLeaderDot(&dot)
+            && dot.y >= SUBMAP_FIRST_ROW && dot.y < SUBMAP_FIRST_ROW + SUBMAP_ROWS;
+    if (sDotShown && (!dotOn || dot.x != sDotAt.x || dot.y != sDotAt.y)) {
+        // off, or moved: its block as the map has it
+        int bx = sDotAt.x / 2, by = (sDotAt.y - SUBMAP_FIRST_ROW) / 2;
+        Restore(sMtBase, SUBMAP_X + bx * 8, SUBMAP_Y + by * 8, 8, 8);
+        BuildMapBlock(bx, by, tile);
+        DrawMapBlock(tile, SUBMAP_X + bx * 8, SUBMAP_Y + by * 8, pal);
+        Dirty(SUBMAP_X + bx * 8, SUBMAP_Y + by * 8, 8, 8);
+        sDotShown = FALSE;
+    }
+    if (dotOn && !sDotShown) {
+        int yy = dot.y - SUBMAP_FIRST_ROW, q = (dot.x & 1) + (yy & 1) * 2;
+        const u32 *src = Port_MinimapGfx(MAP_GFX_PLAYER, q);
+        if (src != NULL) {
+            for (int i = 0; i < 8; i++)
+                tile[i] = src[i * 2 + 1];
+            DrawMapBlock(tile, SUBMAP_X + (dot.x & ~1) * 4, SUBMAP_Y + (yy & ~1) * 4, pal);
+            Dirty(SUBMAP_X + (dot.x & ~1) * 4, SUBMAP_Y + (yy & ~1) * 4, 8, 8);
+            sDotShown = TRUE;
+            sDotAt = dot;
+        }
+    }
+
+    // The team's lines
+    k.size = 0;
+    AddRowsText(&k);
+    if (KeyChanged(&sLastText, &k)) {
+        // Positions as on the DS: names at 28, "Level" at 96, and HP as
+        // "hp/max" in three-digit cells ending at 197.
+        Restore(sMtBase, TEAM_WIN_X + 8, TEAM_WIN_Y + 8, TEAM_WIN_W * 8, TEAM_WIN_H * 8);
+        y = TEAM_WIN_Y + 8;
+        for (int i = 0; i < MAX_TEAM_MEMBERS; i++, y += 12) {
+            const PanelRow *row = &sRows[i];
+            int maxRight = TEAM_WIN_X + 181, slashX = maxRight - 3 * GlyphWidth('0') - TextWidth(sSlash);
+            if (!row->used)
+                continue;
+            DrawText(TEAM_WIN_X + 12, y, row->name, COLOR_NAME);
+            x = DrawText(TEAM_WIN_X + 80, y, sLevel, COLOR_TEXT);
+            FormatInt(buf, row->level);
+            DrawText(x, y, buf, COLOR_TEXT);
+            DrawNumberRight(slashX, y, row->hp);
+            DrawText(slashX, y, sSlash, COLOR_TEXT);
+            DrawNumberRight(maxRight, y, row->maxHp);
+        }
+        Dirty(TEAM_WIN_X + 8, TEAM_WIN_Y + 8, TEAM_WIN_W * 8, TEAM_WIN_H * 8);
+    }
+    (void)mapDrawn;
+    return sDirtyX0 < sDirtyX1;
+}
 
 // --- Message log (Layout Options > Sub-Screen: Log) ---------------------------------
 
@@ -1471,12 +1534,20 @@ bool Port_SubScreenChanged(void)
     return sChanged;
 }
 
+// The area of `out` that changed in the last call (when Port_SubScreenChanged).
+void Port_SubScreenChangedArea(int *x0, int *y0, int *x1, int *y1)
+{
+    *x0 = sDirtyX0; *y0 = sDirtyY0; *x1 = sDirtyX1; *y1 = sDirtyY1;
+}
+
 bool Port_RenderSubScreen(u16 *out)
 {
     int brightness, enabled;
     bool8 drawn;
 
     sChanged = FALSE;
+    sDirtyX0 = sDirtyX1 = 0;
+    sDirtyY0 = sDirtyY1 = 0;
     sOut = sOutFrame = sCanvas;
     if (gDungeon == NULL)
         sInDungeon = FALSE;
@@ -1496,6 +1567,7 @@ bool Port_RenderSubScreen(u16 *out)
             memset(out, 0, W * H * sizeof(u16));
             sOutBrightness = 0;
             sChanged = TRUE;
+            DirtyAll();
         }
         return TRUE;
     }
@@ -1506,6 +1578,8 @@ bool Port_RenderSubScreen(u16 *out)
             drawn = DrawMessageLog();
         else
             drawn = DrawTeamPanel();
+        if (drawn && gPortConfig.layoutSubScreen != PORT_SUB_LAYOUT_MT)
+            DirtyAll();
         sLayoutDrawn = gPortConfig.layoutSubScreen;
     } else {
         if (!DrawWorldMap()) {
@@ -1514,13 +1588,22 @@ bool Port_RenderSubScreen(u16 *out)
             return FALSE;
         }
         drawn = sWorldMapChanged;
+        if (drawn)
+            DirtyAll();
     }
     if (!drawn && brightness == sOutBrightness)
         return TRUE; // out still holds this picture
-    if (brightness == 0x100)
-        memcpy(out, sCanvas, sizeof(sCanvas));
-    else
-        Darken(out, sCanvas, brightness);
+    if (brightness == 0x100 && sOutBrightness == 0x100) {
+        // only what changed
+        for (int y = sDirtyY0; y < sDirtyY1; y++)
+            memcpy(&out[y * W + sDirtyX0], &sCanvas[y * W + sDirtyX0], (sDirtyX1 - sDirtyX0) * sizeof(u16));
+    } else {
+        DirtyAll();
+        if (brightness == 0x100)
+            memcpy(out, sCanvas, sizeof(sCanvas));
+        else
+            Darken(out, sCanvas, brightness);
+    }
     sOutBrightness = brightness;
     sChanged = TRUE;
     return TRUE;

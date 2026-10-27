@@ -57,6 +57,9 @@ static int sBgAny[4];               // layer has an opaque pixel on this line
 // sLastMask (all groups when a renderer does not track them).
 static uint32_t sBgMask[4];
 static uint32_t sLastMask;
+// ... and which groups are opaque in all 8 pixels (0 when not tracked).
+static uint32_t sBgFull[4];
+static uint32_t sLastFull;
 #define ALL_GROUPS 0xFFFFFFFFu
 
 // Takes the next run of consecutive groups out of *m: x from *x0 to *x1
@@ -203,7 +206,9 @@ static inline const uint16_t *PalT(unsigned bank)
 }
 
 // Decodes one 8-pixel row of the tile named by map entry `e` into px[0..7].
-// Returns nonzero if any pixel is opaque.
+// Returns 0 if all pixels are transparent, 2 if all are opaque, else 1.
+#define HAS_ZERO_NIBBLE(v) ((((v) - 0x11111111u) & ~(v) & 0x88888888u) != 0)
+#define HAS_ZERO_BYTE(v) ((((v) - 0x01010101u) & ~(v) & 0x80808080u) != 0)
 static inline __attribute__((always_inline)) int DecodeTileRow(uint16_t e, unsigned charBase, int inY, int color256, uint16_t *px)
 {
     int ty = (e & 0x800) ? 7 - inY : inY;
@@ -224,7 +229,7 @@ static inline __attribute__((always_inline)) int DecodeTileRow(uint16_t e, unsig
             unsigned idx = (i < 4) ? (lo >> (8 * i)) & 0xFF : (hi >> (8 * (i - 4))) & 0xFF;
             px[i] = idx ? (PAL16[idx] & 0x7FFF) : TRANSPARENT;
         }
-        any = 1;
+        any = (HAS_ZERO_BYTE(lo) || HAS_ZERO_BYTE(hi)) ? 1 : 2;
     }
     else {
         unsigned a = charBase + tile * 32 + ty * 4;
@@ -234,18 +239,19 @@ static inline __attribute__((always_inline)) int DecodeTileRow(uint16_t e, unsig
             return 0;
         }
         const uint16_t *pal = PalT(e >> 12);
+        any = HAS_ZERO_NIBBLE(row) ? 1 : 2;
         if (e & 0x400) { // horizontal flip
             px[7] = pal[row & 0xF];         px[6] = pal[(row >> 4) & 0xF];
             px[5] = pal[(row >> 8) & 0xF];  px[4] = pal[(row >> 12) & 0xF];
             px[3] = pal[(row >> 16) & 0xF]; px[2] = pal[(row >> 20) & 0xF];
             px[1] = pal[(row >> 24) & 0xF]; px[0] = pal[row >> 28];
-            return 1;
+            return any;
         }
         px[0] = pal[row & 0xF];         px[1] = pal[(row >> 4) & 0xF];
         px[2] = pal[(row >> 8) & 0xF];  px[3] = pal[(row >> 12) & 0xF];
         px[4] = pal[(row >> 16) & 0xF]; px[5] = pal[(row >> 20) & 0xF];
         px[6] = pal[(row >> 24) & 0xF]; px[7] = pal[row >> 28];
-        return 1;
+        return any;
     }
     if (e & 0x400) { // horizontal flip
         for (int i = 0; i < 4; i++) {
@@ -270,7 +276,7 @@ static int RenderWideBg(int bg, int line, uint16_t *out)
     int inY = y & 7;
     const uint16_t *row = &wb->map[(y >> 3) * 64];
     int any = 0;
-    uint32_t mask = 0;
+    uint32_t mask = 0, notFull = 0;
     int x = (wb->scrollX - sOx) & 511;
 
     for (int sx = 0; sx < sW;) {
@@ -278,6 +284,7 @@ static int RenderWideBg(int bg, int line, uint16_t *out)
         int skip = x & 7;
         int n = 8 - skip;
         uint16_t px[8];
+        int got;
         if (n > sW - sx) n = sW - sx;
         if (e == PORT_WIDE_BLACK) {
             for (int i = 0; i < n; i++) out[sx + i] = 0;
@@ -285,12 +292,14 @@ static int RenderWideBg(int bg, int line, uint16_t *out)
             mask |= Groups(sx, n);
         }
         else if (n == 8) {
-            if (DecodeTileRow(e, charBase, inY, color256, &out[sx])) {
+            if ((got = DecodeTileRow(e, charBase, inY, color256, &out[sx])) != 0) {
                 any = 1;
                 mask |= Groups(sx, 8);
             }
+            if (got != 2)
+                notFull |= Groups(sx, 8);
         }
-        else if (DecodeTileRow(e, charBase, inY, color256, px)) {
+        else if (notFull |= Groups(sx, n), DecodeTileRow(e, charBase, inY, color256, px)) {
             for (int i = 0; i < n; i++) {
                 out[sx + i] = px[skip + i];
                 any |= !(px[skip + i] & TRANSPARENT);
@@ -304,6 +313,7 @@ static int RenderWideBg(int bg, int line, uint16_t *out)
         x = (x + n) & 511;
     }
     sLastMask = mask;
+    sLastFull = mask & ~notFull;
     return any;
 }
 
@@ -325,7 +335,7 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
     sWide = 0; sW = GBA_W; sOx = 0;
     any = RenderTextBg(bg, gy, gbaLine);
     sWide = 1; sW = SCREEN_W; sOx = WIDE_OX;
-    sLastMask = ALL_GROUPS;
+    sLastMask = ALL_GROUPS; sLastFull = 0;
     if (!any)
         return 0; // nothing to show: compositing skips the layer
     int gx = ((-sOx) % GBA_W + GBA_W) % GBA_W;
@@ -334,7 +344,7 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
         if (++gx == GBA_W)
             gx = 0;
     }
-    sLastMask = ALL_GROUPS;
+    sLastMask = ALL_GROUPS; sLastFull = 0;
     return any;
 }
 
@@ -342,7 +352,7 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
 static int RenderTextBg(int bg, int line, uint16_t *out)
 {
     uint16_t cnt = R16(0x08 + bg * 2);
-    sLastMask = ALL_GROUPS;
+    sLastMask = ALL_GROUPS; sLastFull = 0;
     if (sWide && gPortWideBg[bg].map)
         return RenderWideBg(bg, line, out); // (sets sLastMask)
     if (sWide && gPortTileBg[bg] && R16(0x10 + bg * 4) == 0 && R16(0x12 + bg * 4) == 0)
@@ -372,7 +382,7 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         int fill = DecodeTileRow(e, ((cnt >> 2) & 3) * 0x4000, gy & 7, (cnt >> 7) & 1, px);
         for (int x = 0; x < sOx; x++) out[x] = px[(x - sOx + hofs) & 7];
         for (int x = sOx + GBA_W; x < sW; x++) out[x] = px[(x - sOx + hofs) & 7];
-        sLastMask = ALL_GROUPS;
+        sLastMask = ALL_GROUPS; sLastFull = 0;
         return any | fill;
     }
     return RenderTextBgVram(bg, line, out, cnt);
@@ -382,7 +392,7 @@ static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt)
 {
     if (cnt & 0x40) {
         RenderTextBgMosaic(bg, line, out);
-        sLastMask = ALL_GROUPS;
+        sLastMask = ALL_GROUPS; sLastFull = 0;
         return 1;
     }
     unsigned charBase = ((cnt >> 2) & 3) * 0x4000;
@@ -398,7 +408,7 @@ static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt)
     unsigned rowBlock = (y >= 256) ? ((widthPx == 512) ? 2 : 1) : 0;
     unsigned rowOff = screenBase + rowBlock * 0x800 + ((y >> 3) & 31) * 64;
     int any = 0;
-    uint32_t mask = 0;
+    uint32_t mask = 0, notFull = 0;
 
     int sx = 0;
     int x = (hofs - sOx) & (widthPx - 1);
@@ -409,19 +419,24 @@ static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt)
         if (n > sW - sx) n = sW - sx;
         if (mapOff + 1 >= 0x10000) {
             for (int i = 0; i < n; i++) out[sx + i] = TRANSPARENT;
+            notFull |= Groups(sx, n);
         }
         else {
             uint16_t e = *(const uint16_t *)&gPortVram[mapOff]; // map entries are 2-byte aligned
             if (sWide && e == EDGE_TILE)
                 e = 0; // see EDGE_TILE
             if (n == 8) {
-                if (DecodeTileRow(e, charBase, inY, color256, &out[sx])) {
+                int got = DecodeTileRow(e, charBase, inY, color256, &out[sx]);
+                if (got) {
                     any = 1;
                     mask |= Groups(sx, 8);
                 }
+                if (got != 2)
+                    notFull |= Groups(sx, 8);
             }
             else {
                 uint16_t px[8];
+                notFull |= Groups(sx, n);
                 if (DecodeTileRow(e, charBase, inY, color256, px)) {
                     for (int i = 0; i < n; i++) {
                         out[sx + i] = px[skip + i];
@@ -438,6 +453,7 @@ static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt)
         x = (x + n) & (widthPx - 1);
     }
     sLastMask = mask;
+    sLastFull = mask & ~notFull;
     return any;
 }
 
@@ -697,8 +713,8 @@ static void FillSpan(uint8_t *wm, int lo, int hi, uint8_t value)
     if (hi > sW || lo > hi) {
         if (hi > sW && lo <= hi) hi = sW;
         else { // wrapped: x >= lo or x < hi
-            for (int x = 0; x < sW; x++)
-                if (x >= lo || x < hi) wm[x] = value;
+            if (hi > 0) memset(wm, value, hi > sW ? sW : hi);
+            if (lo < sW) memset(wm + (lo < 0 ? 0 : lo), value, sW - (lo < 0 ? 0 : lo));
             return;
         }
     }
@@ -777,8 +793,19 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
                 continue;
             const uint16_t *src = sBg[b];
             uint8_t bit = (uint8_t)(1u << b);
-            uint32_t m = sBgMask[b];
+            uint32_t full = (wmAll & bit) ? sBgFull[b] : 0; // opaque and shown: copied whole
+            uint32_t m = full;
             int x, x1;
+            while (NextRun(&m, &x, &x1)) {
+                int n = x1 - x;
+                if (needSec) {
+                    memcpy(&secC[x], &dst[x], n * sizeof(uint16_t));
+                    memcpy(&secL[x], &topL[x], n);
+                }
+                memcpy(&dst[x], &src[x], n * sizeof(uint16_t));
+                memset(&topL[x], b, n);
+            }
+            m = sBgMask[b] & ~full;
             while (NextRun(&m, &x, &x1)) {
                 if (wmAll & bit) { // shown everywhere: only transparency matters
                     if (needSec) {
@@ -891,19 +918,19 @@ void Ppu_RenderLine(int line, uint16_t *dst)
     switch (mode) {
     case 0:
         for (int b = 0; b < 4; b++)
-            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); sBgMask[b] = sBgAny[b] ? sLastMask : 0; }
+            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); sBgMask[b] = sBgAny[b] ? sLastMask : 0; sBgFull[b] = sBgAny[b] ? sLastFull : 0; }
         break;
     case 1:
         for (int b = 0; b < 2; b++)
-            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); sBgMask[b] = sBgAny[b] ? sLastMask : 0; }
-        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; RenderAffineBg(2, sBg[2]); }
+            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); sBgMask[b] = sBgAny[b] ? sLastMask : 0; sBgFull[b] = sBgAny[b] ? sLastFull : 0; }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderAffineBg(2, sBg[2]); }
         break;
     case 2:
-        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; RenderAffineBg(2, sBg[2]); }
-        if (dispcnt & 0x800) { bgOn[3] = 1; sBgAny[3] = 1; sBgMask[3] = ALL_GROUPS; RenderAffineBg(3, sBg[3]); }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderAffineBg(2, sBg[2]); }
+        if (dispcnt & 0x800) { bgOn[3] = 1; sBgAny[3] = 1; sBgMask[3] = ALL_GROUPS; sBgFull[3] = 0; RenderAffineBg(3, sBg[3]); }
         break;
     case 3:
-        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; RenderMode3(line, sBg[2]); }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderMode3(line, sBg[2]); }
         break;
     default:
         break; // modes 4/5 are not used by pmd-red

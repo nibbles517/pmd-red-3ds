@@ -183,14 +183,16 @@ static void PresentSub(void)
         }
         return;
     }
-    // The second screen is drawn into both of its buffers after a change (the
-    // other one shows next frame), and left alone while nothing changes.
-    static int sSubWrites, sSubFade = -1;
-    if (Port_SubScreenChanged() || sFadeLevel != sSubFade)
-        sSubWrites = 2;
+    // The second screen is double-buffered: what changed is drawn into this
+    // frame's buffer, and again into the other one next frame (it missed it).
+    // While nothing changes, neither is touched.
+    static int sSubFade = -1;
+    static int sPend[4]; // the area the other buffer still lacks (x0, y0, x1, y1)
+    int area[4] = { 0, 0, 0, 0 };
+    int full = sFadeLevel != sSubFade;
     sSubFade = sFadeLevel;
     if (sSubMode != SUB_PICTURE) {
-        sSubWrites = 2;
+        full = 1;
         gfxSetScreenFormat(screen, GSP_RGB565_OES);
         gfxSetDoubleBuffering(screen, true);
         for (int i = 0; i < 2; i++) { // both buffers, so the border stays black
@@ -199,16 +201,32 @@ static void PresentSub(void)
         }
         sSubMode = SUB_PICTURE;
     }
-    if (sSubWrites == 0)
+    if (full) {
+        area[2] = SUBSCREEN_W; area[3] = SUBSCREEN_H;
+    } else if (Port_SubScreenChanged()) {
+        Port_SubScreenChangedArea(&area[0], &area[1], &area[2], &area[3]);
+    }
+    int draw[4] = { area[0], area[1], area[2], area[3] };
+    if (sPend[0] < sPend[2]) { // add what the other buffer lacks
+        if (draw[0] >= draw[2]) {
+            memcpy(draw, sPend, sizeof(draw));
+        } else {
+            if (sPend[0] < draw[0]) draw[0] = sPend[0];
+            if (sPend[1] < draw[1]) draw[1] = sPend[1];
+            if (sPend[2] > draw[2]) draw[2] = sPend[2];
+            if (sPend[3] > draw[3]) draw[3] = sPend[3];
+        }
+    }
+    memcpy(sPend, area, sizeof(sPend));
+    if (draw[0] >= draw[2] || draw[1] >= draw[3])
         return;
-    sSubWrites--;
 
     const uint16_t *lut = sPresentLut;
     uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
     const int ox = (width - SUBSCREEN_W) / 2, oy = (240 - SUBSCREEN_H) / 2;
-    for (int x = 0; x < SUBSCREEN_W; x++) {
+    for (int x = draw[0]; x < draw[2]; x++) {
         uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
-        for (int y = 0; y < SUBSCREEN_H; y++)
+        for (int y = draw[1]; y < draw[3]; y++)
             col[-y] = PIX(sSubFrame[y * SUBSCREEN_W + x]);
     }
 }

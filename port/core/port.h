@@ -60,6 +60,7 @@ void Port_LoadConfig(void);
 // call, out is left as it was and Port_SubScreenChanged() returns false.
 bool Port_RenderSubScreen(uint16_t *out);
 bool Port_SubScreenChanged(void);
+void Port_SubScreenChangedArea(int *x0, int *y0, int *x1, int *y1); // what changed (x1/y1 exclusive)
 
 // Backend: implemented once per platform.
 void Backend_Present(const uint16_t *frame, int width, int height); // BGR555: 240x160 (GBA size) or SCREEN_W x SCREEN_H (DS size)
