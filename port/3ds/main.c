@@ -90,34 +90,72 @@ static void ClearGameScreen(void);
 // stored bottom to top. Going down a source column one pixel at a time would
 // read every 512 bytes in a DS-size picture (256 pixels a row), which the
 // Old 3DS's cache cannot hold on to (they all fall in the same few cache
-// sets); writing across columns one pixel at a time is slow too, and so are
-// writes the cache does not hold (it only keeps what is read). So it goes in
-// strips of 16 columns: each source row's 16 pixels go to a small buffer, one
-// 32-byte line per row, which stays in the cache (it is the same buffer every
-// strip); then each framebuffer column is written in one go from it.
+// sets). So it goes in strips of 16 columns, two rows at a time: the two
+// rows' 16 pixels are read together, and each column gets its two pixels
+// (one above the other, next to each other in memory) in one 32-bit write.
 static uint16_t sIdentity[400];
 static uint16_t sMapX[400], sMapY[240];
 
-static void Blit(const uint16_t *frame, int srcW, uint16_t *fb, int ox, int oy,
-                 int x0, int y0, int x1, int y1, const uint16_t *xmap, const uint16_t *ymap,
-                 const uint16_t *lut)
+typedef struct {
+    const uint16_t *frame;
+    int srcW;
+    uint16_t *fb;
+    int ox, oy, x0, y0, x1, y1;
+    const uint16_t *xmap, *ymap, *lut;
+} BlitArgs;
+
+static void Blit(const BlitArgs *b)
 {
     enum { STRIP = 16 };
-    static uint16_t strip[240][STRIP] __attribute__((aligned(32))); // [y][column]
-    for (int xs = x0; xs < x1; xs += STRIP) {
-        int n = xs + STRIP < x1 ? STRIP : x1 - xs;
-        for (int y = y0; y < y1; y++) {
-            const uint16_t *row = frame + ymap[y] * srcW;
-            uint16_t *dst = strip[y];
+    const uint16_t *lut = b->lut;
+    for (int xs = b->x0; xs < b->x1; xs += STRIP) {
+        int n = xs + STRIP < b->x1 ? STRIP : b->x1 - xs;
+        const uint16_t *xmap = b->xmap + xs;
+        uint16_t *top = b->fb + (b->ox + xs) * 240 + (239 - b->oy); // y grows downwards in memory
+        int y = b->y0;
+        if ((b->oy + y) & 1) { // a lone first row (the pairs must be 32-bit aligned)
+            const uint16_t *row = b->frame + b->ymap[y] * b->srcW;
             for (int i = 0; i < n; i++)
-                dst[i] = PIX(row[xmap[xs + i]]);
+                top[i * 240 - y] = PIX(row[xmap[i]]);
+            y++;
         }
-        for (int i = 0; i < n; i++) {
-            uint16_t *col = fb + (ox + xs + i) * 240 + (239 - oy); // y grows downwards in memory
-            for (int y = y0; y < y1; y++)
-                col[-y] = strip[y][i];
+        for (; y + 1 < b->y1; y += 2) {
+            const uint16_t *rowA = b->frame + b->ymap[y] * b->srcW;
+            const uint16_t *rowB = b->frame + b->ymap[y + 1] * b->srcW;
+            uint16_t *dst = top - y - 1; // row y + 1, then row y
+            for (int i = 0; i < n; i++, dst += 240) {
+                uint32_t a = PIX(rowA[xmap[i]]), c = PIX(rowB[xmap[i]]);
+                *(uint32_t *)dst = c | (a << 16);
+            }
+        }
+        if (y < b->y1) { // a lone last row
+            const uint16_t *row = b->frame + b->ymap[y] * b->srcW;
+            for (int i = 0; i < n; i++)
+                top[i * 240 - y] = PIX(row[xmap[i]]);
         }
     }
+}
+
+static void BlitAsync(void *arg) { Blit(arg); }
+
+// The main screen's copy: with Dual Core on, the second core does the right
+// half while this one does the left.
+static void BlitMain(const uint16_t *frame, int srcW, uint16_t *fb, int ox, int oy, int w, int h,
+                     const uint16_t *xmap, const uint16_t *ymap, const uint16_t *lut)
+{
+    BlitArgs left = { frame, srcW, fb, ox, oy, 0, 0, w, h, xmap, ymap, lut };
+    if (!Port_DualCore()) {
+        Blit(&left);
+        return;
+    }
+    static BlitArgs right;
+    int mid = (w / 2) & ~15;
+    right = left;
+    right.x0 = mid;
+    left.x1 = mid;
+    Backend_RunAsync(BlitAsync, &right);
+    Blit(&left);
+    Backend_WaitAsync();
 }
 
 static void BuildMaps(void)
@@ -145,18 +183,18 @@ static void PresentGba(const uint16_t *frame, uint16_t *fb, int width, const uin
 {
     if (!sScaled) {
         const int ox = (width - GBA_W) / 2, oy = (240 - GBA_H) / 2;
-        Blit(frame, GBA_W, fb, ox, oy, 0, 0, GBA_W, GBA_H, sIdentity, sIdentity, lut);
+        BlitMain(frame, GBA_W, fb, ox, oy, GBA_W, GBA_H, sIdentity, sIdentity, lut);
         return;
     }
     if (sBottom) {
         // 4/3x to 320x213: every source pixel becomes 1 or 2 screen pixels.
         ScaleMaps(320, 213, 4, 3);
-        Blit(frame, GBA_W, fb, 0, (240 - 213) / 2, 0, 0, 320, 213, sMapX, sMapY, lut);
+        BlitMain(frame, GBA_W, fb, 0, (240 - 213) / 2, 320, 213, sMapX, sMapY, lut);
         return;
     }
     // 1.5x: every source pixel becomes 1 or 2 screen pixels in each direction.
     ScaleMaps(360, 240, 3, 2);
-    Blit(frame, GBA_W, fb, (400 - 360) / 2, 0, 0, 0, 360, 240, sMapX, sMapY, lut);
+    BlitMain(frame, GBA_W, fb, (400 - 360) / 2, 0, 360, 240, sMapX, sMapY, lut);
 }
 
 // DS size: the 256x192 picture, 1:1 or 1.25x to 320x240.
@@ -164,12 +202,12 @@ static void PresentDs(const uint16_t *frame, uint16_t *fb, int width, const uint
 {
     if (!sScaled) {
         const int ox = (width - SCREEN_W) / 2, oy = (240 - SCREEN_H) / 2;
-        Blit(frame, SCREEN_W, fb, ox, oy, 0, 0, SCREEN_W, SCREEN_H, sIdentity, sIdentity, lut);
+        BlitMain(frame, SCREEN_W, fb, ox, oy, SCREEN_W, SCREEN_H, sIdentity, sIdentity, lut);
         return;
     }
     // 1.25x: every source pixel becomes 1 or 2 screen pixels.
     ScaleMaps(320, 240, 5, 4);
-    Blit(frame, SCREEN_W, fb, (width - 320) / 2, 0, 0, 0, 320, 240, sMapX, sMapY, lut);
+    BlitMain(frame, SCREEN_W, fb, (width - 320) / 2, 0, 320, 240, sMapX, sMapY, lut);
 }
 
 static void PresentMain(const uint16_t *frame, int frameW)
@@ -282,7 +320,8 @@ static void PresentSub(void)
     const uint16_t *lut = sPresentLut;
     uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
     const int ox = (width - SUBSCREEN_W) / 2, oy = (240 - SUBSCREEN_H) / 2;
-    Blit(sSubFrame, SUBSCREEN_W, fb, ox, oy, draw[0], draw[1], draw[2], draw[3], sIdentity, sIdentity, lut);
+    BlitArgs b = { sSubFrame, SUBSCREEN_W, fb, ox, oy, draw[0], draw[1], draw[2], draw[3], sIdentity, sIdentity, lut };
+    Blit(&b);
     Part(T_SUBOUT);
 }
 
@@ -354,11 +393,12 @@ void Backend_Present(const uint16_t *frame, int width, int height)
 // share of its system core (core 1), which the system's own services (the
 // screens, sound, the HOME Menu) then do without: asking for 80% made those
 // slow (port.log: sound and flushing took twice as long, even with Dual Core
-// turned off again). So the share is CPU_LIMIT_ON only while Dual Core is on
+// turned off again); 50% left the second core too little to draw with. So
+// the share is CPU_LIMIT_ON only while Dual Core is on
 // and the game is in front, and the least the system takes (CPU_LIMIT_OFF)
 // otherwise; the thread is stopped when Dual Core is turned off.
 
-#define CPU_LIMIT_ON 50
+#define CPU_LIMIT_ON 70
 #define CPU_LIMIT_OFF 5
 static Thread sWorker;
 static bool sWorkerOld3DS; // the worker uses the system core's share
