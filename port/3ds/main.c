@@ -90,8 +90,10 @@ static void ClearGameScreen(void);
 // stored bottom to top. Going down a source column one pixel at a time would
 // read every 512 bytes in a DS-size picture (256 pixels a row), which the
 // Old 3DS's cache cannot hold on to (they all fall in the same few cache
-// sets): instead it goes in strips of 16 columns, reading each source row's
-// 16 pixels together and writing the strip's 16 framebuffer columns.
+// sets); writing across columns one pixel at a time is slow too. So it goes
+// in strips of 16 columns: the strip is read row by row into a small buffer
+// that stays in the cache, turned on its side, then each framebuffer column
+// is written in one go.
 static uint16_t sIdentity[400];
 static uint16_t sMapX[400], sMapY[240];
 
@@ -100,14 +102,19 @@ static void Blit(const uint16_t *frame, int srcW, uint16_t *fb, int ox, int oy,
                  const uint16_t *lut)
 {
     enum { STRIP = 16 };
+    static uint16_t strip[STRIP][240] __attribute__((aligned(8))); // [column][y]
     for (int xs = x0; xs < x1; xs += STRIP) {
-        int xe = xs + STRIP < x1 ? xs + STRIP : x1;
-        uint16_t *top = fb + (ox + xs) * 240 + (239 - oy);
+        int n = xs + STRIP < x1 ? STRIP : x1 - xs;
         for (int y = y0; y < y1; y++) {
             const uint16_t *row = frame + ymap[y] * srcW;
-            uint16_t *dst = top - y;
-            for (int x = xs; x < xe; x++, dst += 240)
-                *dst = PIX(row[xmap[x]]);
+            for (int i = 0; i < n; i++)
+                strip[i][y] = PIX(row[xmap[xs + i]]);
+        }
+        for (int i = 0; i < n; i++) {
+            uint16_t *col = fb + (ox + xs + i) * 240 + (239 - oy); // y = 0 here, y grows downwards in memory
+            const uint16_t *src = strip[i];
+            for (int y = y0; y < y1; y++)
+                col[-y] = src[y];
         }
     }
 }
