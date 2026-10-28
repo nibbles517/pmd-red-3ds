@@ -64,5 +64,11 @@ extern uint8_t gPortTileBg[4];
 // Wide view: BG0's top row (the dungeon's floor, level and HP) drawn this
 // many lines lower (set by the game in dungeons; 0 elsewhere).
 extern uint8_t gPortHudLines;
+// ... then also drawn this many pixels further left, and its HP bar (BG0
+// tiles from column 18) from gPortHudBar instead: 4bpp tiles of 8 rows, one
+// pixel per HP, up to PORT_HUD_BAR_MAX pixels (the game's own: 96).
+extern uint8_t gPortHudLeft;
+#define PORT_HUD_BAR_MAX 160
+extern uint32_t gPortHudBar[PORT_HUD_BAR_MAX];
 
 #endif

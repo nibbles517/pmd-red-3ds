@@ -47,7 +47,8 @@ static int sObjXWrap = 256;
 #ifndef PPU_SECOND
 struct PortWideBg gPortWideBg[4];
 uint8_t gPortTileBg[4];
-uint8_t gPortHudLines;
+uint8_t gPortHudLines, gPortHudLeft;
+uint32_t gPortHudBar[PORT_HUD_BAR_MAX]; // (PORT_HUD_BAR_MAX / 8 tiles of 8 rows)
 #endif
 
 // The I/O registers the renderer reads: the live ones, or (Dual Core) a
@@ -384,6 +385,38 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
     return any;
 }
 
+// Wide view, gPortHudLines set: BG0's top row (the dungeon's floor, level
+// and HP; `line` is the row's own, 0-7), gPortHudLeft further left than the
+// GBA screen's, its HP bar (8 pixels per tile from column 18, shown while
+// the row holds it) longer: gPortHudBar's.
+static int RenderHud(int line, uint16_t *out, uint16_t cnt)
+{
+    int ox = sOx - gPortHudLeft;
+    int saveOx = sOx;
+    sOx = ox;
+    sW = ox + GBA_W;
+    int any = RenderTextBgVram(0, line, out, cnt);
+    sOx = saveOx;
+    sW = sViewW;
+    for (int x = 0; x < ox; x++) out[x] = TRANSPARENT;
+    for (int x = ox + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
+
+    int hofs = R16(0x10) & 0x1FF, vofs = R16(0x12) & 0x1FF;
+    unsigned screenBase = ((cnt >> 8) & 0x1F) * 0x800;
+    uint16_t e = *(const uint16_t *)&gPortVram[screenBase + (((vofs >> 3) & 31) * 32 + ((18 + (hofs >> 3)) & 31)) * 2];
+    if (e == 0xF2CC) { // the bar is shown
+        int x0 = ox + 18 * 8;
+        for (int i = 0; i < PORT_HUD_BAR_MAX && x0 + i < sW; i++) {
+            uint32_t row = gPortHudBar[(i >> 3) * 8 + line];
+            unsigned n = (row >> ((i & 7) * 4)) & 0xF;
+            out[x0 + i] = n ? Pal(0xF0 + n) : TRANSPARENT;
+            any |= n != 0;
+        }
+    }
+    sLastMask = ALL_GROUPS; sLastFull = 0;
+    return any;
+}
+
 // Returns nonzero if the line has any opaque pixel.
 static int RenderTextBg(int bg, int line, uint16_t *out)
 {
@@ -401,14 +434,14 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         // system's fill tile, which in dungeons is the darkness (blended over
         // the floor): to the sides BG1 is that tile, so the darkness reaches
         // the edges.
-        if (bg == 0 && line < 8 + gPortHudLines) {
+        if (bg == 0 && gPortHudLines && line < 8 + gPortHudLines) {
             // the top row, gPortHudLines lower
             if (line < gPortHudLines) {
                 for (int x = 0; x < sW; x++) out[x] = TRANSPARENT;
                 sLastMask = 0; sLastFull = 0;
                 return 0;
             }
-            line -= gPortHudLines;
+            return RenderHud(line - gPortHudLines, out, cnt);
         }
         sW = sOx + GBA_W;
         int any = RenderTextBgVram(bg, line, out, cnt);
