@@ -300,6 +300,7 @@ class Harness:
         samples = collections.Counter()
         callers = collections.Counter()
         pcs = collections.Counter()
+        per_frame = collections.Counter()
         self.stopped_by_hook = False
         pc = start
         while self.exit_code is None and self.frame < self.args.frames:
@@ -308,6 +309,7 @@ class Harness:
             pc = self.uc.reg_read(UC_ARM_REG_PC)
             if self.uc.reg_read(UC_ARM_REG_CPSR) & 0x20:
                 pc |= 1  # resume in Thumb state
+            per_frame[self.frame] += 1
             if self.frame == frame_before or True:
                 name = where(self.syms, pc & ~1).split('+')[0]
                 samples[name] += 1
@@ -323,6 +325,9 @@ class Harness:
                 for addr, n in pcs.most_common():
                     f.write(f'{addr:#x} {n}\n')
         print(f'instructions per frame: {total * self.args.profile / max(1, self.frame - self.first_frame):.0f}')
+        heavy = sorted((f, n) for f, n in per_frame.items() if n * self.args.profile > 3_000_000)
+        if heavy:
+            print('frames over 3M instructions:', ', '.join(f'{f}: {n * self.args.profile / 1e6:.1f}M' for f, n in heavy))
         print('top (function <- caller):')
         for (f, c), n in callers.most_common(15):
             print(f'  {100 * n / total:5.1f}%  {f} <- {c}')

@@ -1482,6 +1482,47 @@ index 0680f301..5348bec4 100644
  
      sub_80073E0(0);
  }
+diff --git a/src/dungeon_name_banner.c b/src/dungeon_name_banner.c
+index 7a4e7b57..97d66197 100644
+--- a/src/dungeon_name_banner.c
++++ b/src/dungeon_name_banner.c
+@@ -14,6 +14,9 @@
+ #include "pokemon_3.h"
+ #include "text_1.h"
+ #include "text_3.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ 
+ EWRAM_DATA OpenedFile *gDungeonNameBannerPalette = NULL;
+ static EWRAM_DATA OpenedFile *gDungeonNameBannerFontFile = NULL;
+@@ -62,6 +65,17 @@ void ShowDungeonNameBanner_Async(void)
+         s32 currFloor = gDungeon->unk644.dungeonLocation.floor + gDungeon->startFloorId;
+         const u8 *dungName = GetDungeonName2(gDungeon->unk644.dungeonLocation.id);
+         s32 r5 = 10;
++#ifdef PLATFORM_3DS
++        // DS and Fit sizes (the wide view): as far below the screen's top as
++        // in the GBA picture centred on it
++        s32 rowShift = 0;
++        if (PORT_WIDE_SIZE) {
++            rowShift = (SCREEN_H - 160) / 16;
++            gPortWideView = 2;
++        }
++#else
++        const s32 rowShift = 0;
++#endif
+ 
+         for (r7 = 0; r7 < 8; r7++) {
+             for (i = 0; i < 28; r5++) {
+@@ -69,7 +83,7 @@ void ShowDungeonNameBanner_Async(void)
+ 
+                 i++;
+                 a2 = r5 | 0xE000;
+-                sub_8008DC8(i, r7 + 4, r5 | a2, 0);
++                sub_8008DC8(i, r7 + 4 + rowShift, r5 | a2, 0);
+             }
+         }
+ 
 diff --git a/src/dungeon_pokemon_sprites.c b/src/dungeon_pokemon_sprites.c
 index b965ec4a..a66128bd 100644
 --- a/src/dungeon_pokemon_sprites.c
@@ -3265,6 +3306,45 @@ index e6872a26..c6368b99 100644
      SoundBiasSet();
  
      REG_IME = 0;
+diff --git a/src/run_dungeon.c b/src/run_dungeon.c
+index f6108c72..60ff6c90 100644
+--- a/src/run_dungeon.c
++++ b/src/run_dungeon.c
+@@ -65,6 +65,20 @@
+ #include "adventure_info.h"
+ #include "decompress_sir.h"
+ 
++#ifdef PLATFORM_3DS
++static void PortHoldFloorBanner(s32 frames)
++{
++    s32 i;
++    gUnknown_203B40D = TRUE;
++    gDungeonBrightness = 0;
++    for (i = 0; i < frames; i++) {
++        sub_803E874(1, 0x1F);
++        DungeonRunFrameActions(5);
++    }
++    gUnknown_203B40D = FALSE;
++}
++#endif
++
+ EWRAM_INIT struct UnkStruct_203B414 *gUnknown_203B414 = NULL;
+ EWRAM_INIT Dungeon *gDungeon = NULL;
+ static EWRAM_INIT u8 *gSerializedData_203B41C = NULL;
+@@ -390,6 +404,13 @@ void RunDungeon_Async(DungeonSetupStruct *setupPtr)
+             sub_806AB2C();
+         }
+ 
++#ifdef PLATFORM_3DS
++        // The GBA shows the floor's name banner (on black) while it makes the
++        // floor, which here takes no time: it is kept as long, as measured
++        // in the GBA's speed (about 45 frames for a new floor, 15 when
++        // resuming a quicksave), before fading as usual.
++        PortHoldFloorBanner(r6 ? 15 : 45);
++#endif
+         if (gDungeon->unk7 == 0) {
+             sub_803E748();
+         }
 diff --git a/src/save.c b/src/save.c
 index ee2ca650..032da776 100644
 --- a/src/save.c
