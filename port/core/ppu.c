@@ -47,6 +47,7 @@ static int sObjXWrap = 256;
 #ifndef PPU_SECOND
 struct PortWideBg gPortWideBg[4];
 uint8_t gPortTileBg[4];
+uint8_t gPortHudLines;
 #endif
 
 // The I/O registers the renderer reads: the live ones, or (Dual Core) a
@@ -400,6 +401,15 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         // system's fill tile, which in dungeons is the darkness (blended over
         // the floor): to the sides BG1 is that tile, so the darkness reaches
         // the edges.
+        if (bg == 0 && line < 8 + gPortHudLines) {
+            // the top row, gPortHudLines lower
+            if (line < gPortHudLines) {
+                for (int x = 0; x < sW; x++) out[x] = TRANSPARENT;
+                sLastMask = 0; sLastFull = 0;
+                return 0;
+            }
+            line -= gPortHudLines;
+        }
         sW = sOx + GBA_W;
         int any = RenderTextBgVram(bg, line, out, cnt);
         sW = sViewW;

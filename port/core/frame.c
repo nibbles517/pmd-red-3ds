@@ -217,6 +217,7 @@ static void RunFrame(void)
     if (!wide) {
         memset(gPortWideBg, 0, sizeof(gPortWideBg));
         memset(gPortTileBg, 0, sizeof(gPortTileBg));
+        gPortHudLines = 0;
     }
 
     int dual = Port_DualCore();

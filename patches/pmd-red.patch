@@ -1630,7 +1630,7 @@ index 60311546..1c3f273b 100644
  
              switch (GetEntityType(ent)) {
 diff --git a/src/dungeon_vram.c b/src/dungeon_vram.c
-index 99689873..04d04fcb 100644
+index 99689873..a1c1f2ab 100644
 --- a/src/dungeon_vram.c
 +++ b/src/dungeon_vram.c
 @@ -1,4 +1,7 @@
@@ -1641,7 +1641,7 @@ index 99689873..04d04fcb 100644
  #include "globaldata.h"
  #include "dungeon_vram.h"
  #include "structs/str_dungeon.h"
-@@ -182,6 +185,22 @@ static void sub_803E490(u32 unused)
+@@ -182,6 +185,23 @@ static void sub_803E490(u32 unused)
          SetBG2RegOffsets(0, 0);
      }
      SetBG3RegOffsets(gDungeon->unk181e8.cameraPixelPos.x, gDungeon->unk181e8.cameraPixelPos.y - gDungeon->unk181e8.unk181FC);
@@ -1653,6 +1653,7 @@ index 99689873..04d04fcb 100644
 +        gPortWideBg[3].scrollX = gDungeon->unk181e8.cameraPixelPos.x;
 +        gPortWideBg[3].scrollY = gDungeon->unk181e8.cameraPixelPos.y - gDungeon->unk181e8.unk181FC;
 +        gPortWideView = 2;
++        gPortHudLines = SCREEN_H > 192 ? 4 : 0; // Fit: the floor, level and HP 4 lines lower
 +        // the tile highlights: scrolled with the floor only while shown
 +        gPortWideBg[2].map = gDungeon->unk181e8.unk1821A ? gPortDungeonBg2 : NULL;
 +        gPortWideBg[2].scrollX = gDungeon->unk181e8.cameraPixelPos.x;
@@ -1664,7 +1665,7 @@ index 99689873..04d04fcb 100644
      sub_806CC10();
      sub_804522C();
      sub_803F9CC();
-@@ -730,7 +749,11 @@ static void sub_803EDF0(void)
+@@ -730,7 +750,11 @@ static void sub_803EDF0(void)
      y2 = (gDungeon->unk181e8.cameraPixelPos.y + 24);
      y = y1 - y2;
  
@@ -1865,7 +1866,7 @@ index 1179e657..13c8e87f 100644
  // arm9.bin::0200A178
  void InitGraphics(void)
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..7bcc9611 100644
+index 069cfc94..654d33db 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -1876,7 +1877,7 @@ index 069cfc94..7bcc9611 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,149 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,151 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -1957,6 +1958,7 @@ index 069cfc94..7bcc9611 100644
 +        gPortWideBg[bg].scrollY = mapRender->cameraPos.y;
 +    }
 +    gPortWideView = 2;
++    gPortHudLines = 0;
 +}
 +
 +// The friend areas map and the world map (on the way to a dungeon), wide:
@@ -1986,6 +1988,7 @@ index 069cfc94..7bcc9611 100644
 +        gPortWideBg[bg].scrollY = bgY;
 +    }
 +    gPortWideView = 2;
++    gPortHudLines = 0;
 +}
 +
 +// ... and where to keep bgPos: the GBA's rules (the Pokémon at least 48

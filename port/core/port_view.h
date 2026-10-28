@@ -61,4 +61,8 @@ extern struct PortWideBg gPortWideBg[4];
 // screen, one copy centred (full-screen move effects), while unscrolled.
 extern uint8_t gPortTileBg[4];
 
+// Wide view: BG0's top row (the dungeon's floor, level and HP) drawn this
+// many lines lower (set by the game in dungeons; 0 elsewhere).
+extern uint8_t gPortHudLines;
+
 #endif
