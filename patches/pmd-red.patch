@@ -2594,14 +2594,16 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..e65a3c03
+index 00000000..3d7bd0f9
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,318 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
 +//   Frame Skip             Off / Auto / Always (port/core/frame.c)
++//   Dual Core              Off / On: the second CPU core draws the picture
++//                          (port/core/frame.c); defaults to On on an Old 3DS
 +//   Main Screen            Top / Bottom (kept in the save's game options, in the
 +//                          bit the DS version uses for its touch screen option:
 +//                          clear = bottom, set = top)
@@ -2630,9 +2632,9 @@ index 00000000..e65a3c03
 +
 +enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN };
 +// First page entries
-+enum { TOP_FRAMESKIP, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
++enum { TOP_FRAMESKIP, TOP_DUALCORE, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
 +
-+#define TOP_ENTRIES 4
++#define TOP_ENTRIES 5
 +#define MAX_CHOICES 4
 +
 +enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP };
@@ -2664,6 +2666,8 @@ index 00000000..e65a3c03
 +ALIGNED(4) static const u8 sOff[] = _("Off");
 +ALIGNED(4) static const u8 sAuto[] = _("Auto");
 +ALIGNED(4) static const u8 sAlways[] = _("Always");
++ALIGNED(4) static const u8 sDualCore[] = _("Dual Core");
++ALIGNED(4) static const u8 sOn[] = _("On");
 +ALIGNED(4) static const u8 sMainScreen[] = _("Main Screen{MOVE_X_POSITION_BY_80}Top{MOVE_X_POSITION_BY_120}Bottom");
 +ALIGNED(4) static const u8 sTop[] = _("Top");
 +ALIGNED(4) static const u8 sBottom[] = _("Bottom");
@@ -2770,6 +2774,12 @@ index 00000000..e65a3c03
 +        for (c = 0; c < 3; c++)
 +            PrintStringOnWindow(FRAMESKIP_X(c), y, sSettings[SETTING_FRAMESKIP].choices[c], win, 0);
 +        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(skip), y + 10, GetStringLineWidth(sSettings[SETTING_FRAMESKIP].choices[skip]), COLOR_WHITE_2);
++        y = GetMenuEntryYCoord(&sMenu.input, TOP_DUALCORE);
++        PrintStringOnWindow(8, y, sDualCore, win, 0);
++        PrintStringOnWindow(FRAMESKIP_X(0), y, sOff, win, 0);
++        PrintStringOnWindow(FRAMESKIP_X(1), y, sOn, win, 0);
++        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.dualCore ? 1 : 0), y + 10,
++                                     GetStringLineWidth(gPortConfig.dualCore ? sOn : sOff), COLOR_WHITE_2);
 +        y = GetMenuEntryYCoord(&sMenu.input, TOP_MAIN_SCREEN);
 +        PrintStringOnWindow(8, y, sMainScreen, win, 0);
 +        if (sMenu.options->touchScreen)
@@ -2865,6 +2875,10 @@ index 00000000..e65a3c03
 +                if (index == TOP_FRAMESKIP) {
 +                    s32 v = gPortConfig.frameSkip < 3 ? gPortConfig.frameSkip : PORT_FRAMESKIP_AUTO;
 +                    gPortConfig.frameSkip = (u8)((v + 3 + step) % 3);
++                    changed = TRUE;
++                }
++                else if (index == TOP_DUALCORE) {
++                    gPortConfig.dualCore = !gPortConfig.dualCore;
 +                    changed = TRUE;
 +                }
 +                else if (index == TOP_MAIN_SCREEN) {

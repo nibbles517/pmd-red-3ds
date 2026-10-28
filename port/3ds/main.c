@@ -28,7 +28,7 @@
 
 void AgbMain(void);
 
-const int Backend_Version9_UpdateRepoIfMissing = 9;
+const int Backend_Version10_UpdateRepoIfMissing = 10;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -343,6 +343,103 @@ void Backend_Present(const uint16_t *frame, int width, int height)
     PresentSub(); // (times T_SUB and T_SUBOUT)
 }
 
+// --- Dual Core ------------------------------------------------------------------
+//
+// A thread on the second CPU core (an Old 3DS lends apps part of its system
+// core: up to 80% is asked for; a New 3DS has a core of its own for apps,
+// core 2) runs what Backend_RunAsync is given: drawing part of the main
+// screen's picture (port/core/frame.c). If it cannot be started, the work is
+// done at once on this core.
+
+static Thread sWorker;
+static bool sWorkerTried, sWorkerQuit, sWorkerBusy;
+static LightEvent sWorkGo, sWorkDone;
+static void (*sWorkFn)(void *);
+static void *sWorkArg;
+
+bool Backend_IsNew3DS(void)
+{
+    bool isNew = false;
+    APT_CheckNew3DS(&isNew);
+    return isNew;
+}
+
+static void WorkerMain(void *unused)
+{
+    (void)unused;
+    for (;;) {
+        LightEvent_Wait(&sWorkGo);
+        __sync_synchronize();
+        if (sWorkerQuit)
+            break;
+        sWorkFn(sWorkArg);
+        __sync_synchronize();
+        LightEvent_Signal(&sWorkDone);
+    }
+}
+
+static void StartWorker(void)
+{
+    s32 prio = 0x30;
+    bool isNew = Backend_IsNew3DS();
+    sWorkerTried = true;
+    LightEvent_Init(&sWorkGo, RESET_ONESHOT);
+    LightEvent_Init(&sWorkDone, RESET_ONESHOT);
+    if (!isNew)
+        APT_SetAppCpuTimeLimit(80);
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    sWorker = threadCreate(WorkerMain, NULL, 32 * 1024, prio - 1, isNew ? 2 : 1, false);
+    Backend_Log("dual core: %s (core %d)", sWorker ? "started" : "not available", isNew ? 2 : 1);
+}
+
+void Backend_RunAsync(void (*fn)(void *), void *arg)
+{
+    if (!sWorkerTried)
+        StartWorker();
+    if (sWorker == NULL) {
+        fn(arg);
+        return;
+    }
+    sWorkFn = fn;
+    sWorkArg = arg;
+    sWorkerBusy = true;
+    __sync_synchronize();
+    LightEvent_Signal(&sWorkGo);
+}
+
+void Backend_WaitAsync(void)
+{
+    if (!sWorkerBusy)
+        return;
+    LightEvent_Wait(&sWorkDone);
+    __sync_synchronize();
+    sWorkerBusy = false;
+}
+
+bool Backend_AsyncDone(void)
+{
+    if (!sWorkerBusy)
+        return true;
+    if (!LightEvent_TryWait(&sWorkDone))
+        return false;
+    __sync_synchronize();
+    sWorkerBusy = false;
+    return true;
+}
+
+static void StopWorker(void)
+{
+    if (sWorker == NULL)
+        return;
+    Backend_WaitAsync();
+    sWorkerQuit = true;
+    __sync_synchronize();
+    LightEvent_Signal(&sWorkGo);
+    threadJoin(sWorker, U64_MAX);
+    threadFree(sWorker);
+    sWorker = NULL;
+}
+
 // --- Pacing ------------------------------------------------------------------
 //
 // Each frame should be done by the next VBlank (60 a second). One that is
@@ -545,6 +642,7 @@ static void FlushSave(void)
 
 static void Shutdown(void)
 {
+    StopWorker();
     FlushSave();
     if (sAudioOn) { ndspExit(); linearFree(sWaveData); }
     if (sLog) fclose(sLog);

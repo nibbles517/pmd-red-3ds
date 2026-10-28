@@ -33,6 +33,17 @@ extern void (*gPortLineHook)(int line);
 void Ppu_BeginFrame(void);
 void Ppu_RenderLine(int line, uint16_t *dst);
 void Ppu_SetView(int wide); // wide: SCREEN_W-pixel lines, lines past 159 too (port_view.h)
+// Dual Core: the lines are drawn after the frame's events, from the
+// registers each line had (NULL: the live ones); two renderers share them
+// out, the second one (PpuB_*, ppu_b.c) on the second CPU core. Ppu_SkipLine:
+// a line the other renderer draws.
+void Ppu_SetLineRegs(const uint8_t *regs);
+void Ppu_SkipLine(int line);
+void PpuB_BeginFrame(void);
+void PpuB_RenderLine(int line, uint16_t *dst);
+void PpuB_SkipLine(int line);
+void PpuB_SetView(int wide);
+void PpuB_SetLineRegs(const uint8_t *regs);
 
 // dma.c
 void Dma_HBlank(void);
@@ -51,7 +62,8 @@ void Sound_EndFrame(void);
 bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Screen
 bool Port_DsSize(void);            // ... > Main Screen Settings > Size is DS (port_view.h)
 void Port_LoadConfig(void);
-int Port_FrameSkipMode(void);       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
+int Port_FrameSkipMode(void);
+int Port_DualCore(void);            // Graphics Options > Dual Core: On       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
 
 // subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
 // true when there is something to show.
@@ -71,6 +83,12 @@ void Backend_Present(const uint16_t *frame, int width, int height);
 // Whether the last frame took longer than a 60th of a second (Frame Skip:
 // Auto then skips drawing the next one).
 bool Backend_FrameLate(void);
+// Dual Core: runs fn(arg) on the second CPU core (or at once, if there is
+// none); Backend_WaitAsync waits for it to return.
+void Backend_RunAsync(void (*fn)(void *), void *arg);
+void Backend_WaitAsync(void);
+bool Backend_AsyncDone(void);  // whether it has returned already (without waiting)
+bool Backend_IsNew3DS(void); // (Dual Core's default)
 // Performance meter: the core marks where each frame's parts end (the
 // backend times them). skipped: Frame Skip left the frame undrawn.
 enum { PORT_MARK_FRAME_START, PORT_MARK_DRAWN, PORT_MARK_PRESENTED, PORT_MARK_VBLANK_DONE };
@@ -84,7 +102,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version9_UpdateRepoIfMissing;
+extern const int Backend_Version10_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

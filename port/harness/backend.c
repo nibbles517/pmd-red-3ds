@@ -20,7 +20,13 @@ enum {
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4 };
 
-const int Backend_Version9_UpdateRepoIfMissing = 9;
+const int Backend_Version10_UpdateRepoIfMissing = 10;
+
+// Dual Core: one core here, so the second core's part is drawn at once.
+void Backend_RunAsync(void (*fn)(void *), void *arg) { fn(arg); }
+void Backend_WaitAsync(void) {}
+bool Backend_AsyncDone(void) { return true; }
+bool Backend_IsNew3DS(void) { return false; }
 
 void Backend_Mark(int mark, int skipped) { (void)mark; (void)skipped; }
 

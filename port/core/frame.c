@@ -85,7 +85,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version9_UpdateRepoIfMissing != 9)
+    if (Backend_Version10_UpdateRepoIfMissing != 10)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -100,11 +100,91 @@ void Port_Init(void)
 }
 
 uint64_t Port_FrameCount(void) { return sFrames; }
-const uint16_t *Port_Framebuffer(void) { return sShown; }
+const uint16_t *Port_Framebuffer(void);
 
 static void UpdateKeys(void)
 {
     W16(REG_KEYINPUT, (uint16_t)(~Backend_PollKeys() & 0x3FF));
+}
+
+// --- Dual Core ------------------------------------------------------------
+//
+// Graphics Options > Dual Core: On. While the frame's lines go by (and the
+// VCount and HBlank events change the registers), the registers each line
+// has are kept; then the picture is drawn by two renderers at once, the main
+// CPU core drawing the top lines and the second core the rest. VRAM, the
+// palettes and OAM do not change until VBlank, so both read them as they are.
+// The split moves a little each frame towards the core that finished first.
+
+#define REG_COPY 0x60 // the registers the renderer reads (DISPCNT .. BLDY)
+static uint8_t sLineRegs[SCREEN_H][REG_COPY] __attribute__((aligned(4)));
+static uint8_t sStartRegs[REG_COPY] __attribute__((aligned(4)));
+static int sSplit = 96;    // the first line the second core draws
+static int sDualViewWide = -1;
+
+typedef struct {
+    int first, lines, mode, wide;
+} Part;
+
+static void DrawPartB(void *arg)
+{
+    const Part *p = arg;
+    static uint16_t line[SCREEN_W];
+    if (p->wide != sDualViewWide) {
+        PpuB_SetView(p->wide);
+        sDualViewWide = p->wide;
+    }
+    PpuB_SetLineRegs(sStartRegs);
+    PpuB_BeginFrame();
+    for (int y = 0; y < p->lines; y++) {
+        PpuB_SetLineRegs(sLineRegs[y]);
+        if (y < p->first)
+            PpuB_SkipLine(y);
+        else if (p->mode == VIEW_GBA)
+            PpuB_RenderLine(y, &sFrame[y * GBA_W]);
+        else if (p->wide)
+            PpuB_RenderLine(y, &sFrame[y * SCREEN_W]);
+        else {
+            PpuB_RenderLine(y, line);
+            memcpy(&sFrame[(y + NARROW_OY) * SCREEN_W + NARROW_OX], line, GBA_W * sizeof(uint16_t));
+        }
+    }
+    PpuB_SetLineRegs(NULL);
+}
+
+static void DrawDual(int mode, int wide, int lines)
+{
+    static Part part;
+    int split = sSplit;
+    if (split > lines - 8) split = lines - 8;
+    if (split < 8) split = 8;
+    part.first = split;
+    part.lines = lines;
+    part.mode = mode;
+    part.wide = wide;
+    Backend_RunAsync(DrawPartB, &part);
+
+    Ppu_SetLineRegs(sStartRegs);
+    Ppu_BeginFrame();
+    for (int y = 0; y < split; y++) {
+        Ppu_SetLineRegs(sLineRegs[y]);
+        if (mode == VIEW_GBA)
+            Ppu_RenderLine(y, &sFrame[y * GBA_W]);
+        else if (wide)
+            Ppu_RenderLine(y, &sFrame[y * SCREEN_W]);
+        else {
+            Ppu_RenderLine(y, sLine);
+            memcpy(&sFrame[(y + NARROW_OY) * SCREEN_W + NARROW_OX], sLine, GBA_W * sizeof(uint16_t));
+        }
+    }
+    Ppu_SetLineRegs(NULL);
+
+    // Whichever core finished first takes a couple more lines next frame.
+    if (Backend_AsyncDone())
+        sSplit = split - 2;
+    else
+        sSplit = split + 2;
+    Backend_WaitAsync();
 }
 
 // One full frame of hardware: the visible lines, then VBlank.
@@ -118,11 +198,11 @@ static void UpdateKeys(void)
 // while palettes and OAM (copied in the VBlank handler) stay on time.
 static void RunFrame(void)
 {
+    Backend_Mark(PORT_MARK_FRAME_START, 0);
     // Main Screen Settings > Size: GBA, the game's 240x160 picture as it is;
     // DS, a 256x192 picture, the GBA one in the middle, or the wide view while
     // the game keeps asking for it (it sets gPortWideView every frame it draws
     // a dungeon floor or a ground map, which it does only in DS size).
-    Backend_Mark(PORT_MARK_FRAME_START, 0);
     int ds = Port_DsSize();
     int wide = ds && gPortWideView != 0;
     int mode = !ds ? VIEW_GBA : wide ? VIEW_WIDE : VIEW_FRAMED;
@@ -133,7 +213,9 @@ static void RunFrame(void)
         memset(gPortTileBg, 0, sizeof(gPortTileBg));
     }
 
-    // Performance Settings > Frame Skip: the game runs every frame, but the
+    int dual = Port_DualCore();
+
+    // Graphics Options > Frame Skip: the game runs every frame, but the
     // picture is not drawn on some (the main screen keeps the last one).
     // Always: every other frame. Auto: after a frame that took too long (so
     // the game keeps its speed when drawing is too slow), at most
@@ -155,12 +237,15 @@ static void RunFrame(void)
         Ppu_SetView(wide);
         memset(sFrame, 0, sizeof(sFrame)); // the framed view's border is black
     }
+    int lines = wide ? SCREEN_H : GBA_H;
+    if (!skip && dual)
+        memcpy(sStartRegs, gPortRegs, REG_COPY);
+    else if (!skip)
+        Ppu_BeginFrame();
 
     // Lines 0-159: visible. The wide view also draws lines below, as if the
     // screen went on (no VCount events there, but the HBlank DMA continues).
-    if (!skip)
-        Ppu_BeginFrame();
-    for (int line = 0; line < (wide ? SCREEN_H : GBA_H); line++) {
+    for (int line = 0; line < lines; line++) {
         if (line < GBA_H) {
             SetLine(line);
             if (gPortLineHook)
@@ -168,6 +253,9 @@ static void RunFrame(void)
         }
         if (skip) {
             // not drawn
+        }
+        else if (dual) {
+            memcpy(sLineRegs[line], gPortRegs, REG_COPY); // drawn below
         }
         else if (mode == VIEW_GBA) {
             Ppu_RenderLine(line, &sFrame[line * GBA_W]);
@@ -181,7 +269,10 @@ static void RunFrame(void)
         }
         Dma_HBlank();
     }
+    if (!skip && dual)
+        DrawDual(mode, wide, lines);
     Backend_Mark(PORT_MARK_DRAWN, skip);
+
     if (!skip)
         memcpy(sShown, sFrame, sizeof(sShown));
     if (mode == VIEW_GBA)
@@ -206,6 +297,8 @@ static void RunFrame(void)
     UpdateKeys();
     sFrames++;
 }
+
+const uint16_t *Port_Framebuffer(void) { return sShown; }
 
 // --- BIOS calls ----------------------------------------------------------
 

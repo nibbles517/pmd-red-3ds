@@ -7,22 +7,33 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 2
+#define PORT_CONFIG_VERSION 3
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO };
 
 void Port_LoadConfig(void)
 {
     // An older, shorter file loads too (the backend fills the rest with 0).
     struct PortConfig c;
+    // Dual Core until chosen: on where it is needed (an Old 3DS)
+    gPortConfig.dualCore = !Backend_IsNew3DS();
     if (!Backend_LoadConfig((uint8_t *)&c, sizeof(c)))
         return;
     if (c.version == 1) { // before Frame Skip: Auto
-        c.version = PORT_CONFIG_VERSION;
+        c.version = 2;
         c.frameSkip = PORT_FRAMESKIP_AUTO;
+    }
+    if (c.version == 2) { // before Dual Core
+        c.version = 3;
+        c.dualCore = gPortConfig.dualCore;
     }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));
+}
+
+int Port_DualCore(void)
+{
+    return gPortConfig.dualCore != 0;
 }
 
 extern bool8 gPortGroundRunning; // subscreen.c
@@ -40,9 +51,9 @@ const char *Port_SettingsSummary(void)
     static const char *const sLayouts[4] = { "Blue", "Sky", "Log", "M+T" };
     static const char *const sSkips[3] = { "Off", "Auto", "Always" };
     static char buf[64];
-    snprintf(buf, sizeof(buf), "size=%s sub=%s skip=%s", sSizes[gPortConfig.layout[0][0] & 3],
+    snprintf(buf, sizeof(buf), "size=%s sub=%s skip=%s dual=%s", sSizes[gPortConfig.layout[0][0] & 3],
              gPortConfig.subScreenDisabled ? "off" : sLayouts[gPortConfig.layoutSubScreen & 3],
-             sSkips[gPortConfig.frameSkip % 3]);
+             sSkips[gPortConfig.frameSkip % 3], gPortConfig.dualCore ? "On" : "Off");
     return buf;
 }
 

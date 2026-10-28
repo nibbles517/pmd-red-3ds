@@ -25,10 +25,33 @@
 #include <string.h>
 #include "port.h"
 
+// Dual Core: ppu_b.c builds this file a second time, with its own state,
+// for the second CPU core to draw part of the lines with (Ppu* -> PpuB*).
+#ifdef PPU_SECOND
+#define Ppu_BeginFrame PpuB_BeginFrame
+#define Ppu_RenderLine PpuB_RenderLine
+#define Ppu_SkipLine PpuB_SkipLine
+#define Ppu_SetView PpuB_SetView
+#define Ppu_SetLineRegs PpuB_SetLineRegs
+#endif
+
 #define W SCREEN_W // buffer size; the line drawn is sW pixels
 static int sW = GBA_W, sOx = 0, sWide = 0;
+#ifndef PPU_SECOND
 struct PortWideBg gPortWideBg[4];
 uint8_t gPortTileBg[4];
+#endif
+
+// The I/O registers the renderer reads: the live ones, or (Dual Core) a
+// copy of them made as the line went by (Ppu_SetLineRegs).
+static const uint8_t *sRegs = gPortRegs;
+
+void Ppu_SetLineRegs(const uint8_t *regs)
+{
+    sRegs = regs ? regs : gPortRegs;
+}
+
+#define gPortRegs sRegs
 #define TILE_OY ((SCREEN_H - GBA_H) / 2)
 static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt);
 
@@ -894,6 +917,17 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
         else if (effect == 2) dst[x] = Brighten(dst[x], evy);
         else if (effect == 3) dst[x] = Darken(dst[x], evy);
       }
+    }
+}
+
+// A line left to the other renderer (Dual Core): only what carries over to
+// the next line (the affine backgrounds' reference points) is kept up.
+void Ppu_SkipLine(int line)
+{
+    (void)line;
+    for (int i = 0; i < 2; i++) {
+        AffineReloadIfWritten(i);
+        AffineAdvance(i);
     }
 }
 

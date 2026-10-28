@@ -32,8 +32,9 @@ struct PortConfig
     // In dungeons, Others > Game Options > Layout Options
     u8 layoutSubScreen;     // 0 Blue, 1 Sky, 2 Log, 3 M+T
     u8 layoutInfo;          // Additional Info: 0 Off, 1 On
-    // Screen Options > Performance Settings (version 2)
-    u8 frameSkip;           // PORT_FRAMESKIP_*
+    // Graphics Options
+    u8 frameSkip;           // PORT_FRAMESKIP_* (version 2)
+    u8 dualCore;            // 0 Off, 1 On (version 3; until then: On on an Old 3DS, Off on a New 3DS)
 };
 
 extern struct PortConfig gPortConfig;
