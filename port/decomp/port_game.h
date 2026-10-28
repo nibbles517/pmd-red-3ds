@@ -52,10 +52,12 @@ enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_
 
 // Text windows (BG0/BG1): 20 rows on the GBA; up to 30 for the wide view,
 // which moves them down, nearer the taller screen's bottom: 16 lines in DS
-// size (half the extra lines), 56 in Fit (the windows at the GBA screen's
-// bottom end 25 lines above the screen's).
+// size (half the extra lines); in Fit 56 for the windows in the GBA screen's
+// bottom half (those at its bottom end 25 lines above the screen's), 24 for
+// the others (text_1.c WindowShiftTiles).
 #define TEXT_ROWS ((SCREEN_H_MAX + 7) / 8)
 #define WINDOW_SHIFT_TILES (SCREEN_H > 192 ? 7 : 2)
+#define WINDOW_SHIFT_TILES_TOP 3
 // Lines of window backgrounds (text_2.c DrawWindowBg, per-line WIN0H)
 #define WINDOW_BG_LINES SCREEN_H_MAX
 
