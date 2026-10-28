@@ -16,6 +16,9 @@ unsigned char gPortRegs[0x400] __attribute__((aligned(4)));
 unsigned char gPortVram[0x18000] __attribute__((aligned(4)));
 unsigned char gPortPltt[0x400] __attribute__((aligned(4)));
 unsigned char gPortOam[0x400] __attribute__((aligned(4)));
+int16_t gPortOamY[128];
+int gPortScreenW = 256, gPortScreenH = 192;
+struct PortWinX gPortWin1X[SCREEN_H_MAX];
 
 void Ref_BeginFrame(void);
 void Ref_RenderLine(int line, uint16_t *dst);

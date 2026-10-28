@@ -29,6 +29,17 @@ void Port_LoadConfig(void)
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));
+    Port_UpdateScreenSize();
+}
+
+// The picture's size (port_view.h): 320x240 in Fit size, else 256x192.
+int gPortScreenW = 256, gPortScreenH = 192;
+
+void Port_UpdateScreenSize(void)
+{
+    bool8 fit = gPortConfig.layout[0][0] == PORT_SIZE_FIT;
+    gPortScreenW = fit ? 320 : 256;
+    gPortScreenH = fit ? 240 : 192;
 }
 
 int Port_DualCore(void)
@@ -71,10 +82,10 @@ void Port_SaveConfig(void)
 // the DS version uses for its touch screen option, which the GBA game never
 // reads: clear (new games, saves from a GBA) means the bottom screen, as on
 // the DS; set means the top screen.
-// Main Screen Settings > Size: DS (port_view.h). GBA keeps the 240x160 picture.
-bool Port_DsSize(void)
+// Main Screen Settings > Size: DS or Fit (port_view.h). GBA keeps the 240x160 picture.
+bool Port_WideSize(void)
 {
-    return PORT_DS_SIZE;
+    return PORT_WIDE_SIZE;
 }
 
 bool Port_WantsBottomScreen(void)

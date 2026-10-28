@@ -60,7 +60,7 @@ void Sound_EndFrame(void);
 
 // Port settings kept in the game's own options (port/core/options.c).
 bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Screen
-bool Port_DsSize(void);            // ... > Main Screen Settings > Size is DS (port_view.h)
+bool Port_WideSize(void);          // ... > Main Screen Settings > Size is DS or Fit (port_view.h)
 void Port_LoadConfig(void);
 int Port_FrameSkipMode(void);
 int Port_DualCore(void);            // Graphics Options > Dual Core: On       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
@@ -76,7 +76,7 @@ bool Port_SubScreenChanged(void);
 void Port_SubScreenChangedArea(int *x0, int *y0, int *x1, int *y1); // what changed (x1/y1 exclusive)
 
 // Backend: implemented once per platform.
-// BGR555: 240x160 (GBA size) or SCREEN_W x SCREEN_H (DS size). frame is NULL
+// BGR555: 240x160 (GBA size), 256x192 (DS size) or 320x240 (Fit). frame is NULL
 // on a frame skipped by Frame Skip: the main screen keeps its last picture
 // (the second screen is still updated).
 void Backend_Present(const uint16_t *frame, int width, int height);
@@ -102,7 +102,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version10_UpdateRepoIfMissing;
+extern const int Backend_Version11_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

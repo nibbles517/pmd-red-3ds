@@ -17,10 +17,11 @@ enum {
     IO_DUMPMAPS = 15, // read at start: nonzero = render both world maps (written back at IO_SUBSCREEN... see HarnessMain)
     IO_SUBSCREEN = 14, // read: nonzero = render the second screen; write: its buffer (0 = nothing)
     IO_LATE = 16,      // read: nonzero = report the last frame as late (Frame Skip: Auto)
+    IO_PRESENT_SIZE = 17, // write: the next IO_PRESENT's width << 16 | height
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4 };
 
-const int Backend_Version10_UpdateRepoIfMissing = 10;
+const int Backend_Version11_UpdateRepoIfMissing = 11;
 
 // Dual Core: one core here, so the second core's part is drawn at once.
 void Backend_RunAsync(void (*fn)(void *), void *arg) { fn(arg); }
@@ -63,27 +64,32 @@ bool Backend_FrameLate(void) { return IO[IO_LATE] != 0; }
 void Backend_Present(const uint16_t *frame, int width, int height)
 {
     static const uint16_t *sLast;
-    static int sLastW;
+    static int sLastW, sLastH;
     if (frame == NULL) { // skipped: the last picture again
         frame = sLast;
         width = sLastW;
-        height = width == GBA_W ? GBA_H : SCREEN_H;
+        height = sLastH;
         if (frame == NULL)
             return;
     }
     sLast = frame;
     sLastW = width;
-    // the harness always takes 256x192: a GBA-size picture goes in the middle
-    static uint16_t ds[SCREEN_W * SCREEN_H];
+    sLastH = height;
+    // the harness takes 256x192 (or 320x240 in Fit size): a GBA-size picture
+    // goes in the middle of a 256x192 one
+    static uint16_t ds[256 * 192];
     if (width == GBA_W) {
         memset(ds, 0, sizeof(ds));
         for (int y = 0; y < height; y++)
-            memcpy(&ds[(y + NARROW_OY) * SCREEN_W + NARROW_OX], &frame[y * GBA_W], GBA_W * 2);
+            memcpy(&ds[(y + 16) * 256 + 8], &frame[y * GBA_W], GBA_W * 2);
         frame = ds;
+        width = 256;
+        height = 192;
     }
     static uint16_t sub[SUBSCREEN_W * SUBSCREEN_H];
     if (IO[IO_SUBSCREEN])
         IO[IO_SUBSCREEN] = Port_RenderSubScreen(sub) ? (uint32_t)(uintptr_t)sub : 0;
+    IO[IO_PRESENT_SIZE] = (uint32_t)(width << 16 | height);
     IO[IO_PRESENT] = (uint32_t)(uintptr_t)frame;
 }
 uint16_t Backend_PollKeys(void) { return (uint16_t)IO[IO_KEYS]; }

@@ -118,7 +118,7 @@ class Harness:
         self.uc.mem_map(IO_BASE, 0x1000)
         self.uc.hook_add(UC_HOOK_MEM_WRITE, self.on_write, begin=IO_BASE, end=IO_BASE + 0xFFF)
         self.uc.hook_add(UC_HOOK_MEM_READ, self.on_read, begin=IO_BASE, end=IO_BASE + 0xFFF)
-        self.regs = [0] * 16
+        self.regs = [0] * 32
         self.line = bytearray()
         self.frame = 0
         self.last_frame = None
@@ -187,7 +187,7 @@ class Harness:
             except Exception:
                 pass
         self.frame = st['frame']
-        self.regs = st['io']
+        self.regs = list(st['io']) + [0] * (32 - len(st['io']))
         return self.uc.reg_read(UC_ARM_REG_PC)
 
     def on_watch(self, uc, access, addr, size, value, user):
@@ -238,13 +238,17 @@ class Harness:
                 self.line.clear()
             else:
                 self.line.append(value & 0xFF)
+        elif reg == 17:  # the size of the next picture presented
+            self.frame_size = (value >> 16, value & 0xFFFF)
         elif reg == 1:  # present
-            self.last_frame = bytes(uc.mem_read(value, 256 * 192 * 2))
+            w, h = getattr(self, 'frame_size', (256, 192))
+            self.last_size = (w, h)
+            self.last_frame = bytes(uc.mem_read(value, w * h * 2))
             if getattr(self, 'pending_capture_png', None):
                 open(self.pending_capture_png[:-4] + '.frame', 'wb').write(self.last_frame)
                 self.pending_capture_png = None
             if self.wants_shot():
-                write_png(os.path.join(self.args.out, f'frame_{self.frame:05d}.png'), self.last_frame)
+                write_png(os.path.join(self.args.out, f'frame_{self.frame:05d}.png'), self.last_frame, *self.last_size)
         elif reg == 3:  # end of frame
             self.frame += 1
             if self.frame >= self.args.frames:
@@ -362,7 +366,7 @@ class Harness:
             except UcError:
                 pass
             if self.last_frame:
-                write_png(os.path.join(self.args.out, 'crash_last_frame.png'), self.last_frame)
+                write_png(os.path.join(self.args.out, 'crash_last_frame.png'), self.last_frame, *self.last_size)
             return 2
         dt = time.time() - t0
         ran = self.frame - first
@@ -371,7 +375,7 @@ class Harness:
             self.save_state(self.args.save_state)
             print(f'state saved to {self.args.save_state} at frame {self.frame}')
         if self.last_frame:
-            write_png(os.path.join(self.args.out, 'last_frame.png'), self.last_frame)
+            write_png(os.path.join(self.args.out, 'last_frame.png'), self.last_frame, *self.last_size)
         if self.args.wav and self.audio:
             with wave.open(self.args.wav, 'wb') as w:
                 w.setnchannels(2)

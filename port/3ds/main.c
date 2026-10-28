@@ -28,7 +28,7 @@
 
 void AgbMain(void);
 
-const int Backend_Version10_UpdateRepoIfMissing = 10;
+const int Backend_Version11_UpdateRepoIfMissing = 11;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -197,20 +197,21 @@ static void PresentGba(const uint16_t *frame, uint16_t *fb, int width, const uin
     BlitMain(frame, GBA_W, fb, (400 - 360) / 2, 0, 360, 240, sMapX, sMapY, lut);
 }
 
-// DS size: the 256x192 picture, 1:1 or 1.25x to 320x240.
-static void PresentDs(const uint16_t *frame, uint16_t *fb, int width, const uint16_t *lut)
+// DS size: the 256x192 picture, 1:1 or 1.25x to 320x240. Fit: the 320x240
+// picture, 1:1.
+static void PresentDs(const uint16_t *frame, int frameW, int frameH, uint16_t *fb, int width, const uint16_t *lut)
 {
-    if (!sScaled) {
-        const int ox = (width - SCREEN_W) / 2, oy = (240 - SCREEN_H) / 2;
-        BlitMain(frame, SCREEN_W, fb, ox, oy, SCREEN_W, SCREEN_H, sIdentity, sIdentity, lut);
+    if (!sScaled || frameW != 256) {
+        const int ox = (width - frameW) / 2, oy = (240 - frameH) / 2;
+        BlitMain(frame, frameW, fb, ox, oy, frameW, frameH, sIdentity, sIdentity, lut);
         return;
     }
     // 1.25x: every source pixel becomes 1 or 2 screen pixels.
     ScaleMaps(320, 240, 5, 4);
-    BlitMain(frame, SCREEN_W, fb, (width - 320) / 2, 0, 320, 240, sMapX, sMapY, lut);
+    BlitMain(frame, frameW, fb, (width - 320) / 2, 0, 320, 240, sMapX, sMapY, lut);
 }
 
-static void PresentMain(const uint16_t *frame, int frameW)
+static void PresentMain(const uint16_t *frame, int frameW, int frameH)
 {
     // Framebuffers are 240 pixels per column, columns left to right, each
     // column stored bottom to top. Top: 400 columns; bottom: 320.
@@ -225,7 +226,7 @@ static void PresentMain(const uint16_t *frame, int frameW)
     if (frameW == GBA_W)
         PresentGba(frame, fb, width, sPresentLut);
     else
-        PresentDs(frame, fb, width, sPresentLut);
+        PresentDs(frame, frameW, frameH, fb, width, sPresentLut);
 }
 
 // --- Performance meter ---------------------------------------------------------
@@ -370,7 +371,6 @@ static void MeterEndFrame(void)
 
 void Backend_Present(const uint16_t *frame, int width, int height)
 {
-    (void)height;
     // NULL: a frame Frame Skip did not draw. During the screen change fade
     // the last picture is shown again (the fade changes its colours).
     if (frame == NULL && sFadeDir != 0)
@@ -378,7 +378,7 @@ void Backend_Present(const uint16_t *frame, int width, int height)
     sMainPresented = frame != NULL;
     sMarkTick = svcGetSystemTick();
     if (frame != NULL)
-        PresentMain(frame, width);
+        PresentMain(frame, width, height);
     Part(T_OUT);
     PresentSub(); // (times T_SUB and T_SUBOUT)
 }

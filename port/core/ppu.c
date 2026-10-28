@@ -8,7 +8,7 @@
 // backgrounds), mode 3, regular and affine sprites, windows 0/1 and the object
 // window, alpha blending, brighten/darken, and mosaic.
 //
-// Wide view (Ppu_SetView): the line is SCREEN_W (256) pixels, GBA x 0 drawn at
+// Wide view (Ppu_SetView): the line is SCREEN_W (256 or 320) pixels, GBA x 0 drawn at
 // screen x WIDE_OX, and lines past 159 are drawn too (up to SCREEN_H). The game
 // only knows a 240x160 screen, so window edges at the screen's edges are
 // stretched to the new edges, and backgrounds the game draws for the larger
@@ -35,8 +35,15 @@
 #define Ppu_SetLineRegs PpuB_SetLineRegs
 #endif
 
-#define W SCREEN_W // buffer size; the line drawn is sW pixels
+#define W SCREEN_W_MAX // buffer size; the line drawn is sW pixels
 static int sW = GBA_W, sOx = 0, sWide = 0;
+// The wide view's size (Ppu_SetView: SCREEN_W x SCREEN_H as they were then)
+static int sViewW = 256, sViewH = 192, sViewOx = 8;
+// Pixels per group (below): 8 (1 << 3), or 16 for lines over 256 pixels
+static int sGs = 3;
+// Sprite x (9 bits, GBA screen x) from which it counts as negative: 256, or
+// 320 when the wide view reaches past GBA x 256 (Fit: up to 280)
+static int sObjXWrap = 256;
 #ifndef PPU_SECOND
 struct PortWideBg gPortWideBg[4];
 uint8_t gPortTileBg[4];
@@ -52,14 +59,19 @@ void Ppu_SetLineRegs(const uint8_t *regs)
 }
 
 #define gPortRegs sRegs
-#define TILE_OY ((SCREEN_H - GBA_H) / 2)
+#define TILE_OY ((sViewH - GBA_H) / 2)
 static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt);
 
 void Ppu_SetView(int wide)
 {
+    sViewW = SCREEN_W;
+    sViewH = SCREEN_H;
+    sViewOx = WIDE_OX;
     sWide = wide;
-    sW = wide ? SCREEN_W : GBA_W;
-    sOx = wide ? WIDE_OX : 0;
+    sW = wide ? sViewW : GBA_W;
+    sOx = wide ? sViewOx : 0;
+    sGs = sW > 256 ? 4 : 3;
+    sObjXWrap = sW > 256 ? 320 : 256;
 }
 #define TRANSPARENT 0x8000u
 
@@ -94,8 +106,8 @@ static inline int NextRun(uint32_t *m, int *x0, int *x1)
     int g = __builtin_ctz(*m);
     uint32_t rest = ~(*m >> g);
     int end = rest == 0 ? 32 : g + __builtin_ctz(rest);
-    *x0 = g * 8;
-    *x1 = end * 8 > sW ? sW : end * 8;
+    *x0 = g << sGs;
+    *x1 = (end << sGs) > sW ? sW : end << sGs;
     *m = end >= 32 ? 0 : *m & (~0u << end);
     return 1;
 }
@@ -103,7 +115,7 @@ static inline int NextRun(uint32_t *m, int *x0, int *x1)
 // The groups covering x .. x+n-1 (n >= 1).
 static inline uint32_t Groups(int x, int n)
 {
-    return (2u << ((x + n - 1) >> 3)) - (1u << (x >> 3));
+    return (2u << ((x + n - 1) >> sGs)) - (1u << (x >> sGs));
 }
 static ObjLine sObj;
 static int sObjAny, sObjSemiAny, sObjWinAny;
@@ -286,7 +298,7 @@ static inline __attribute__((always_inline)) int DecodeTileRow(uint16_t e, unsig
     return any;
 }
 
-// A background the game draws for the wide view: a 64x32-entry map in RAM,
+// A background the game draws for the wide view: a 64x64-entry map in RAM,
 // scrolled by gPortWideBg (not by the BG registers). PORT_WIDE_BLACK entries
 // are opaque black (outside the map).
 static int RenderWideBg(int bg, int line, uint16_t *out)
@@ -295,7 +307,7 @@ static int RenderWideBg(int bg, int line, uint16_t *out)
     uint16_t cnt = R16(0x08 + bg * 2);
     unsigned charBase = ((cnt >> 2) & 3) * 0x4000;
     int color256 = (cnt >> 7) & 1;
-    int y = (line + wb->scrollY) & 255;
+    int y = (line + wb->scrollY) & 511;
     int inY = y & 7;
     const uint16_t *row = &wb->map[(y >> 3) * 64];
     int any = 0;
@@ -357,7 +369,7 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
 
     sWide = 0; sW = GBA_W; sOx = 0;
     any = RenderTextBg(bg, gy, gbaLine);
-    sWide = 1; sW = SCREEN_W; sOx = WIDE_OX;
+    sWide = 1; sW = sViewW; sOx = sViewOx;
     sLastMask = ALL_GROUPS; sLastFull = 0;
     if (!any)
         return 0; // nothing to show: compositing skips the layer
@@ -390,10 +402,12 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         // the edges.
         sW = sOx + GBA_W;
         int any = RenderTextBgVram(bg, line, out, cnt);
-        sW = SCREEN_W;
+        sW = sViewW;
         if (bg == 0) {
             for (int x = 0; x < sOx; x++) out[x] = TRANSPARENT;
             for (int x = sOx + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
+            // the sides are not opaque, whatever the map held there
+            sLastFull &= ~(Groups(0, sOx) | Groups(sOx + GBA_W, sW - sOx - GBA_W));
             return any;
         }
         int hofs = R16(0x14) & 0x1FF, vofs = R16(0x16) & 0x1FF;
@@ -595,7 +609,10 @@ static void RenderObjects(int line, uint16_t dispcnt)
         if (affine && (a0 & 0x200)) { boundW *= 2; boundH *= 2; }
 
         int y = a0 & 0xFF;
-        if (y + boundH > 256) y -= 256;
+        int wholeY = gPortOamY[sObjList[k]];
+        if (sWide && (wholeY & 0xFF) == y)
+            y = wholeY; // the game's y, whole (port_view.h)
+        else if (y + boundH > 256) y -= 256;
         if (line < y || line >= y + boundH)
             continue;
         int ly = line;
@@ -614,7 +631,7 @@ static void RenderObjects(int line, uint16_t dispcnt)
         if (bitmapMode && tileNum < 512)
             continue;
         int x = a1 & 0x1FF;
-        if (x >= 256) x -= 512;
+        if (x >= sObjXWrap) x -= 512;
         x += sOx;
         if (x >= sW || x + boundW <= 0)
             continue;
@@ -727,12 +744,10 @@ static int InWindowRange(int v, int lo, int hi, int limit)
     return v >= lo && v < hi;
 }
 
-// Fills [lo, hi) of a window span, with the hardware's wrap-around rules
-// (same as InWindowRange, but for a whole line at once).
-static void FillSpan(uint8_t *wm, int lo, int hi, uint8_t value)
+// Fills [lo, hi) of a window span (screen x), with the hardware's
+// wrap-around rules (same as InWindowRange, but for a whole line at once).
+static void FillSpanScreen(uint8_t *wm, int lo, int hi, uint8_t value)
 {
-    if (sWide)
-        WideWindowX(&lo, &hi);
     if (hi > sW || lo > hi) {
         if (hi > sW && lo <= hi) hi = sW;
         else { // wrapped: x >= lo or x < hi
@@ -744,10 +759,18 @@ static void FillSpan(uint8_t *wm, int lo, int hi, uint8_t value)
     for (int x = lo; x < hi; x++) wm[x] = value;
 }
 
+// ... in GBA x (the window registers)
+static void FillSpan(uint8_t *wm, int lo, int hi, uint8_t value)
+{
+    if (sWide)
+        WideWindowX(&lo, &hi);
+    FillSpanScreen(wm, lo, hi, value);
+}
+
 // Lines a window can reach: 160, or the wide view's height. A window that
 // reaches the GBA screen's bottom reaches the wide screen's bottom.
 static int sVLimit = GBA_H;
-static inline int WinBottom(int hi) { return (sWide && hi >= GBA_H) ? SCREEN_H : hi; }
+static inline int WinBottom(int hi) { return (sWide && hi >= GBA_H) ? sViewH : hi; }
 
 // Composites one line. Layers are painted back to front through the window
 // mask, tracking each pixel's top two layers; then the colour effect (alpha,
@@ -789,8 +812,13 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
         }
         if (win1) {
             uint16_t h = R16(0x42), v = R16(0x46);
-            if (InWindowRange(line, v >> 8, WinBottom(v & 0xFF), sVLimit))
-                FillSpan(wm, h >> 8, h & 0xFF, (winin >> 8) & 0x3F);
+            if (InWindowRange(line, v >> 8, WinBottom(v & 0xFF), sVLimit)) {
+                const struct PortWinX *e = &gPortWin1X[line];
+                if (sWide && e->valid && e->reg == h)
+                    FillSpanScreen(wm, e->lo, e->hi, (winin >> 8) & 0x3F);
+                else
+                    FillSpan(wm, h >> 8, h & 0xFF, (winin >> 8) & 0x3F);
+            }
         }
         if (win0) { // window 0 has priority over window 1
             uint16_t h = R16(0x40), v = R16(0x44);
@@ -937,7 +965,7 @@ void Ppu_RenderLine(int line, uint16_t *dst)
     sPalTBuilt = 0;
     int mode = dispcnt & 7;
 
-    sVLimit = sWide ? SCREEN_H : GBA_H;
+    sVLimit = sWide ? sViewH : GBA_H;
 
     if (dispcnt & 0x80) { // forced blank: white
         for (int x = 0; x < sW; x++) dst[x] = 0x7FFF;

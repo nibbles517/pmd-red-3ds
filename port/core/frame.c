@@ -36,12 +36,15 @@ enum {
 // frames for renderer regression tests). NULL in normal builds.
 void (*gPortLineHook)(int line);
 
-static uint16_t sFrame[SCREEN_W * SCREEN_H];
-static uint16_t sShown[SCREEN_W * SCREEN_H];
-static uint16_t sLine[SCREEN_W];
+static uint16_t sFrame[SCREEN_W_MAX * SCREEN_H_MAX];
+static uint16_t sShown[SCREEN_W_MAX * SCREEN_H_MAX];
+static uint16_t sLine[SCREEN_W_MAX];
 enum { VIEW_GBA, VIEW_FRAMED, VIEW_WIDE };
 static int sViewMode = -1; // view of the last frame
+static int sViewW;         // ... and its width
 uint8_t gPortWideView;
+int16_t gPortOamY[128];
+struct PortWinX gPortWin1X[SCREEN_H_MAX];
 static uint64_t sFrames;
 static int sInFrame;     // inside the scanline loop: VCOUNT is the real line
 static int sVirtualLine; // outside it: advances on every read so busy-waits end
@@ -85,7 +88,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version10_UpdateRepoIfMissing != 10)
+    if (Backend_Version11_UpdateRepoIfMissing != 11)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -117,10 +120,10 @@ static void UpdateKeys(void)
 // The split moves a little each frame towards the core that finished first.
 
 #define REG_COPY 0x60 // the registers the renderer reads (DISPCNT .. BLDY)
-static uint8_t sLineRegs[SCREEN_H][REG_COPY] __attribute__((aligned(4)));
+static uint8_t sLineRegs[SCREEN_H_MAX][REG_COPY] __attribute__((aligned(4)));
 static uint8_t sStartRegs[REG_COPY] __attribute__((aligned(4)));
 static int sSplit = 96;    // the first line the second core draws
-static int sDualViewWide = -1;
+static int sDualViewWide = -1, sDualViewW;
 
 typedef struct {
     int first, lines, mode, wide;
@@ -129,10 +132,11 @@ typedef struct {
 static void DrawPartB(void *arg)
 {
     const Part *p = arg;
-    static uint16_t line[SCREEN_W];
-    if (p->wide != sDualViewWide) {
+    static uint16_t line[SCREEN_W_MAX];
+    if (p->wide != sDualViewWide || SCREEN_W != sDualViewW) {
         PpuB_SetView(p->wide);
         sDualViewWide = p->wide;
+        sDualViewW = SCREEN_W;
     }
     PpuB_SetLineRegs(sStartRegs);
     PpuB_BeginFrame();
@@ -200,10 +204,12 @@ static void RunFrame(void)
 {
     Backend_Mark(PORT_MARK_FRAME_START, 0);
     // Main Screen Settings > Size: GBA, the game's 240x160 picture as it is;
-    // DS, a 256x192 picture, the GBA one in the middle, or the wide view while
-    // the game keeps asking for it (it sets gPortWideView every frame it draws
-    // a dungeon floor or a ground map, which it does only in DS size).
-    int ds = Port_DsSize();
+    // DS (256x192) or Fit (320x240), the GBA picture in the middle, or the
+    // wide view while the game keeps asking for it (it sets gPortWideView
+    // every frame it draws a dungeon floor or a ground map, which it does
+    // only in those sizes).
+    Port_UpdateScreenSize();
+    int ds = Port_WideSize();
     int wide = ds && gPortWideView != 0;
     int mode = !ds ? VIEW_GBA : wide ? VIEW_WIDE : VIEW_FRAMED;
     if (gPortWideView)
@@ -227,13 +233,14 @@ static void RunFrame(void)
         case 1: skip = Backend_FrameLate() && sSkipped < MAX_SKIPPED; break;
         case 2: skip = sSkipped == 0; break;
     }
-    if (mode != sViewMode)
+    if (mode != sViewMode || SCREEN_W != sViewW)
         skip = 0; // a new view is drawn at once
     sSkipped = skip ? sSkipped + 1 : 0;
 
     sInFrame = 1;
-    if (mode != sViewMode) {
+    if (mode != sViewMode || SCREEN_W != sViewW) {
         sViewMode = mode;
+        sViewW = SCREEN_W;
         Ppu_SetView(wide);
         memset(sFrame, 0, sizeof(sFrame)); // the framed view's border is black
     }
@@ -274,7 +281,7 @@ static void RunFrame(void)
     Backend_Mark(PORT_MARK_DRAWN, skip);
 
     if (!skip)
-        memcpy(sShown, sFrame, sizeof(sShown));
+        memcpy(sShown, sFrame, (mode == VIEW_GBA ? GBA_W * GBA_H : SCREEN_W * SCREEN_H) * sizeof(uint16_t));
     if (mode == VIEW_GBA)
         Backend_Present(skip ? NULL : sShown, GBA_W, GBA_H);
     else

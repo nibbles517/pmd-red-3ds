@@ -322,7 +322,7 @@ index 002fa3c7..406bee8e 100644
  
      *spAsU32 = func();
 diff --git a/src/code_809D148.c b/src/code_809D148.c
-index cf978c03..3c9a4dab 100644
+index cf978c03..c1f5de60 100644
 --- a/src/code_809D148.c
 +++ b/src/code_809D148.c
 @@ -1,4 +1,7 @@
@@ -341,7 +341,7 @@ index cf978c03..3c9a4dab 100644
 +        if (Port_GroundViewIsNarrow())
 +            sUnknown_20399E8.unk3C.y = (r3 - 20480) / 256;
 +        else
-+            sUnknown_20399E8.unk3C.y = (r3 - 96 * 256) / 256; // the wide view's middle line
++            sUnknown_20399E8.unk3C.y = (r3 - (SCREEN_H / 2) * 256) / 256; // the wide view's middle line
 +#else
          sUnknown_20399E8.unk3C.y = (r3 - 20480) / 256;
 +#endif
@@ -442,7 +442,7 @@ index 28b04fb0..368ffdc7 100644
 +#endif
  }
 diff --git a/src/dungeon_items.c b/src/dungeon_items.c
-index 148a1118..a3c9d25c 100644
+index 148a1118..359ba656 100644
 --- a/src/dungeon_items.c
 +++ b/src/dungeon_items.c
 @@ -1,4 +1,7 @@
@@ -459,7 +459,7 @@ index 148a1118..a3c9d25c 100644
  
 +#ifdef PLATFORM_3DS
 +    // the wide view shows more below and left (port_view.h)
-+    if (x >= (PORT_DS_SIZE ? -32 - WIDE_OX : -32) && y >= -32 && x <= 272 && y <= (PORT_DS_SIZE ? SCREEN_H + 32 : 192)) {
++    if (x >= (PORT_WIDE_SIZE ? -32 - WIDE_OX : -32) && y >= -32 && x <= (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX + 32 : 272) && y <= (PORT_WIDE_SIZE ? SCREEN_H + 32 : 192)) {
 +#else
      if (x >= -32 && y >= -32 && x <= 272 && y <= 192) {
 +#endif
@@ -738,26 +738,27 @@ index 7e6792c7..db06c38f 100644
      terrainType = GetTerrainType(tile);
      hallucinating = gDungeon->unk181e8.hallucinating;
 diff --git a/src/dungeon_map_access.c b/src/dungeon_map_access.c
-index 4a9a72ad..05f95b09 100644
+index 4a9a72ad..ebc461ad 100644
 --- a/src/dungeon_map_access.c
 +++ b/src/dungeon_map_access.c
-@@ -21,6 +21,32 @@
+@@ -21,6 +21,34 @@
  #include "dungeon_data.h"
  #include "dungeon_8041AD0.h"
  
 +#ifdef PLATFORM_3DS
-+// 3DS port, wide view (port_view.h; DS size only): the floor (BG3) is drawn
-+// into a map twice as wide as the GBA's, enough for a 256x192 view, and the
++// 3DS port, wide view (port_view.h; DS and Fit sizes): the floor (BG3) is
++// drawn into a 64x64 map, enough for a 320x240 view, and the
 +// columns and rows past the GBA screen's edges are drawn too.
 +#include "port_game.h"
-+u16 gPortDungeonBg3[32 * 64];
-+u16 gPortDungeonBg2[32 * 64]; // the tile highlights (grid, facing), likewise
-+#define WIDE PORT_DS_SIZE
-+#define FLOOR_ENTRY(y, x) (*(WIDE ? &gPortDungeonBg3[((y) & 31) * 64 + ((x) & 63)] : &gBgTilemaps[3][(y) & 31][(x) & 31]))
-+#define OVERLAY_ENTRY(y, x) (*(WIDE ? &gPortDungeonBg2[((y) & 31) * 64 + ((x) & 63)] : &gBgTilemaps[2][(y) & 31][(x) & 31]))
++u16 gPortDungeonBg3[64 * 64];
++u16 gPortDungeonBg2[64 * 64]; // the tile highlights (grid, facing), likewise
++#define WIDE PORT_WIDE_SIZE
++#define FLOOR_ENTRY(y, x) (*(WIDE ? &gPortDungeonBg3[((y) & 63) * 64 + ((x) & 63)] : &gBgTilemaps[3][(y) & 31][(x) & 31]))
++#define OVERLAY_ENTRY(y, x) (*(WIDE ? &gPortDungeonBg2[((y) & 63) * 64 + ((x) & 63)] : &gBgTilemaps[2][(y) & 31][(x) & 31]))
 +#define FLOOR_X_MASK (WIDE ? 0x3F : 0x1F)
-+#define FLOOR_COLUMNS (WIDE ? 34 : 31)   // (256 + 8 scroll + 8 extra column) / 8
-+#define FLOOR_ROWS (WIDE ? 26 : 23)      // (192 + 8 + 8 row above) / 8
++#define FLOOR_Y_MASK (WIDE ? 0x3F : 0x1F)
++#define FLOOR_COLUMNS (WIDE ? (SCREEN_W + 16) / 8 : 31) // (width + 8 scroll + 8 extra column) / 8
++#define FLOOR_ROWS (WIDE ? (SCREEN_H + 16) / 8 : 23)    // (height + 8 + 8 row above) / 8
 +#define OVERLAY_ROWS (WIDE ? SCREEN_H / 8 + 1 : 21)
 +#define FLOOR_LEFT (WIDE ? -WIDE_OX : 0) // GBA x of the column past the left edge
 +#define FLOOR_RIGHT (SCREEN_W - WIDE_OX) // ... and the right edge (wide)
@@ -765,6 +766,7 @@ index 4a9a72ad..05f95b09 100644
 +#else
 +#define FLOOR_ENTRY(y, x) gBgTilemaps[3][y][x]
 +#define FLOOR_X_MASK 0x1F
++#define FLOOR_Y_MASK 0x1F
 +#define FLOOR_COLUMNS 31
 +#define FLOOR_ROWS 23
 +#define OVERLAY_ENTRY(y, x) gBgTilemaps[2][y][x]
@@ -774,7 +776,7 @@ index 4a9a72ad..05f95b09 100644
  EWRAM_DATA OpenedFile *gDungeonPaletteFile = {0};
  EWRAM_DATA AnimatedColor gDungeonAnimatedColors[32] = {0};
  EWRAM_DATA OpenedFile *gDungeonAnimatedColorsFile = {0};
-@@ -83,7 +109,7 @@ void LoadDungeonTilesetAssets(void)
+@@ -83,7 +111,7 @@ void LoadDungeonTilesetAssets(void)
  
    sprintf(fileName,"b%02dfon",gUnknown_8108EC0[gDungeon->tileset]);
    file = OpenFileAndGetFileDataPtr(fileName,&gDungeonFileArchive);
@@ -783,7 +785,7 @@ index 4a9a72ad..05f95b09 100644
    CloseFile(file);
  
    sprintf(fileName,"b%02dpal",gDungeon->tileset);
-@@ -491,14 +517,18 @@ void UpdateTrapsVisibility(void)
+@@ -491,14 +519,18 @@ void UpdateTrapsVisibility(void)
      Dungeon *dungeon = gDungeon;
      hallucinating = dungeon->unk181e8.hallucinating;
      showInvisibleTrapsMonsters = dungeon->unk181e8.showInvisibleTrapsMonsters;
@@ -804,19 +806,20 @@ index 4a9a72ad..05f95b09 100644
          r8 = gUnknown_80F6A4A[30 + y];
          var_44 = gUnknown_80F6C06[30 + y];
          r7 = r10 + (r8 * 3);
-@@ -536,9 +566,9 @@ void UpdateTrapsVisibility(void)
+@@ -536,9 +568,9 @@ void UpdateTrapsVisibility(void)
          }
  
  
 -        for (j = 0; j < 23; j++) {
-+        for (j = 0; j < FLOOR_ROWS; j++) {
-             y &= 0x1F;
+-            y &= 0x1F;
 -            gBgTilemaps[3][y][x] = *src;
++        for (j = 0; j < FLOOR_ROWS; j++) {
++            y &= FLOOR_Y_MASK;
 +            FLOOR_ENTRY(y, x) = *src;
              src += 3;
              y++;
              r8++;
-@@ -610,6 +640,10 @@ void sub_804A1F0(s32 a0, s32 a1)
+@@ -610,6 +642,10 @@ void sub_804A1F0(s32 a0, s32 a1)
      Dungeon *dungeon = gDungeon;
      hallucinating = dungeon->unk181e8.hallucinating;
      showInvisibleTrapsMonsters = dungeon->unk181e8.showInvisibleTrapsMonsters;
@@ -827,21 +830,22 @@ index 4a9a72ad..05f95b09 100644
      xTemp = dungeon->unk181e8.cameraPixelPos.x + a0;
      yTemp = dungeon->unk181e8.cameraPixelPos.y + a1;
      yTemp >>= 3;
-@@ -650,10 +684,10 @@ void sub_804A1F0(s32 a0, s32 a1)
+@@ -650,10 +686,10 @@ void sub_804A1F0(s32 a0, s32 a1)
          }
      }
  
 -    for (i = 0; i < 23; i++) {
 -        x &= 0x1F;
+-        y &= 0x1F;
+-        gBgTilemaps[3][y][x] = *src;
 +    for (i = 0; i < FLOOR_ROWS; i++) {
 +        x &= FLOOR_X_MASK;
-         y &= 0x1F;
--        gBgTilemaps[3][y][x] = *src;
++        y &= FLOOR_Y_MASK;
 +        FLOOR_ENTRY(y, x) = *src;
          src += 3;
          y++;
          r8++;
-@@ -712,6 +746,13 @@ void sub_804A49C(s32 a0, s32 a1)
+@@ -712,6 +748,13 @@ void sub_804A49C(s32 a0, s32 a1)
      Dungeon *dungeon = gDungeon;
      hallucinating = dungeon->unk181e8.hallucinating;
      showInvisibleTrapsMonsters = dungeon->unk181e8.showInvisibleTrapsMonsters;
@@ -855,21 +859,22 @@ index 4a9a72ad..05f95b09 100644
      xTemp = dungeon->unk181e8.cameraPixelPos.x + a0;
      yTemp = dungeon->unk181e8.cameraPixelPos.y + a1;
      x = xTemp >> 3;
-@@ -751,10 +792,10 @@ void sub_804A49C(s32 a0, s32 a1)
+@@ -751,10 +794,10 @@ void sub_804A49C(s32 a0, s32 a1)
          }
      }
  
 -    for (i = 0; i < 31; i++) {
 -        x &= 0x1F;
+-        y &= 0x1F;
+-        gBgTilemaps[3][y][x] = *src;
 +    for (i = 0; i < FLOOR_COLUMNS; i++) {
 +        x &= FLOOR_X_MASK;
-         y &= 0x1F;
--        gBgTilemaps[3][y][x] = *src;
++        y &= FLOOR_Y_MASK;
 +        FLOOR_ENTRY(y, x) = *src;
          src++;
          x++;
          r9++;
-@@ -813,7 +854,11 @@ void ChangeDungeonCameraPos(DungeonPos *pos, s32 a1, u8 a2, u8 a3)
+@@ -813,7 +856,11 @@ void ChangeDungeonCameraPos(DungeonPos *pos, s32 a1, u8 a2, u8 a3)
      Dungeon *dungeon = gDungeon;
  
      leader = GetLeader();
@@ -881,7 +886,7 @@ index 4a9a72ad..05f95b09 100644
      x2 = x;
      gDungeon->unk181e8.unk1821A = a3;
      i = pos->x;
-@@ -829,7 +874,7 @@ void ChangeDungeonCameraPos(DungeonPos *pos, s32 a1, u8 a2, u8 a3)
+@@ -829,7 +876,7 @@ void ChangeDungeonCameraPos(DungeonPos *pos, s32 a1, u8 a2, u8 a3)
      var_38 = gUnknown_80F6A4A[30 + x2];
      r10 = gUnknown_80F6C06[30 + x2];
  
@@ -890,33 +895,34 @@ index 4a9a72ad..05f95b09 100644
          y = dungeon->unk181e8.cameraPixelPos.y >> 3;
          var_34 = gUnknown_80F6A4A[30 + y];
          r9 = gUnknown_80F6C06[30 + y];
-@@ -865,10 +910,10 @@ void ChangeDungeonCameraPos(DungeonPos *pos, s32 a1, u8 a2, u8 a3)
+@@ -865,10 +912,10 @@ void ChangeDungeonCameraPos(DungeonPos *pos, s32 a1, u8 a2, u8 a3)
              src = &dungeon->unk13554[r5];
          }
  
 -        for (j = 0; j < 21; j++) {
 -            x &= 0x1F;
+-            y &= 0x1F;
+-            gBgTilemaps[2][y][x] = *src;
 +        for (j = 0; j < OVERLAY_ROWS; j++) {
 +            x &= FLOOR_X_MASK;
-             y &= 0x1F;
--            gBgTilemaps[2][y][x] = *src;
++            y &= FLOOR_Y_MASK;
 +            OVERLAY_ENTRY(y, x) = *src;
              src += 3;
              y++;
              var_34++;
-@@ -931,6 +976,10 @@ void sub_804AA60(void)
+@@ -931,6 +978,10 @@ void sub_804AA60(void)
              gBgTilemaps[2][i][j] = 0;
          }
      }
 +#ifdef PLATFORM_3DS
-+    for (i = 0; i < 32 * 64; i++)
++    for (i = 0; i < 64 * 64; i++)
 +        gPortDungeonBg2[i] = 0;
 +#endif
      ScheduleBgTilemapCopy(2);
      gDungeon->unk181e8.unk1821A = 0;
  }
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..50f43b47 100644
+index 0680f301..5348bec4 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,11 @@
@@ -931,7 +937,7 @@ index 0680f301..50f43b47 100644
  
  static void PrintOthersMenuOptions(void);
  static void ShowGameOptionsMenu(void);
-@@ -146,10 +151,338 @@ void ShowDungeonOthersMenu(void)
+@@ -146,10 +151,342 @@ void ShowDungeonOthersMenu(void)
  
  enum {
      GAME_OPTION_DUNGEON,
@@ -1023,7 +1029,7 @@ index 0680f301..50f43b47 100644
 +        { sTextSubScreenSettings, 0, 0, 0, { NULL }, 0, PAGE_SUB_SETTINGS },
 +    },
 +    [PAGE_MAIN_SETTINGS] = {
-+        { sTextSize, 4, 64, 40, { sTextGBA, sTextDS, sTextFit, sText3DS }, (1 << 2) | (1 << 3), NO_LINK },
++        { sTextSize, 4, 64, 40, { sTextGBA, sTextDS, sTextFit, sText3DS }, (1 << 3), NO_LINK },
 +        { sTextScale, 3, 64, 40, { sTextNone, sTextFull, sTextStretch }, 7, NO_LINK },
 +    },
 +    [PAGE_SUB_SETTINGS] = { // (the second screen has no GBA size)
@@ -1073,7 +1079,7 @@ index 0680f301..50f43b47 100644
 +{
 +    if (sPortValues[PAGE_LAYOUT][1] != sPortOpened[PAGE_LAYOUT][1] || sPortPage == PAGE_LAYOUT)
 +        sChangedGameOptions.mapOption = sPortValues[PAGE_LAYOUT][1];
-+    bool8 wasWide = PORT_DS_SIZE;
++    u8 wasSize = gPortConfig.layout[0][0];
 +    if (sPortPage == PAGE_WINDOWS) {
 +        sChangedGameOptions.windowColor = sPortValues[PAGE_WINDOWS][0];
 +        sChangedGameOptions.playerGender = sPortValues[PAGE_WINDOWS][1] ? FEMALE : MALE;
@@ -1092,10 +1098,14 @@ index 0680f301..50f43b47 100644
 +    gPortConfig.layout[1][1] = sPortValues[PAGE_SUB_SETTINGS][2];
 +    sub_803E13C();
 +    LoadDungeonMapPalette();
-+    // Size changed between GBA and DS: the floor is kept in a different map
-+    // in each (dungeon_map_access.c), so it is drawn again.
-+    if (wasWide != PORT_DS_SIZE)
++    // Size changed: the floor is kept in a different map in GBA size
++    // (dungeon_map_access.c), and the wide view's size and camera differ, so
++    // it is drawn again.
++    if (wasSize != gPortConfig.layout[0][0]) {
++        Port_UpdateScreenSize();
++        UpdateCamera(0);
 +        UpdateTrapsVisibility();
++    }
 +}
 +
 +// ... and leaving a page writes what changed and says so.
@@ -1271,7 +1281,7 @@ index 0680f301..50f43b47 100644
  static void ShowGameOptionsMenu(void)
  {
      while (TRUE) {
-@@ -185,6 +518,26 @@ static void ShowGameOptionsMenu(void)
+@@ -185,6 +522,26 @@ static void ShowGameOptionsMenu(void)
              break;
  
          sChangedGameOptions = *gGameOptionsRef;
@@ -1298,7 +1308,7 @@ index 0680f301..50f43b47 100644
          if (gDungeonMenu.menuIndex == GAME_OPTION_DUNGEON) {
              bPress = ShowDungeonOptions();
              TrySetNewGameOptions(bPress);
-@@ -193,6 +546,7 @@ static void ShowGameOptionsMenu(void)
+@@ -193,6 +550,7 @@ static void ShowGameOptionsMenu(void)
              bPress = ShowOthersOptions();
              TrySetNewGameOptions(bPress);
          }
@@ -1306,7 +1316,7 @@ index 0680f301..50f43b47 100644
          else if (gDungeonMenu.menuIndex == GAME_OPTION_DEFAULT) {
              AskToResetToDefault();
          }
-@@ -211,7 +565,11 @@ enum {
+@@ -211,7 +569,11 @@ enum {
      OPTION_COUNT
  };
  
@@ -1318,7 +1328,7 @@ index 0680f301..50f43b47 100644
  #define OTHERS_OPTIONS_COUNT (OPTION_COUNT - DUNGEON_OPTIONS_COUNT)
  
  static bool8 ShowDungeonOptions(void)
-@@ -240,12 +598,18 @@ static bool8 ShowDungeonOptions(void)
+@@ -240,12 +602,18 @@ static bool8 ShowDungeonOptions(void)
              if (gRealInputs.repeated & DPAD_LEFT) {
                  PlayDungeonCursorSE(FALSE);
                  ChangeGameOptionLeft(gDungeonMenu.menuIndex);
@@ -1337,7 +1347,7 @@ index 0680f301..50f43b47 100644
                  dpadMoved = TRUE;
                  break;
              }
-@@ -361,6 +725,12 @@ static void AskToResetToDefault(void)
+@@ -361,6 +729,12 @@ static void AskToResetToDefault(void)
  {
      if (DisplayDungeonYesNoMessage_Async(0, gUnknown_80FEC28, FALSE) == 1) {
          InitializeGameOptions(FALSE);
@@ -1350,7 +1360,7 @@ index 0680f301..50f43b47 100644
          sub_803E13C();
      }
  }
-@@ -562,7 +932,7 @@ static void PrintQuickSaveMenuOptions(void)
+@@ -562,7 +936,7 @@ static void PrintQuickSaveMenuOptions(void)
  static void PrintGameOptions(void)
  {
      s32 optionsCount;
@@ -1359,7 +1369,7 @@ index 0680f301..50f43b47 100644
      WindowHeader header;
      WindowTemplates windows = {
          .id = {
-@@ -585,7 +955,7 @@ static void PrintGameOptions(void)
+@@ -585,7 +959,7 @@ static void PrintGameOptions(void)
      header.currId = 0;
      header.f3 = 0;
      gDungeonMenu.menuIndex = 0;
@@ -1368,7 +1378,7 @@ index 0680f301..50f43b47 100644
      gDungeonMenu.currPageEntries = optionsCount;
      gDungeonMenu.entriesPerPage = optionsCount;
      gDungeonMenu.currPage = 0;
-@@ -604,14 +974,17 @@ static void PrintGameOptions(void)
+@@ -604,14 +978,17 @@ static void PrintGameOptions(void)
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
  
@@ -1392,7 +1402,7 @@ index 0680f301..50f43b47 100644
      sub_80073E0(0);
  }
  
-@@ -654,7 +1027,11 @@ static void PrintDungeonOptions(void)
+@@ -654,7 +1031,11 @@ static void PrintDungeonOptions(void)
      ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
      windows.id[0].width = 24;
      windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(DUNGEON_OPTIONS_COUNT, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
@@ -1404,7 +1414,7 @@ index 0680f301..50f43b47 100644
      windows.id[0].pos.x = 2;
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
-@@ -663,14 +1040,18 @@ static void PrintDungeonOptions(void)
+@@ -663,14 +1044,18 @@ static void PrintDungeonOptions(void)
      y[1] = GetMenuEntryYCoord(&gDungeonMenu, 1);
      y[2] = GetMenuEntryYCoord(&gDungeonMenu, 2);
      y[3] = GetMenuEntryYCoord(&gDungeonMenu, 3);
@@ -1423,7 +1433,7 @@ index 0680f301..50f43b47 100644
  
      if (sChangedGameOptions.dungeonSpeed != DUNGEON_SPEED_SLOW) {
          AddDoubleUnderScoreHighlight(0, 136, y[0] + 10, 21, 7);
-@@ -700,7 +1081,11 @@ static void PrintDungeonOptions(void)
+@@ -700,7 +1085,11 @@ static void PrintDungeonOptions(void)
          AddDoubleUnderScoreHighlight(0, 80, y[3] + 10, 16, 7);
      }
  
@@ -1436,7 +1446,7 @@ index 0680f301..50f43b47 100644
      sub_80073E0(0);
  }
 diff --git a/src/dungeon_pokemon_sprites.c b/src/dungeon_pokemon_sprites.c
-index b965ec4a..26a31bcd 100644
+index b965ec4a..a66128bd 100644
 --- a/src/dungeon_pokemon_sprites.c
 +++ b/src/dungeon_pokemon_sprites.c
 @@ -1,4 +1,7 @@
@@ -1452,7 +1462,7 @@ index b965ec4a..26a31bcd 100644
      posY = (pos->y - gfxInfo->height * 4 - posScreen->y) + posOffset->y;
      ySubbed = posY - 16;
 +#ifdef PLATFORM_3DS
-+    if (posX >= -32 && posY >= -32 && posX < (PORT_DS_SIZE ? SCREEN_W - WIDE_OX : 240) && posY < (PORT_DS_SIZE ? SCREEN_H : 160)) {
++    if (posX >= -32 && posY >= -32 && posX < (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : 240) && posY < (PORT_WIDE_SIZE ? SCREEN_H : 160)) {
 +#else
      if (posX >= -32 && posY >= -32 && posX < 240 && posY < 160) {
 +#endif
@@ -1509,7 +1519,7 @@ index b965ec4a..26a31bcd 100644
  {
      if (sDungeonPokemonSprites != NULL) {
 diff --git a/src/dungeon_range.c b/src/dungeon_range.c
-index ca1c1984..8939a90f 100644
+index ca1c1984..85b50559 100644
 --- a/src/dungeon_range.c
 +++ b/src/dungeon_range.c
 @@ -1,4 +1,7 @@
@@ -1525,7 +1535,7 @@ index ca1c1984..8939a90f 100644
      s32 y = inY - gDungeon->unk181e8.cameraPixelPos.y;
  
 +#ifdef PLATFORM_3DS
-+    if (x >= (PORT_DS_SIZE ? -16 - WIDE_OX : -16) && y >= -16 && x <= 255 && y <= (PORT_DS_SIZE ? SCREEN_H + 15 : 175))
++    if (x >= (PORT_WIDE_SIZE ? -16 - WIDE_OX : -16) && y >= -16 && x <= (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX + 15 : 255) && y <= (PORT_WIDE_SIZE ? SCREEN_H + 15 : 175))
 +#else
      if (x >= -16 && y >= -16 && x <= 255 && y <= 175)
 +#endif
@@ -1595,7 +1605,7 @@ index 80a7d04f..dcb4bc28 100644
  
  void sub_803F9CC(void)
 diff --git a/src/dungeon_util.c b/src/dungeon_util.c
-index 60311546..dc2b1bf5 100644
+index 60311546..1c3f273b 100644
 --- a/src/dungeon_util.c
 +++ b/src/dungeon_util.c
 @@ -1,4 +1,7 @@
@@ -1612,7 +1622,7 @@ index 60311546..dc2b1bf5 100644
  
 +#ifdef PLATFORM_3DS
 +        // the wide view shows more below and left (port_view.h)
-+        if (x >= (PORT_DS_SIZE ? -32 - WIDE_OX : -32) && y >= -32 && x <= 272 && y <= (PORT_DS_SIZE ? SCREEN_H + 32 : 192)) {
++        if (x >= (PORT_WIDE_SIZE ? -32 - WIDE_OX : -32) && y >= -32 && x <= (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX + 32 : 272) && y <= (PORT_WIDE_SIZE ? SCREEN_H + 32 : 192)) {
 +#else
          if (x >= -32 && y >= -32 && x <= 272 && y <= 192) {
 +#endif
@@ -1620,7 +1630,7 @@ index 60311546..dc2b1bf5 100644
  
              switch (GetEntityType(ent)) {
 diff --git a/src/dungeon_vram.c b/src/dungeon_vram.c
-index 99689873..f2efd6fd 100644
+index 99689873..04d04fcb 100644
 --- a/src/dungeon_vram.c
 +++ b/src/dungeon_vram.c
 @@ -1,4 +1,7 @@
@@ -1636,7 +1646,7 @@ index 99689873..f2efd6fd 100644
      }
      SetBG3RegOffsets(gDungeon->unk181e8.cameraPixelPos.x, gDungeon->unk181e8.cameraPixelPos.y - gDungeon->unk181e8.unk181FC);
 +#ifdef PLATFORM_3DS
-+    if (PORT_DS_SIZE) {
++    if (PORT_WIDE_SIZE) {
 +        // wide view: the floor from the wide map (dungeon_map_access.c)
 +        extern u16 gPortDungeonBg3[], gPortDungeonBg2[];
 +        gPortWideBg[3].map = gPortDungeonBg3;
@@ -1659,7 +1669,7 @@ index 99689873..f2efd6fd 100644
      y = y1 - y2;
  
 +#ifdef PLATFORM_3DS
-+    if (x >= -32 && y >= -8 && x < (PORT_DS_SIZE ? SCREEN_W - WIDE_OX : 240) && y < (PORT_DS_SIZE ? SCREEN_H : 160)) {
++    if (x >= -32 && y >= -8 && x < (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : 240) && y < (PORT_WIDE_SIZE ? SCREEN_H : 160)) {
 +#else
      if (x >= -32 && y >= -8 && x < 240 && y < 160) {
 +#endif
@@ -1730,7 +1740,7 @@ index 172f2be9..c3dfe0d5 100644
  }
 +#endif // PLATFORM_3DS
 diff --git a/src/friend_areas_map.c b/src/friend_areas_map.c
-index c2e99136..77460008 100644
+index c2e99136..0c271c7d 100644
 --- a/src/friend_areas_map.c
 +++ b/src/friend_areas_map.c
 @@ -1,4 +1,7 @@
@@ -1782,7 +1792,7 @@ index c2e99136..77460008 100644
      gFriendAreasMapPtr->monSpritePos = gFriendAreasMapPtr->locationsInfo[startingLocationId].pos;
      gFriendAreasMapPtr->bgPos.x = gFriendAreasMapPtr->monSpritePos.x - 120;
 +#ifdef PLATFORM_3DS
-+    gFriendAreasMapPtr->bgPos.y = gFriendAreasMapPtr->monSpritePos.y - (PORT_DS_SIZE ? SCREEN_H / 2 : 80);
++    gFriendAreasMapPtr->bgPos.y = gFriendAreasMapPtr->monSpritePos.y - (PORT_WIDE_SIZE ? SCREEN_H / 2 : 80);
 +#else
      gFriendAreasMapPtr->bgPos.y = gFriendAreasMapPtr->monSpritePos.y - 80;
 +#endif
@@ -1790,7 +1800,7 @@ index c2e99136..77460008 100644
      FriendAreasMap_UpdateBg();
  }
 diff --git a/src/friend_areas_map_util.c b/src/friend_areas_map_util.c
-index f3807983..f02e58a2 100644
+index f3807983..fa116197 100644
 --- a/src/friend_areas_map_util.c
 +++ b/src/friend_areas_map_util.c
 @@ -1,4 +1,7 @@
@@ -1806,7 +1816,7 @@ index f3807983..f02e58a2 100644
      s32 y2 = y1;
  
 +#ifdef PLATFORM_3DS
-+    if (PORT_DS_SIZE) {
++    if (PORT_WIDE_SIZE) {
 +        Port_DrawWideMapArrays(gFriendAreasMapPtr->unk2014, gFriendAreasMapPtr->unk14, gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
 +        return;
 +    }
@@ -1819,7 +1829,7 @@ index f3807983..f02e58a2 100644
  void FriendAreasMap_UpdateMonSpritePosition(void)
  {
 +#ifdef PLATFORM_3DS
-+    if (PORT_DS_SIZE) { // wide view (port_view.h)
++    if (PORT_WIDE_SIZE) { // wide view (port_view.h)
 +        Port_WideMapFollow(&gFriendAreasMapPtr->bgPos, &gFriendAreasMapPtr->monSpritePos, 239, 151);
 +        return;
 +    }
@@ -1832,7 +1842,7 @@ index f3807983..f02e58a2 100644
      SetBG2RegOffsets(gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
      SetBG3RegOffsets(gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
 +#ifdef PLATFORM_3DS
-+    if (PORT_DS_SIZE)
++    if (PORT_WIDE_SIZE)
 +        Port_ShowWideMapArrays(gFriendAreasMapPtr->bgPos.x, gFriendAreasMapPtr->bgPos.y);
 +#endif
      AnimateSprites();
@@ -1855,7 +1865,7 @@ index 1179e657..13c8e87f 100644
  // arm9.bin::0200A178
  void InitGraphics(void)
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..67646a9e 100644
+index 069cfc94..7bcc9611 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -1872,10 +1882,10 @@ index 069cfc94..67646a9e 100644
  
 +#ifdef PLATFORM_3DS
 +// 3DS port, wide view (port_view.h): the layers are also drawn into maps
-+// wide enough for 256x192 of the map around the camera, which the port draws
++// wide enough for the screen (up to 320x240) of the map around the camera, which the port draws
 +// instead of the 32x32 ones. Past the map's edges (maps smaller than the view)
 +// is black.
-+static u16 sPortWideMaps[2][32 * 64]; // BG2, BG3
++static u16 sPortWideMaps[2][64 * 64]; // BG2, BG3
 +
 +bool8 gPortGroundNarrow; // set by ground_map.c for screens made as maps
 +
@@ -1887,7 +1897,7 @@ index 069cfc94..67646a9e 100644
 +    s32 mapW = mapRender->mapSizePixels.x / 8, mapH = mapRender->mapSizePixels.y / 8;
 +    s32 tx0 = (mapRender->cameraPos.x - WIDE_OX) >> 3, ty0 = mapRender->cameraPos.y >> 3;
 +
-+    if (gPortGroundNarrow || !PORT_DS_SIZE)
++    if (gPortGroundNarrow || !PORT_WIDE_SIZE)
 +        return;
 +    for (j = 0; j < mapRender->numBgs; j++) {
 +        u16 *tilemap = mapRender->bgTilemaps[j];
@@ -1904,12 +1914,12 @@ index 069cfc94..67646a9e 100644
 +        if (cd == 0 || chunks == NULL) {
 +            for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++)
 +                for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++)
-+                    dst[(ty & 31) * 64 + (tx & 63)] = 0;
++                    dst[(ty & 63) * 64 + (tx & 63)] = 0;
 +        }
 +        else {
 +            // Each column's chunk and place in it, worked out once (no
 +            // divisions in the loop: this runs every frame).
-+            s16 colChunk[SCREEN_W / 8 + 1], colIn[SCREEN_W / 8 + 1];
++            s16 colChunk[SCREEN_W_MAX / 8 + 1], colIn[SCREEN_W_MAX / 8 + 1];
 +            for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++) {
 +                s32 mx = tx, i = tx - tx0;
 +                if (mapRender->wrapAround)
@@ -1924,7 +1934,7 @@ index 069cfc94..67646a9e 100644
 +            }
 +            for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++) {
 +                s32 my = ty;
-+                u16 *out = &dst[(ty & 31) * 64];
++                u16 *out = &dst[(ty & 63) * 64];
 +                const u16 *chunkRow;
 +                const u16 *tiles;
 +                if (mapRender->wrapAround)
@@ -1959,7 +1969,7 @@ index 069cfc94..67646a9e 100644
 +
 +    for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++) {
 +        for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++) {
-+            s32 i = (ty & 31) * 64 + (tx & 63);
++            s32 i = (ty & 63) * 64 + (tx & 63);
 +            bool8 in = tx >= 0 && ty >= 0 && tx < 64 && ty < 64;
 +            sPortWideMaps[0][i] = in ? bg2[ty][tx] : 0;
 +            sPortWideMaps[1][i] = in ? bg3[ty][tx] : PORT_WIDE_BLACK;
@@ -2068,7 +2078,7 @@ index 1dea7998..d585e375 100644
  {
      if (sUnknown_20398A8 == Unk_20398A8_UNK0) {
 diff --git a/src/ground_map.c b/src/ground_map.c
-index ddf7d16b..22f0db77 100644
+index ddf7d16b..cf554fb4 100644
 --- a/src/ground_map.c
 +++ b/src/ground_map.c
 @@ -1,4 +1,7 @@
@@ -2117,7 +2127,7 @@ index ddf7d16b..22f0db77 100644
 +
 +bool8 Port_GroundViewIsNarrow(void)
 +{
-+    return !PORT_DS_SIZE || gGroundMapDungeon_3001B70 == NULL || gGroundMapAction->groundMapId == -1
++    return !PORT_WIDE_SIZE || gGroundMapDungeon_3001B70 == NULL || gGroundMapAction->groundMapId == -1
 +        || IsNarrowMap(gGroundMapAction->groundMapId);
 +}
 +#endif
@@ -2125,7 +2135,7 @@ index ddf7d16b..22f0db77 100644
  bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
  {
      const GroundConversionStruct *convTable;
-@@ -1279,10 +1307,28 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
+@@ -1279,10 +1307,30 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
              convTable = &gGroundMapConversionTable[gGroundMapAction->groundMapId];
              GetDungeonBounds(gGroundMapDungeon_3001B70, pos1, pos2);
  
@@ -2138,12 +2148,14 @@ index ddf7d16b..22f0db77 100644
 +            }
 +            else {
 +            // Wide view (port_view.h): the camera's point (code_809D148.c)
-+            // stays far enough from the edges for 256x192 of map, the screen
-+            // spanning GBA x -8..248 around it (121 left of it), y 0..192.
++            // stays far enough from the edges for the screen's worth of map
++            // (256x192 or 320x240), the screen spanning GBA x -WIDE_OX ..
++            // SCREEN_W - WIDE_OX around it (121 left of it, on the GBA),
++            // y 0..SCREEN_H (the point on its middle line).
 +            pos1->x += (121 + WIDE_OX) * 256;
-+            pos1->y += 96 * 256;
++            pos1->y += (SCREEN_H / 2) * 256;
 +            pos2->x -= (SCREEN_W - 121 - WIDE_OX) * 256;
-+            pos2->y -= (SCREEN_H - 96) * 256;
++            pos2->y -= (SCREEN_H - SCREEN_H / 2) * 256;
 +            }
 +#else
              pos1->x += 0x7800;
@@ -2154,7 +2166,7 @@ index ddf7d16b..22f0db77 100644
  
              if(convTable->unk0 == 0xA)
              {
-@@ -1292,12 +1338,26 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
+@@ -1292,12 +1340,26 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
                  pos2->y -= 0x1800;
              }
  
@@ -2181,7 +2193,7 @@ index ddf7d16b..22f0db77 100644
              return TRUE;
          }
      }
-@@ -1522,6 +1582,9 @@ void sub_80A59DC(void)
+@@ -1522,6 +1584,9 @@ void sub_80A59DC(void)
                  break;
          }
  
@@ -2345,13 +2357,13 @@ index 372641a7..de69a01f 100644
  
  // arm9.bin::0200CA1C
 diff --git a/src/menu_input.c b/src/menu_input.c
-index aeeb69ed..c610f45f 100644
+index aeeb69ed..8d2fd375 100644
 --- a/src/menu_input.c
 +++ b/src/menu_input.c
 @@ -1,4 +1,9 @@
  #include "global.h"
 +#ifdef PLATFORM_3DS
-+#define OFFSCREEN_X 256 // x 240 hides a sprite on the GBA, not in the wide view
++#define OFFSCREEN_X 384 // x 240 hides a sprite on the GBA, not in the wide view (-128 there)
 +#else
 +#define OFFSCREEN_X DISPLAY_WIDTH
 +#endif
@@ -2368,13 +2380,13 @@ index aeeb69ed..c610f45f 100644
  
      a0->unk26 = 0;
 diff --git a/src/naming_screen.c b/src/naming_screen.c
-index d24034e1..9478c71b 100644
+index d24034e1..79edce4b 100644
 --- a/src/naming_screen.c
 +++ b/src/naming_screen.c
 @@ -1,4 +1,9 @@
  #include "global.h"
 +#ifdef PLATFORM_3DS
-+#define OFFSCREEN_X 256 // x 240 hides a sprite on the GBA, not in the wide view
++#define OFFSCREEN_X 384 // x 240 hides a sprite on the GBA, not in the wide view (-128 there)
 +#else
 +#define OFFSCREEN_X DISPLAY_WIDTH
 +#endif
@@ -2743,10 +2755,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..3d7bd0f9
+index 00000000..78d3eaf1
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,318 @@
+@@ -0,0 +1,319 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -2880,13 +2892,13 @@ index 00000000..3d7bd0f9
 +}
 +
 +// Settings (setting, or one of its choices) that do nothing yet are shown in
-+// red: Scale; the Fit and 3DS sizes.
++// red: Scale; the 3DS size, and Fit for the second screen.
 +static bool8 IsPlaceholder(s32 setting, s32 choice)
 +{
 +    if (setting == SETTING_SCALE)
 +        return TRUE;
 +    if (setting == SETTING_SIZE)
-+        return choice == PORT_SIZE_FIT || choice == PORT_SIZE_3DS;
++        return choice == PORT_SIZE_3DS || (choice == PORT_SIZE_FIT && sMenu.page == PAGE_SUB_SCREEN);
 +    return FALSE;
 +}
 +
@@ -3042,6 +3054,7 @@ index 00000000..3d7bd0f9
 +                u8 *value = SettingValue(setting);
 +                s32 v = *value < first || *value >= sSettings[setting].count ? 0 : *value - first;
 +                *value = (u8)(first + (v + n + step) % n);
++                Port_UpdateScreenSize();
 +                changed = TRUE;
 +            }
 +            if (changed)
@@ -3157,7 +3170,7 @@ index ee2ca650..032da776 100644
  {
      return WriteSaveSector(a, src, size);
 diff --git a/src/sprite.c b/src/sprite.c
-index 812df38d..e3029ee1 100644
+index 812df38d..68c59fea 100644
 --- a/src/sprite.c
 +++ b/src/sprite.c
 @@ -1,4 +1,11 @@
@@ -3172,31 +3185,70 @@ index 812df38d..e3029ee1 100644
  #include "globaldata.h"
  #include "bg_palette_buffer.h"
  #include "cpu.h"
-@@ -233,7 +240,11 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
+@@ -15,6 +22,11 @@ UNUSED EWRAM_DATA static u32 sUnused1 = {0}; // R=202569C
+ EWRAM_DATA static SpriteList sSpriteList = {0}; // B=20ED4C0
+ EWRAM_DATA static UnkSpriteLink sUnknown_2025EA8[128] = {0};
+ EWRAM_DATA static SpriteOAM sUnknown_20262A8[128] = {0};
++#ifdef PLATFORM_3DS
++// Each sprite's y, whole (gPortOamY, port_view.h): OAM keeps 8 bits, too
++// few for the Fit size's 240 lines.
++static s16 sPortSpriteY[128];
++#endif
+ EWRAM_DATA static s32 sSpriteCount = {0}; // R=20266A8
+ UNUSED EWRAM_DATA static u32 sUnused2 = {0}; // R=20266AC
+ 
+@@ -233,7 +245,11 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
  
      if (pos < -64)
          return;
 +#ifdef PLATFORM_3DS
-+    if (pos >= (PORT_DS_SIZE ? SCREEN_W - WIDE_OX : DISPLAY_WIDTH)) // the wide view reaches past the GBA screen
++    if (pos >= (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : DISPLAY_WIDTH)) // the wide view reaches past the GBA screen
 +#else
      if (pos >= DISPLAY_WIDTH)
 +#endif
          return;
  
      SpriteSetX(sprite, pos);
-@@ -242,7 +253,11 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
+@@ -242,10 +258,17 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
      pos += axData->pos.y - 0x200;
      if (pos < -64)
          return;
 +#ifdef PLATFORM_3DS
-+    if (pos >= (PORT_DS_SIZE ? SCREEN_H : DISPLAY_HEIGHT))
++    if (pos >= (PORT_WIDE_SIZE ? SCREEN_H : DISPLAY_HEIGHT))
 +#else
      if (pos >= DISPLAY_HEIGHT)
 +#endif
          return;
  
      SpriteSetOamY(sprite, pos);
-@@ -368,7 +383,7 @@ void CopySpritesToOam(void)
++#ifdef PLATFORM_3DS
++    sPortSpriteY[sSpriteCount] = pos;
++#endif
+ 
+     // Set paletteNum
+     if (!SpriteGetUnk6_1(sprite)) {
+@@ -286,6 +309,9 @@ void AddSprite(SpriteOAM *a0, s32 a1, ax_sprite *a2, unkStruct_2039DB0 *spriteMa
+     }
+ 
+     yPos = spr->unk6 >> SPRITEOAM_SHIFT_WORKING_Y;
++#ifdef PLATFORM_3DS
++    sPortSpriteY[sSpriteCount] = (s32)((u32)yPos << 20) >> 20; // 12 bits, signed
++#endif
+     nullsub_3(yPos, 0);
+     yPos &= SPRITEOAM_MAX_Y;
+     spr->attrib1 &= ~SPRITEOAM_MASK_Y;
+@@ -350,6 +376,10 @@ void CopySpritesToOam(void)
+             // Set y/affineMode/objMode/mosaic/bpp/shape
+             oam--;
+             *oam = spr->attrib1;
++#ifdef PLATFORM_3DS
++            if (spr >= sUnknown_20262A8 && spr < sUnknown_20262A8 + 128)
++                gPortOamY[((u32)oam - OAM) / 8] = sPortSpriteY[spr - sUnknown_20262A8];
++#endif
+ 
+             count++;
+         }
+@@ -368,7 +398,7 @@ void CopySpritesToOam(void)
          *oam = 0;
          // Set y/affineMode/objMode/mosaic/bpp/shape
          oam--;
@@ -3205,7 +3257,7 @@ index 812df38d..e3029ee1 100644
      }
  
      sOAMSpriteCount = count;
-@@ -379,7 +394,7 @@ void SetSavingIconCoords(DungeonPos *pos)
+@@ -379,7 +409,7 @@ void SetSavingIconCoords(DungeonPos *pos)
  {
      if (pos == NULL) {
          sUnknown_2025694.x = 0;
@@ -3214,7 +3266,7 @@ index 812df38d..e3029ee1 100644
      }
      else {
          sUnknown_2025694.x = pos->x;
-@@ -400,7 +415,7 @@ void BlinkSavingIcon(void)
+@@ -400,7 +430,7 @@ void BlinkSavingIcon(void)
      if (uVar1 & 16) {
          // Set y to 160
          // Set affineMode/objMode/mosaic/bpp/shape to 0
@@ -3224,7 +3276,7 @@ index 812df38d..e3029ee1 100644
          // Set size to 1
          *oam++ = 0x4000;
 diff --git a/src/text_1.c b/src/text_1.c
-index e6612f2c..3eb5c085 100644
+index e6612f2c..93fb1eab 100644
 --- a/src/text_1.c
 +++ b/src/text_1.c
 @@ -1,4 +1,10 @@
@@ -3274,7 +3326,7 @@ index e6612f2c..3eb5c085 100644
 +    // DrawWindowBg) go WINDOW_SHIFT_TILES rows down, nearer the bottom of
 +    // the taller screen.
 +    DungeonPos shifted = *positionModifier;
-+    if (PORT_DS_SIZE && gPortWideView)
++    if (PORT_WIDE_SIZE && gPortWideView)
 +        shifted.y += WINDOW_SHIFT_TILES;
 +    positionModifier = &shifted;
 +#endif
@@ -3439,7 +3491,7 @@ index f20880c5..b44ac671 100644
      s32 i, j;
      Window *window = &windows[id];
 diff --git a/src/trap.c b/src/trap.c
-index 3a78e6d7..f223d603 100644
+index 3a78e6d7..27b86073 100644
 --- a/src/trap.c
 +++ b/src/trap.c
 @@ -1,4 +1,7 @@
@@ -3455,7 +3507,7 @@ index 3a78e6d7..f223d603 100644
                  s32 spriteX = (x * 24) - gDungeon->unk181e8.cameraPixelPos.x;
                  s32 spriteY = (y * 24) - gDungeon->unk181e8.cameraPixelPos.y;
 +#ifdef PLATFORM_3DS
-+                if (spriteX >= (PORT_DS_SIZE ? -32 - WIDE_OX : -32) && spriteY >= -32 && spriteX <= 272 && spriteY <= (PORT_DS_SIZE ? SCREEN_H + 32 : 192))  {
++                if (spriteX >= (PORT_WIDE_SIZE ? -32 - WIDE_OX : -32) && spriteY >= -32 && spriteX <= (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX + 32 : 272) && spriteY <= (PORT_WIDE_SIZE ? SCREEN_H + 32 : 192))  {
 +#else
                  if (spriteX >= -32 && spriteY >= -32 && spriteX <= 272 && spriteY <= 192)  {
 +#endif
@@ -3463,7 +3515,7 @@ index 3a78e6d7..f223d603 100644
                      SpriteSetY(&gUnknown_202EDC0, spriteY);
                      SpriteSetX(&gUnknown_202EDC0, spriteX);
 diff --git a/src/window_buffer.c b/src/window_buffer.c
-index 90053fbc..057ddcd1 100644
+index 90053fbc..5e8e2df5 100644
 --- a/src/window_buffer.c
 +++ b/src/window_buffer.c
 @@ -17,8 +17,17 @@ EWRAM_DATA static bool32 sBoolUnk = FALSE;      // Toggled but is never read
@@ -3476,8 +3528,8 @@ index 90053fbc..057ddcd1 100644
 +// 3DS port: the wide view draws SCREEN_H lines, with this HBlank DMA going on
 +// past line 159 (port/core/frame.c), so the buffers hold that many lines.
 +#include "port_game.h"
-+#define BUF_LINES SCREEN_H
-+#define LINES_PAST (SCREEN_H - 160)
++#define BUF_LINES SCREEN_H_MAX
++#define LINES_PAST (SCREEN_H_MAX - 160)
 +#else
 +#define BUF_LINES 160
 +#endif
@@ -3509,7 +3561,7 @@ index 90053fbc..057ddcd1 100644
  // arm9.bin::02005758
  void CopyWindowBgBuffer(s32 *pos, u8 kind)
  {
-@@ -119,6 +144,15 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -119,8 +144,21 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
      src1 = gWindowBgCopy;
      if (src1 == NULL)
          src1 = sDefaultBgH;
@@ -3524,8 +3576,14 @@ index 90053fbc..057ddcd1 100644
 +#endif
  
      sBufferPtr = dst;
++#ifdef PLATFORM_3DS
++    for (i = 0; i < SCREEN_H_MAX; i++)
++        gPortWin1X[i].valid = FALSE;
++#endif
  
-@@ -130,39 +164,70 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+     switch (kind) {
+         case COPY_WINDOW_BG_BUFFER_WIN0:
+@@ -130,39 +168,64 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                      *dst++ = 0;         // WIN1H (disabled)
                  );
              }
@@ -3537,10 +3595,11 @@ index 90053fbc..057ddcd1 100644
          case COPY_WINDOW_BG_BUFFER_DIM2:
              src2 = sCorridorDim2;
 +#ifdef PLATFORM_3DS
-+            // the circle around the leader, moved down with it (DS size)
-+            for (i = 0; i < 160; i++) {
++            // the circle around the leader, moved down with it (wide view)
++            for (i = 0; i < BUF_LINES; i++) {
++                s32 c = i - PORT_LEADER_SHIFT;
 +                *dst++ = *src1++;   // WIN0H
-+                *dst++ = (i < PORT_LEADER_SHIFT) ? 0x100 : src2[i - PORT_LEADER_SHIFT];
++                *dst++ = (c < 0 || c >= 160) ? 0x100 : src2[c];
 +            }
 +#else
              for (i = 0; i < 10; i++) {
@@ -3549,19 +3608,16 @@ index 90053fbc..057ddcd1 100644
                      *dst++ = *src2++;   // WIN1H (dim)
                  );
              }
-+#endif
-+#ifdef PLATFORM_3DS
-+            ExtendLines(dst, win0);
-+            dst += LINES_PAST * 2;
 +#endif
              break;
          case COPY_WINDOW_BG_BUFFER_DIM1:
              src2 = sCorridorDim1;
 +#ifdef PLATFORM_3DS
-+            // the circle around the leader, moved down with it (DS size)
-+            for (i = 0; i < 160; i++) {
++            // the circle around the leader, moved down with it (wide view)
++            for (i = 0; i < BUF_LINES; i++) {
++                s32 c = i - PORT_LEADER_SHIFT;
 +                *dst++ = *src1++;   // WIN0H
-+                *dst++ = (i < PORT_LEADER_SHIFT) ? 0x100 : src2[i - PORT_LEADER_SHIFT];
++                *dst++ = (c < 0 || c >= 160) ? 0x100 : src2[c];
 +            }
 +#else
              for (i = 0; i < 10; i++) {
@@ -3570,10 +3626,6 @@ index 90053fbc..057ddcd1 100644
                      *dst++ = *src2++;   // WIN1H (dim)
                  );
              }
-+#endif
-+#ifdef PLATFORM_3DS
-+            ExtendLines(dst, win0);
-+            dst += LINES_PAST * 2;
 +#endif
              break;
          case COPY_WINDOW_BG_BUFFER_ROOM_DIM:
@@ -3598,8 +3650,35 @@ index 90053fbc..057ddcd1 100644
                      if (pos[1] > i) {
                          *dst++ = *src1++;
                          *dst++ = 256;
+@@ -185,6 +248,16 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+                             left = pos[2];
+                         }
+ 
++#ifdef PLATFORM_3DS
++                        // the wide view: the room's edges in screen x too,
++                        // past the GBA screen's edges (port_view.h)
++                        if (PORT_WIDE_SIZE && i < SCREEN_H_MAX) {
++                            s32 lo = left + WIDE_OX, hi = right + WIDE_OX;
++                            gPortWin1X[i].lo = lo < 0 ? 0 : lo > SCREEN_W ? SCREEN_W : lo;
++                            gPortWin1X[i].hi = hi < 0 ? 0 : hi > SCREEN_W ? SCREEN_W : hi;
++                            gPortWin1X[i].valid = TRUE;
++                        }
++#endif
+                         if (right < 0)
+                             right = 0;
+                         if (right > X_MAX - 1)
+@@ -198,6 +271,9 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+                         *dst++ = *src1++;
+                         // Note this is backwards so the dim window is drawn on the outside
+                         *dst++ = (left << 8) | right;
++#ifdef PLATFORM_3DS
++                        gPortWin1X[i].reg = (left << 8) | right;
++#endif
+                     }
+                 }
+             }
 diff --git a/src/world_map.c b/src/world_map.c
-index 8c50130b..f3e49f9c 100644
+index 8c50130b..adb16bdd 100644
 --- a/src/world_map.c
 +++ b/src/world_map.c
 @@ -1,4 +1,7 @@
@@ -3628,7 +3707,7 @@ index 8c50130b..f3e49f9c 100644
      sWorldMapPtr->monSpritePos = gDungeonCoordinates[info->startLocation.id];
      sWorldMapPtr->bgPos.x = sWorldMapPtr->monSpritePos.x - 120;
 +#ifdef PLATFORM_3DS
-+    sWorldMapPtr->bgPos.y = sWorldMapPtr->monSpritePos.y - (PORT_DS_SIZE ? SCREEN_H / 2 : 80);
++    sWorldMapPtr->bgPos.y = sWorldMapPtr->monSpritePos.y - (PORT_WIDE_SIZE ? SCREEN_H / 2 : 80);
 +#else
      sWorldMapPtr->bgPos.y = sWorldMapPtr->monSpritePos.y - 80;
 +#endif
@@ -3640,7 +3719,7 @@ index 8c50130b..f3e49f9c 100644
  static void UpdateMonSpritePosition(void)
  {
 +#ifdef PLATFORM_3DS
-+    if (PORT_DS_SIZE) { // wide view (port_view.h)
++    if (PORT_WIDE_SIZE) { // wide view (port_view.h)
 +        Port_WideMapFollow(&sWorldMapPtr->bgPos, &sWorldMapPtr->monSpritePos, 240, 160);
 +        return;
 +    }
@@ -3653,7 +3732,7 @@ index 8c50130b..f3e49f9c 100644
      s32 y2 = y1;
  
 +#ifdef PLATFORM_3DS
-+    if (PORT_DS_SIZE) {
++    if (PORT_WIDE_SIZE) {
 +        Port_DrawWideMapArrays(sWorldMapPtr->unk3114, sWorldMapPtr->unk1114, sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
 +        return;
 +    }
@@ -3666,7 +3745,7 @@ index 8c50130b..f3e49f9c 100644
      SetBG2RegOffsets(sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
      SetBG3RegOffsets(sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
 +#ifdef PLATFORM_3DS
-+    if (PORT_DS_SIZE)
++    if (PORT_WIDE_SIZE)
 +        Port_ShowWideMapArrays(sWorldMapPtr->bgPos.x, sWorldMapPtr->bgPos.y);
 +#endif
      AnimateSprites(TRUE);

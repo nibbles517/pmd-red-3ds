@@ -39,21 +39,24 @@ struct PortConfig
 
 extern struct PortConfig gPortConfig;
 enum { PORT_FRAMESKIP_OFF, PORT_FRAMESKIP_AUTO, PORT_FRAMESKIP_ALWAYS };
-enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_FIT, PORT_SIZE_3DS }; // Fit and 3DS: not yet (as GBA)
+enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_FIT, PORT_SIZE_3DS }; // 3DS: not yet (as GBA)
 enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_LAYOUT_MT };
-// Main Screen Settings > Size is DS: the 256x192 picture and the wide view
-// (port_view.h). Everything for it is off in the other sizes.
+// Main Screen Settings > Size is DS or Fit: the 256x192 or 320x240 picture
+// and the wide view (port_view.h). Everything for it is off in the other sizes.
 #define PORT_DS_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS)
-// DS size: the dungeon camera keeps the leader 12 lines lower, as on the DS
-// (screen y 108 instead of 96); the corridor light circles move with it
-#define PORT_LEADER_SHIFT (PORT_DS_SIZE ? 12 : 0)
+#define PORT_WIDE_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS || gPortConfig.layout[0][0] == PORT_SIZE_FIT)
+// The dungeon camera keeps the leader at the screen's middle line, plus 12
+// lower, as on the DS (y 108 of 192, 132 of 240; the GBA's 96 of 160 in GBA
+// size); the corridor light circles move with it. In GBA lines past 96:
+#define PORT_LEADER_SHIFT (PORT_WIDE_SIZE ? SCREEN_H / 2 - 96 + 12 : 0)
 
-// Text windows (BG0/BG1): 20 rows on the GBA; 24 for the wide view, which
-// moves them down 2 rows (16 lines), nearer the taller screen's bottom.
-#define TEXT_ROWS ((SCREEN_H + 7) / 8)
-#define WINDOW_SHIFT_TILES 2
+// Text windows (BG0/BG1): 20 rows on the GBA; up to 30 for the wide view,
+// which moves them down (by half the extra lines: 16 in DS size, 40 in Fit),
+// nearer the taller screen's bottom.
+#define TEXT_ROWS ((SCREEN_H_MAX + 7) / 8)
+#define WINDOW_SHIFT_TILES ((SCREEN_H - 160) / 16)
 // Lines of window backgrounds (text_2.c DrawWindowBg, per-line WIN0H)
-#define WINDOW_BG_LINES SCREEN_H
+#define WINDOW_BG_LINES SCREEN_H_MAX
 
 extern bool8 gPortGroundNarrow; // ground_bg.c
 bool8 Port_GroundViewIsNarrow(void); // ground_map.c
