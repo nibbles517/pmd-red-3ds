@@ -58,6 +58,9 @@ enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_
 #define TEXT_ROWS ((SCREEN_H_MAX + 7) / 8)
 #define WINDOW_SHIFT_TILES (SCREEN_H > 192 ? 7 : 2)
 #define WINDOW_SHIFT_TILES_TOP 3
+// Fit size: the dungeon minimap one row lower (dungeon_map.c), below the
+// floor, level and HP, which are drawn 4 lines lower (gPortHudLines)
+#define PORT_MINIMAP_SHIFT (PORT_WIDE_SIZE && SCREEN_H > 192 ? 1 : 0)
 // Lines of window backgrounds (text_2.c DrawWindowBg, per-line WIN0H)
 #define WINDOW_BG_LINES SCREEN_H_MAX
 

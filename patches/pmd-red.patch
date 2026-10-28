@@ -467,10 +467,18 @@ index 148a1118..359ba656 100644
  
          SpriteSetMatrixNum(&gUnknown_202EDC0, 0);
 diff --git a/src/dungeon_map.c b/src/dungeon_map.c
-index 7e6792c7..db06c38f 100644
+index 7e6792c7..b2875aa9 100644
 --- a/src/dungeon_map.c
 +++ b/src/dungeon_map.c
-@@ -62,6 +62,9 @@ EWRAM_DATA static u8 sPlayerDotFrames = 0;
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/dungeon.h"
+ #include "constants/trap.h"
+@@ -62,6 +65,9 @@ EWRAM_DATA static u8 sPlayerDotFrames = 0;
  EWRAM_DATA static OpenedFile *sDungeonMapGfxFile = NULL;
  EWRAM_DATA static void *sDungeonMapVramDst = NULL;
  EWRAM_INIT DungeonPos gPlayerDotMapPosition = {100, 100};
@@ -480,7 +488,7 @@ index 7e6792c7..db06c38f 100644
  
  // All traps look the same on Map, except for the Wonder Tile.
  static const u8 sTrapToMapGfxId[NUM_TRAPS] =
-@@ -120,6 +123,9 @@ void InitDungeonMap(bool8 a0)
+@@ -120,6 +126,9 @@ void InitDungeonMap(bool8 a0)
      gShowMonsterDotsInDungeonMap = TRUE;
      sDungeonMapVramDst = (void *) VRAM + 0x1700;
      gShowDungeonMap = TRUE;
@@ -490,7 +498,7 @@ index 7e6792c7..db06c38f 100644
      LoadDungeonMapPalette();
  }
  
-@@ -156,6 +162,236 @@ void LoadDungeonMapPalette(void)
+@@ -156,6 +165,236 @@ void LoadDungeonMapPalette(void)
      }
  }
  
@@ -727,7 +735,7 @@ index 7e6792c7..db06c38f 100644
  void DrawMinimapTile(s32 x, s32 y)
  {
      s32 yAdd = 0;
-@@ -202,6 +438,9 @@ void DrawMinimapTile(s32 x, s32 y)
+@@ -202,6 +441,9 @@ void DrawMinimapTile(s32 x, s32 y)
              return;
      }
  
@@ -737,6 +745,35 @@ index 7e6792c7..db06c38f 100644
      tile = GetTile(x, y);
      terrainType = GetTerrainType(tile);
      hallucinating = gDungeon->unk181e8.hallucinating;
+@@ -504,7 +746,11 @@ void FlashLeaderIcon(void)
+         }
+         else {
+             SpriteSetX(&sprite, (gPlayerDotMapPosition.x * 4) + 8);
++#ifdef PLATFORM_3DS
++            SpriteSetY(&sprite, (gPlayerDotMapPosition.y) * 4 + PORT_MINIMAP_SHIFT * 8);
++#else
+             SpriteSetY(&sprite, (gPlayerDotMapPosition.y) * 4);
++#endif
+             AddSprite(&sprite,0x100,NULL,NULL);
+         }
+     }
+@@ -549,6 +795,16 @@ void UpdateBgTilemapForDungeonMap(bool8 a0)
+ 
+     tilemapValue = TILEMAP_TILE_NUM(0xB8) | TILEMAP_PAL(14);
+     id = 1;
++#ifdef PLATFORM_3DS
++    // Fit size: the map a row lower, clear of the floor, level and HP
++    // (drawn 4 lines lower, gPortHudLines)
++    if (PORT_MINIMAP_SHIFT) {
++        u16 *ptr = &gBgTilemaps[0][id][1];
++        for (j = 0; j < 28; j++)
++            *ptr++ = TILEMAP_TILE_NUM(0) | TILEMAP_PAL(14);
++        id++;
++    }
++#endif
+     for (i = 0; i < count1; i++) {
+         u16 *ptr = &gBgTilemaps[0][id][1];
+         for (j = 0; j < 28; j++) {
 diff --git a/src/dungeon_map_access.c b/src/dungeon_map_access.c
 index 4a9a72ad..ebc461ad 100644
 --- a/src/dungeon_map_access.c
