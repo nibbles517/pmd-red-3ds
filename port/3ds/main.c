@@ -90,10 +90,11 @@ static void ClearGameScreen(void);
 // stored bottom to top. Going down a source column one pixel at a time would
 // read every 512 bytes in a DS-size picture (256 pixels a row), which the
 // Old 3DS's cache cannot hold on to (they all fall in the same few cache
-// sets); writing across columns one pixel at a time is slow too. So it goes
-// in strips of 16 columns: the strip is read row by row into a small buffer
-// that stays in the cache, turned on its side, then each framebuffer column
-// is written in one go.
+// sets); writing across columns one pixel at a time is slow too, and so are
+// writes the cache does not hold (it only keeps what is read). So it goes in
+// strips of 16 columns: each source row's 16 pixels go to a small buffer, one
+// 32-byte line per row, which stays in the cache (it is the same buffer every
+// strip); then each framebuffer column is written in one go from it.
 static uint16_t sIdentity[400];
 static uint16_t sMapX[400], sMapY[240];
 
@@ -102,19 +103,19 @@ static void Blit(const uint16_t *frame, int srcW, uint16_t *fb, int ox, int oy,
                  const uint16_t *lut)
 {
     enum { STRIP = 16 };
-    static uint16_t strip[STRIP][240] __attribute__((aligned(8))); // [column][y]
+    static uint16_t strip[240][STRIP] __attribute__((aligned(32))); // [y][column]
     for (int xs = x0; xs < x1; xs += STRIP) {
         int n = xs + STRIP < x1 ? STRIP : x1 - xs;
         for (int y = y0; y < y1; y++) {
             const uint16_t *row = frame + ymap[y] * srcW;
+            uint16_t *dst = strip[y];
             for (int i = 0; i < n; i++)
-                strip[i][y] = PIX(row[xmap[xs + i]]);
+                dst[i] = PIX(row[xmap[xs + i]]);
         }
         for (int i = 0; i < n; i++) {
-            uint16_t *col = fb + (ox + xs + i) * 240 + (239 - oy); // y = 0 here, y grows downwards in memory
-            const uint16_t *src = strip[i];
+            uint16_t *col = fb + (ox + xs + i) * 240 + (239 - oy); // y grows downwards in memory
             for (int y = y0; y < y1; y++)
-                col[-y] = src[y];
+                col[-y] = strip[y][i];
         }
     }
 }
@@ -345,13 +346,43 @@ void Backend_Present(const uint16_t *frame, int width, int height)
 
 // --- Dual Core ------------------------------------------------------------------
 //
-// A thread on the second CPU core (an Old 3DS lends apps part of its system
-// core: up to 80% is asked for; a New 3DS has a core of its own for apps,
-// core 2) runs what Backend_RunAsync is given: drawing part of the main
-// screen's picture (port/core/frame.c). If it cannot be started, the work is
-// done at once on this core.
+// A thread on the second CPU core runs what Backend_RunAsync is given:
+// drawing part of the main screen's picture (port/core/frame.c). If it
+// cannot be started, the work is done at once on this core.
+//
+// A New 3DS has a core of its own for apps (core 2). An Old 3DS lends apps a
+// share of its system core (core 1), which the system's own services (the
+// screens, sound, the HOME Menu) then do without: asking for 80% made those
+// slow (port.log: sound and flushing took twice as long, even with Dual Core
+// turned off again). So the share is CPU_LIMIT_ON only while Dual Core is on
+// and the game is in front, and the least the system takes (CPU_LIMIT_OFF)
+// otherwise; the thread is stopped when Dual Core is turned off.
 
+#define CPU_LIMIT_ON 50
+#define CPU_LIMIT_OFF 5
 static Thread sWorker;
+static bool sWorkerOld3DS; // the worker uses the system core's share
+static aptHookCookie sAptCookie;
+static bool sAptHooked, sAppInFront = true;
+
+static void SetCpuLimit(void)
+{
+    if (!sWorkerOld3DS)
+        return;
+    APT_SetAppCpuTimeLimit(sWorker != NULL && sAppInFront ? CPU_LIMIT_ON : CPU_LIMIT_OFF);
+}
+
+static void AptEvents(APT_HookType hook, void *param)
+{
+    (void)param;
+    if (hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONSLEEP)
+        sAppInFront = false;
+    else if (hook == APTHOOK_ONRESTORE || hook == APTHOOK_ONWAKEUP)
+        sAppInFront = true;
+    else
+        return;
+    SetCpuLimit();
+}
 static bool sWorkerTried, sWorkerQuit, sWorkerBusy;
 static LightEvent sWorkGo, sWorkDone;
 static void (*sWorkFn)(void *);
@@ -383,12 +414,19 @@ static void StartWorker(void)
     s32 prio = 0x30;
     bool isNew = Backend_IsNew3DS();
     sWorkerTried = true;
+    sWorkerQuit = false;
     LightEvent_Init(&sWorkGo, RESET_ONESHOT);
     LightEvent_Init(&sWorkDone, RESET_ONESHOT);
+    if (!sAptHooked) {
+        aptHook(&sAptCookie, AptEvents, NULL);
+        sAptHooked = true;
+    }
+    sWorkerOld3DS = !isNew;
     if (!isNew)
-        APT_SetAppCpuTimeLimit(80);
+        APT_SetAppCpuTimeLimit(CPU_LIMIT_ON);
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
     sWorker = threadCreate(WorkerMain, NULL, 32 * 1024, prio - 1, isNew ? 2 : 1, false);
+    SetCpuLimit();
     Backend_Log("dual core: %s (core %d)", sWorker ? "started" : "not available", isNew ? 2 : 1);
 }
 
@@ -438,6 +476,9 @@ static void StopWorker(void)
     threadJoin(sWorker, U64_MAX);
     threadFree(sWorker);
     sWorker = NULL;
+    sWorkerTried = false; // started again when Dual Core is turned on
+    SetCpuLimit();
+    Backend_Log("dual core: stopped");
 }
 
 // --- Pacing ------------------------------------------------------------------
@@ -669,6 +710,8 @@ void Backend_EndFrame(void)
         if (sFadeLevel == FADE_FRAMES)
             sFadeDir = 0;
     }
+    if (sWorker != NULL && !Port_DualCore())
+        StopWorker(); // Dual Core turned off: give the system core back
     sMarkTick = svcGetSystemTick();
     FlushSave();
     gfxFlushBuffers();
