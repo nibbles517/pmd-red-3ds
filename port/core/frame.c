@@ -191,6 +191,31 @@ static void DrawDual(int mode, int wide, int lines)
     Backend_WaitAsync();
 }
 
+// The wide view's state the game sets (port_view.h), kept a frame (RunFrame)
+typedef struct {
+    struct PortWideBg bg[4];
+    uint8_t tile[4];
+    uint8_t hudLines, hudLeft;
+} WideState;
+static WideState sLatched;
+static int sLatchValid;
+
+static void SaveWide(WideState *w)
+{
+    memcpy(w->bg, gPortWideBg, sizeof(w->bg));
+    memcpy(w->tile, gPortTileBg, sizeof(w->tile));
+    w->hudLines = gPortHudLines;
+    w->hudLeft = gPortHudLeft;
+}
+
+static void LoadWide(const WideState *w)
+{
+    memcpy(gPortWideBg, w->bg, sizeof(w->bg));
+    memcpy(gPortTileBg, w->tile, sizeof(w->tile));
+    gPortHudLines = w->hudLines;
+    gPortHudLeft = w->hudLeft;
+}
+
 // One full frame of hardware: the visible lines, then VBlank.
 //
 // On the GBA, VBlankIntrWait returns at the start of VBlank and the game's
@@ -219,6 +244,15 @@ static void RunFrame(void)
         memset(gPortTileBg, 0, sizeof(gPortTileBg));
         gPortHudLines = 0;
     }
+    // What the game set for the wide view this frame is drawn in the next
+    // one: its BG registers and OAM reach the hardware at VBlank, after this
+    // frame is drawn, so the wide view's backgrounds wait as long, keeping
+    // in step with the sprites.
+    WideState live;
+    SaveWide(&live);
+    if (!sLatchValid)
+        sLatched = live;
+    LoadWide(&sLatched);
 
     int dual = Port_DualCore();
 
@@ -280,6 +314,9 @@ static void RunFrame(void)
     if (!skip && dual)
         DrawDual(mode, wide, lines);
     Backend_Mark(PORT_MARK_DRAWN, skip);
+    LoadWide(&live); // the game's again
+    sLatched = live;
+    sLatchValid = 1;
 
     if (!skip)
         memcpy(sShown, sFrame, (mode == VIEW_GBA ? GBA_W * GBA_H : SCREEN_W * SCREEN_H) * sizeof(uint16_t));

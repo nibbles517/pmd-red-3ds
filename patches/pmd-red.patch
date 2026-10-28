@@ -2298,6 +2298,63 @@ index ddf7d16b..cf554fb4 100644
          sub_80A4764(gGroundMapDungeon_3001B70);
      }
  
+diff --git a/src/ground_sprite.c b/src/ground_sprite.c
+index 79fd9c0d..0a1feab2 100644
+--- a/src/ground_sprite.c
++++ b/src/ground_sprite.c
+@@ -1,4 +1,21 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++// The wide view (DS and Fit sizes): sprites are kept as far past its edges
++// as past the GBA screen's
++#define SPRITE_X_MIN (PORT_WIDE_SIZE ? -64 - WIDE_OX : -64)
++#define SPRITE_X_MAX (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX + 63 : 303)
++#define SPRITE_Y_MAX (PORT_WIDE_SIZE ? SCREEN_H + 47 : 207)
++// ... and put out of sight past them
++#define SPRITE_PARK_X (SPRITE_X_MAX + 1)
++#define SPRITE_PARK_Y (SPRITE_Y_MAX + 1)
++#else
++#define SPRITE_X_MIN -64
++#define SPRITE_X_MAX 303
++#define SPRITE_Y_MAX 207
++#define SPRITE_PARK_X 304
++#define SPRITE_PARK_Y 208
++#endif
+ #include "globaldata.h"
+ #include "code_8099360.h"
+ #include "ground_sprite.h"
+@@ -305,7 +322,7 @@ bool8 IsOnscreen_80A675C(struct UnkGroundSpriteStruct *ptr, PixelPos *pixPosArg)
+         result.y = (pixPosArg->y / 256);
+     }
+ 
+-    if (result.x >= -64 && result.x <= 303 && result.y >= -16 && result.y <= 207) {
++    if (result.x >= SPRITE_X_MIN && result.x <= SPRITE_X_MAX && result.y >= -16 && result.y <= SPRITE_Y_MAX) {
+         return TRUE;
+     }
+ 
+@@ -835,10 +852,10 @@ bool8 sub_80A7094(struct UnkGroundSpriteStruct *ptr, PixelPos *r10, PixelPos *po
+ 
+     resultPos = (PixelPos) {(posArg->x / 256) - gUnknown_2039DD8.x, (posArg->y / 256) - gUnknown_2039DD8.y};
+     unkY = resultPos.y - (a3 / 256);
+-    if (resultPos.x >= -64 && resultPos.x <= 303 && resultPos.y >= -16 && resultPos.y <= 207 && unkY >= -16 && unkY <= 207) {
++    if (resultPos.x >= SPRITE_X_MIN && resultPos.x <= SPRITE_X_MAX && resultPos.y >= -16 && resultPos.y <= SPRITE_Y_MAX && unkY >= -16 && unkY <= SPRITE_Y_MAX) {
+         if ((ptr->flags_0x50 & 0x10) && (gUnknown_2039DCC & 1)) {
+             sub_80A72B8(ptr, FALSE);
+-            DoAxFrame_800558C(&ptr->axdata, 304, 208, 0, ptr->unk68, &ptr->unk3C);
++            DoAxFrame_800558C(&ptr->axdata, SPRITE_PARK_X, SPRITE_PARK_Y, 0, ptr->unk68, &ptr->unk3C);
+             ptr->unk70 = 0;
+             return FALSE;
+         }
+@@ -854,7 +871,7 @@ bool8 sub_80A7094(struct UnkGroundSpriteStruct *ptr, PixelPos *r10, PixelPos *po
+     }
+     else if (ptr->unk70 != 0) {
+         sub_80A72B8(ptr, TRUE);
+-        DoAxFrame_800558C(&ptr->axdata, 304, 208, 0, ptr->unk68, &ptr->unk3C);
++        DoAxFrame_800558C(&ptr->axdata, SPRITE_PARK_X, SPRITE_PARK_Y, 0, ptr->unk68, &ptr->unk3C);
+         ptr->unk70 = 0;
+         return FALSE;
+     }
 diff --git a/src/m4a.c b/src/m4a.c
 index 2bcf6f8a..af9a133b 100644
 --- a/src/m4a.c
