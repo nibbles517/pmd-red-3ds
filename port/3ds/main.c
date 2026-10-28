@@ -83,40 +83,72 @@ static void SetFadeLevel(int level)
 
 static void ClearGameScreen(void);
 
+// Copies (and converts) a picture to a framebuffer: output pixels x0..x1-1,
+// y0..y1-1 of an area at (ox, oy), each from source pixel (xmap[x], ymap[y]).
+//
+// Framebuffers are 240 pixels per column, columns left to right, each column
+// stored bottom to top. Going down a source column one pixel at a time would
+// read every 512 bytes in a DS-size picture (256 pixels a row), which the
+// Old 3DS's cache cannot hold on to (they all fall in the same few cache
+// sets): instead it goes in strips of 16 columns, reading each source row's
+// 16 pixels together and writing the strip's 16 framebuffer columns.
+static uint16_t sIdentity[400];
+static uint16_t sMapX[400], sMapY[240];
+
+static void Blit(const uint16_t *frame, int srcW, uint16_t *fb, int ox, int oy,
+                 int x0, int y0, int x1, int y1, const uint16_t *xmap, const uint16_t *ymap,
+                 const uint16_t *lut)
+{
+    enum { STRIP = 16 };
+    for (int xs = x0; xs < x1; xs += STRIP) {
+        int xe = xs + STRIP < x1 ? xs + STRIP : x1;
+        uint16_t *top = fb + (ox + xs) * 240 + (239 - oy);
+        for (int y = y0; y < y1; y++) {
+            const uint16_t *row = frame + ymap[y] * srcW;
+            uint16_t *dst = top - y;
+            for (int x = xs; x < xe; x++, dst += 240)
+                *dst = PIX(row[xmap[x]]);
+        }
+    }
+}
+
+static void BuildMaps(void)
+{
+    for (int i = 0; i < 400; i++)
+        sIdentity[i] = (uint16_t)i;
+}
+
+// The scaling maps (out x -> source x, out y -> source y) for a ratio num/den.
+static void ScaleMaps(int outW, int outH, int num, int den)
+{
+    static int sNum, sDen, sW, sH;
+    if (num == sNum && den == sDen && outW == sW && outH == sH)
+        return;
+    sNum = num; sDen = den; sW = outW; sH = outH;
+    for (int x = 0; x < outW; x++)
+        sMapX[x] = (uint16_t)(x * den / num);
+    for (int y = 0; y < outH; y++)
+        sMapY[y] = (uint16_t)(y * den / num);
+}
+
 // GBA size: the 240x160 picture, 1:1 or scaled (4/3x to 320x213 on the
 // bottom screen, 1.5x to 360x240 on the top).
 static void PresentGba(const uint16_t *frame, uint16_t *fb, int width, const uint16_t *lut)
 {
     if (!sScaled) {
         const int ox = (width - GBA_W) / 2, oy = (240 - GBA_H) / 2;
-        for (int x = 0; x < GBA_W; x++) {
-            uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
-            for (int y = 0; y < GBA_H; y++)
-                col[-y] = PIX(frame[y * GBA_W + x]);
-        }
+        Blit(frame, GBA_W, fb, ox, oy, 0, 0, GBA_W, GBA_H, sIdentity, sIdentity, lut);
         return;
     }
-
     if (sBottom) {
         // 4/3x to 320x213: every source pixel becomes 1 or 2 screen pixels.
-        const int oy = (240 - 213) / 2;
-        for (int sx = 0; sx < 320; sx++) {
-            int x = sx * 3 / 4;
-            uint16_t *col = fb + sx * 240 + (239 - oy);
-            for (int sy = 0; sy < 213; sy++)
-                col[-sy] = PIX(frame[(sy * 3 / 4) * GBA_W + x]);
-        }
+        ScaleMaps(320, 213, 4, 3);
+        Blit(frame, GBA_W, fb, 0, (240 - 213) / 2, 0, 0, 320, 213, sMapX, sMapY, lut);
         return;
     }
-
     // 1.5x: every source pixel becomes 1 or 2 screen pixels in each direction.
-    const int ox = (400 - 360) / 2;
-    for (int sx = 0; sx < 360; sx++) {
-        int x = sx * 2 / 3;
-        uint16_t *col = fb + (ox + sx) * 240 + 239;
-        for (int sy = 0; sy < 240; sy++)
-            col[-sy] = PIX(frame[(sy * 2 / 3) * GBA_W + x]);
-    }
+    ScaleMaps(360, 240, 3, 2);
+    Blit(frame, GBA_W, fb, (400 - 360) / 2, 0, 0, 0, 360, 240, sMapX, sMapY, lut);
 }
 
 // DS size: the 256x192 picture, 1:1 or 1.25x to 320x240.
@@ -124,22 +156,12 @@ static void PresentDs(const uint16_t *frame, uint16_t *fb, int width, const uint
 {
     if (!sScaled) {
         const int ox = (width - SCREEN_W) / 2, oy = (240 - SCREEN_H) / 2;
-        for (int x = 0; x < SCREEN_W; x++) {
-            uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
-            for (int y = 0; y < SCREEN_H; y++)
-                col[-y] = PIX(frame[y * SCREEN_W + x]);
-        }
+        Blit(frame, SCREEN_W, fb, ox, oy, 0, 0, SCREEN_W, SCREEN_H, sIdentity, sIdentity, lut);
         return;
     }
-
     // 1.25x: every source pixel becomes 1 or 2 screen pixels.
-    const int ox = (width - 320) / 2;
-    for (int sx = 0; sx < 320; sx++) {
-        const uint16_t *src = frame + sx * 4 / 5;
-        uint16_t *col = fb + (ox + sx) * 240 + 239;
-        for (int sy = 0; sy < 240; sy++)
-            col[-sy] = PIX(src[(sy * 4 / 5) * SCREEN_W]);
-    }
+    ScaleMaps(320, 240, 5, 4);
+    Blit(frame, SCREEN_W, fb, (width - 320) / 2, 0, 0, 0, 320, 240, sMapX, sMapY, lut);
 }
 
 static void PresentMain(const uint16_t *frame, int frameW)
@@ -252,11 +274,7 @@ static void PresentSub(void)
     const uint16_t *lut = sPresentLut;
     uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
     const int ox = (width - SUBSCREEN_W) / 2, oy = (240 - SUBSCREEN_H) / 2;
-    for (int x = draw[0]; x < draw[2]; x++) {
-        uint16_t *col = fb + (ox + x) * 240 + (239 - oy);
-        for (int y = draw[1]; y < draw[3]; y++)
-            col[-y] = PIX(sSubFrame[y * SUBSCREEN_W + x]);
-    }
+    Blit(sSubFrame, SUBSCREEN_W, fb, ox, oy, draw[0], draw[1], draw[2], draw[3], sIdentity, sIdentity, lut);
     Part(T_SUBOUT);
 }
 
@@ -604,6 +622,7 @@ int main(void)
     if (flag) { fclose(flag); sLog = fopen(LOG_PATH, "w"); }
 
     BuildLut();
+    BuildMaps();
     AudioInit();
     SetGameScreen(Port_WantsBottomScreen());
 
