@@ -916,7 +916,7 @@ index 4a9a72ad..05f95b09 100644
      gDungeon->unk181e8.unk1821A = 0;
  }
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..77822cbe 100644
+index 0680f301..50f43b47 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,11 @@
@@ -937,8 +937,8 @@ index 0680f301..77822cbe 100644
      GAME_OPTION_DUNGEON,
 -    GAME_OPTION_OTHERS,
 +#ifdef PLATFORM_3DS
-+    GAME_OPTION_GRAPHICS, // 3DS port: Graphics Options (as outside dungeons)
 +    GAME_OPTION_LAYOUT,   // 3DS port: Layout Options
++    GAME_OPTION_GRAPHICS, // 3DS port: Graphics Options (as outside dungeons)
 +#endif
 +    GAME_OPTION_OTHERS,   // (3DS port: Windows Options)
      GAME_OPTION_DEFAULT,
