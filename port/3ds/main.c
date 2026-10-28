@@ -28,7 +28,7 @@
 
 void AgbMain(void);
 
-const int Backend_Version8_UpdateRepoIfMissing = 8;
+const int Backend_Version9_UpdateRepoIfMissing = 9;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -44,6 +44,7 @@ static inline uint16_t ToRgb565(uint16_t c)
 static int sScaled;
 static int sBottom; // picture on the bottom screen
 static FILE *sLog;
+static bool sLate; // the last frame missed its VBlank (see Pacing)
 static PrintConsole sConsole;
 static int sAudioOn;
 
@@ -159,6 +160,31 @@ static void PresentMain(const uint16_t *frame, int frameW)
         PresentDs(frame, fb, width, sPresentLut);
 }
 
+// --- Performance meter ---------------------------------------------------------
+//
+// With sdmc:/3ds/pmd-red-3ds/debug.txt present, port.log gets a line every 5
+// seconds: frames per second, and the average time per frame of each part:
+//   game       the game's own code (between frames)
+//   draw       the main screen's picture (port/core/ppu.c)
+//   out        converting it to the 3DS screen
+//   sub        drawing the second screen; subout: converting it
+//   vblank     the game's VBlank work and the sound
+//   flush      flushing the screens to memory (and writing the save)
+//   wait       waiting for the screens' refresh (spare time)
+enum { T_GAME, T_DRAW, T_OUT, T_SUB, T_SUBOUT, T_VBLANK, T_FLUSH, T_WAIT, T_COUNT };
+static const char *const sPartNames[T_COUNT] = { "game", "draw", "out", "sub", "subout", "vblank", "flush", "wait" };
+static u64 sPartTicks[T_COUNT];
+static u64 sMarkTick, sMeterStart, sMeterBoot;
+static int sMeterFrames, sMeterSkipped, sMeterLate;
+
+static void Part(int part)
+{
+    u64 now = svcGetSystemTick();
+    if (sMarkTick != 0)
+        sPartTicks[part] += now - sMarkTick;
+    sMarkTick = now;
+}
+
 // --- Second screen -------------------------------------------------------------
 //
 // The screen without the game shows the DS-style second screen (team panel,
@@ -175,7 +201,9 @@ static void PresentSub(void)
     gfxScreen_t screen = sBottom ? GFX_TOP : GFX_BOTTOM;
     const int width = sBottom ? 400 : 320;
 
-    if (!Port_RenderSubScreen(sSubFrame)) {
+    bool shown = Port_RenderSubScreen(sSubFrame);
+    Part(T_SUB);
+    if (!shown) {
         if (sSubMode != SUB_TEXT) {
             consoleInit(screen, &sConsole);
             PrintStatus();
@@ -229,9 +257,51 @@ static void PresentSub(void)
         for (int y = draw[1]; y < draw[3]; y++)
             col[-y] = PIX(sSubFrame[y * SUBSCREEN_W + x]);
     }
+    Part(T_SUBOUT);
 }
 
 static int sMainPresented; // this frame drew the main screen (else it keeps its buffers)
+
+void Backend_Mark(int mark, int skipped)
+{
+    switch (mark) {
+        case PORT_MARK_FRAME_START: Part(T_GAME); break;
+        case PORT_MARK_DRAWN: Part(T_DRAW); sMeterSkipped += skipped; break;
+        case PORT_MARK_PRESENTED: sMarkTick = svcGetSystemTick(); break; // (timed in Backend_Present)
+        case PORT_MARK_VBLANK_DONE: Part(T_VBLANK); break;
+    }
+}
+
+static void MeterEndFrame(void)
+{
+    u64 now = svcGetSystemTick();
+    if (sMeterStart == 0) {
+        sMeterStart = sMeterBoot = now;
+        return;
+    }
+    sMeterFrames++;
+    sMeterLate += sLate;
+    if (now - sMeterStart < 5 * (u64)SYSCLOCK_ARM11)
+        return;
+    if (sLog != NULL) {
+        char line[512];
+        double ms = 1000.0 / SYSCLOCK_ARM11, secs = (now - sMeterStart) / (double)SYSCLOCK_ARM11;
+        bool isNew = false;
+        APT_CheckNew3DS(&isNew);
+        int n = snprintf(line, sizeof(line), "perf t=%us %s %s fps=%.1f drawn=%d/%d late=%d %s |",
+            (unsigned)((now - sMeterBoot) / SYSCLOCK_ARM11), isNew ? "New3DS" : "Old3DS", Port_SceneName(),
+            sMeterFrames / secs, sMeterFrames - sMeterSkipped, sMeterFrames, sMeterLate, Port_SettingsSummary());
+        for (int i = 0; i < T_COUNT && n < (int)sizeof(line); i++)
+            n += snprintf(line + n, sizeof(line) - n, " %s %.1f", sPartNames[i], sPartTicks[i] * ms / sMeterFrames);
+        if (n < (int)sizeof(line))
+            snprintf(line + n, sizeof(line) - n, " ms/frame");
+        fprintf(sLog, "%s\n", line);
+        fflush(sLog);
+    }
+    memset(sPartTicks, 0, sizeof(sPartTicks));
+    sMeterFrames = sMeterSkipped = sMeterLate = 0;
+    sMeterStart = now;
+}
 
 void Backend_Present(const uint16_t *frame, int width, int height)
 {
@@ -241,9 +311,11 @@ void Backend_Present(const uint16_t *frame, int width, int height)
     if (frame == NULL && sFadeDir != 0)
         frame = Port_Framebuffer();
     sMainPresented = frame != NULL;
+    sMarkTick = svcGetSystemTick();
     if (frame != NULL)
         PresentMain(frame, width);
-    PresentSub();
+    Part(T_OUT);
+    PresentSub(); // (times T_SUB and T_SUBOUT)
 }
 
 // --- Pacing ------------------------------------------------------------------
@@ -255,7 +327,6 @@ void Backend_Present(const uint16_t *frame, int width, int height)
 
 #define FRAME_TICKS ((u64)SYSCLOCK_ARM11 * 1000 / 59831) // the screens' refresh: 59.831 Hz
 static u64 sDeadline;
-static bool sLate;
 
 bool Backend_FrameLate(void)
 {
@@ -475,13 +546,17 @@ void Backend_EndFrame(void)
         if (sFadeLevel == FADE_FRAMES)
             sFadeDir = 0;
     }
+    sMarkTick = svcGetSystemTick();
     FlushSave();
     gfxFlushBuffers();
     // A skipped frame leaves the main screen's buffers as they are.
     if (sMainPresented)
         gfxScreenSwapBuffers(sBottom ? GFX_BOTTOM : GFX_TOP, false);
     gfxScreenSwapBuffers(sBottom ? GFX_TOP : GFX_BOTTOM, false);
+    Part(T_FLUSH);
     WaitForFrame();
+    Part(T_WAIT);
+    MeterEndFrame();
     if (!aptMainLoop()) {
         Shutdown();
         exit(0);

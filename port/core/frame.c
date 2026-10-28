@@ -85,7 +85,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version8_UpdateRepoIfMissing != 8)
+    if (Backend_Version9_UpdateRepoIfMissing != 9)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -122,6 +122,7 @@ static void RunFrame(void)
     // DS, a 256x192 picture, the GBA one in the middle, or the wide view while
     // the game keeps asking for it (it sets gPortWideView every frame it draws
     // a dungeon floor or a ground map, which it does only in DS size).
+    Backend_Mark(PORT_MARK_FRAME_START, 0);
     int ds = Port_DsSize();
     int wide = ds && gPortWideView != 0;
     int mode = !ds ? VIEW_GBA : wide ? VIEW_WIDE : VIEW_FRAMED;
@@ -180,12 +181,14 @@ static void RunFrame(void)
         }
         Dma_HBlank();
     }
+    Backend_Mark(PORT_MARK_DRAWN, skip);
     if (!skip)
         memcpy(sShown, sFrame, sizeof(sShown));
     if (mode == VIEW_GBA)
         Backend_Present(skip ? NULL : sShown, GBA_W, GBA_H);
     else
         Backend_Present(skip ? NULL : sShown, SCREEN_W, SCREEN_H);
+    Backend_Mark(PORT_MARK_PRESENTED, skip);
 
     // Lines 160-227: VBlank.
     SetLine(160);
@@ -198,6 +201,7 @@ static void RunFrame(void)
     sInFrame = 0;
     sVirtualLine = 160; // the game resumes at the start of the next VBlank
     Sound_EndFrame();
+    Backend_Mark(PORT_MARK_VBLANK_DONE, skip);
     Backend_EndFrame();
     UpdateKeys();
     sFrames++;

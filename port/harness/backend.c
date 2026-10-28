@@ -20,7 +20,9 @@ enum {
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4 };
 
-const int Backend_Version8_UpdateRepoIfMissing = 8;
+const int Backend_Version9_UpdateRepoIfMissing = 9;
+
+void Backend_Mark(int mark, int skipped) { (void)mark; (void)skipped; }
 
 void AgbMain(void);
 

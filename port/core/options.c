@@ -25,6 +25,27 @@ void Port_LoadConfig(void)
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));
 }
 
+extern bool8 gPortGroundRunning; // subscreen.c
+
+const char *Port_SceneName(void)
+{
+    if (gDungeon != NULL)
+        return "dungeon";
+    return gPortGroundRunning ? "ground" : "other";
+}
+
+const char *Port_SettingsSummary(void)
+{
+    static const char *const sSizes[4] = { "GBA", "DS", "Fit", "3DS" };
+    static const char *const sLayouts[4] = { "Blue", "Sky", "Log", "M+T" };
+    static const char *const sSkips[3] = { "Off", "Auto", "Always" };
+    static char buf[64];
+    snprintf(buf, sizeof(buf), "size=%s sub=%s skip=%s", sSizes[gPortConfig.layout[0][0] & 3],
+             gPortConfig.subScreenDisabled ? "off" : sLayouts[gPortConfig.layoutSubScreen & 3],
+             sSkips[gPortConfig.frameSkip % 3]);
+    return buf;
+}
+
 int Port_FrameSkipMode(void)
 {
     return gPortConfig.frameSkip;
