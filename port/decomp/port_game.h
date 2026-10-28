@@ -44,6 +44,9 @@ enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_
 // Main Screen Settings > Size is DS: the 256x192 picture and the wide view
 // (port_view.h). Everything for it is off in the other sizes.
 #define PORT_DS_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS)
+// DS size: the dungeon camera keeps the leader 12 lines lower, as on the DS
+// (screen y 108 instead of 96); the corridor light circles move with it
+#define PORT_LEADER_SHIFT (PORT_DS_SIZE ? 12 : 0)
 
 // Text windows (BG0/BG1): 20 rows on the GBA; 24 for the wide view, which
 // moves them down 2 rows (16 lines), nearer the taller screen's bottom.

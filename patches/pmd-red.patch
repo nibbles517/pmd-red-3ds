@@ -1550,6 +1550,50 @@ index e5de5d56..72d27d9e 100644
  const u8 *const gUnknown_80FE748 = _("Default");
  const u8 *const gUnknown_80FE764 = _("Speed{MOVE_X_POSITION_BY_80}Slow{MOVE_X_POSITION_BY_136}Fast");
  const u8 *const gUnknown_80FE788 = _("Far-off pals{MOVE_X_POSITION_BY_80}Self{MOVE_X_POSITION_BY_136}Look");
+diff --git a/src/dungeon_tilemap.c b/src/dungeon_tilemap.c
+index 80a7d04f..dcb4bc28 100644
+--- a/src/dungeon_tilemap.c
++++ b/src/dungeon_tilemap.c
+@@ -33,6 +33,12 @@
+ #include "run_dungeon.h"
+ #include "effect_main.h"
+ #include "dungeon_8041AD0.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#define CAMERA_OY (96 + PORT_LEADER_SHIFT)
++#else
++#define CAMERA_OY 96
++#endif
+ 
+ static void sub_803F38C(void);
+ static void sub_803F7BC(void);
+@@ -195,7 +201,7 @@ void UpdateCamera(u8 a0)
+         strPtr->cameraPos.y = cameraTarget->pos.y;
+ 
+         strPtr->cameraPixelPos.x = (cameraTarget->pixelPos.x / 256) - 120;
+-        strPtr->cameraPixelPos.y = (cameraTarget->pixelPos.y / 256) - 96;
++        strPtr->cameraPixelPos.y = (cameraTarget->pixelPos.y / 256) - CAMERA_OY;
+ 
+         if (HasHeldItem(cameraTarget, ITEM_X_RAY_SPECS) && info->isTeamLeader) {
+             strPtr->unk1820D = TRUE;
+@@ -328,7 +334,7 @@ void sub_803F878(s32 a0, s32 a1)
+     strPtr->cameraPixelPosMirror = strPtr->cameraPixelPos;
+     strPtr->cameraPosMirror = strPtr->cameraPos;
+     strPtr->cameraPixelPos.x = (a0 / 256) - 120;
+-    strPtr->cameraPixelPos.y = (a1 / 256) - 96;
++    strPtr->cameraPixelPos.y = (a1 / 256) - CAMERA_OY;
+     strPtr->cameraPos.x = a0 / 6144;
+     strPtr->cameraPos.y = a1 / 6144;
+     strPtr->unk1820D = FALSE;
+@@ -373,7 +379,7 @@ s32 GetCameraXPos(void)
+ s32 GetCameraYPos(void)
+ {
+     UnkDungeonGlobal_unk181E8_sub *strPtr = &gDungeon->unk181e8;
+-    return (strPtr->cameraPixelPos.y + 96) * 256;
++    return (strPtr->cameraPixelPos.y + CAMERA_OY) * 256;
+ }
+ 
+ void sub_803F9CC(void)
 diff --git a/src/dungeon_util.c b/src/dungeon_util.c
 index 60311546..dc2b1bf5 100644
 --- a/src/dungeon_util.c
@@ -3419,7 +3463,7 @@ index 3a78e6d7..f223d603 100644
                      SpriteSetY(&gUnknown_202EDC0, spriteY);
                      SpriteSetX(&gUnknown_202EDC0, spriteX);
 diff --git a/src/window_buffer.c b/src/window_buffer.c
-index 90053fbc..e7f2b769 100644
+index 90053fbc..057ddcd1 100644
 --- a/src/window_buffer.c
 +++ b/src/window_buffer.c
 @@ -17,8 +17,17 @@ EWRAM_DATA static bool32 sBoolUnk = FALSE;      // Toggled but is never read
@@ -3481,7 +3525,7 @@ index 90053fbc..e7f2b769 100644
  
      sBufferPtr = dst;
  
-@@ -130,6 +164,10 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -130,39 +164,70 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                      *dst++ = 0;         // WIN1H (disabled)
                  );
              }
@@ -3492,10 +3536,20 @@ index 90053fbc..e7f2b769 100644
              break;
          case COPY_WINDOW_BG_BUFFER_DIM2:
              src2 = sCorridorDim2;
-@@ -139,6 +177,10 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
++#ifdef PLATFORM_3DS
++            // the circle around the leader, moved down with it (DS size)
++            for (i = 0; i < 160; i++) {
++                *dst++ = *src1++;   // WIN0H
++                *dst++ = (i < PORT_LEADER_SHIFT) ? 0x100 : src2[i - PORT_LEADER_SHIFT];
++            }
++#else
+             for (i = 0; i < 10; i++) {
+                 UNROLL16(
+                     *dst++ = *src1++;   // WIN0H
                      *dst++ = *src2++;   // WIN1H (dim)
                  );
              }
++#endif
 +#ifdef PLATFORM_3DS
 +            ExtendLines(dst, win0);
 +            dst += LINES_PAST * 2;
@@ -3503,10 +3557,20 @@ index 90053fbc..e7f2b769 100644
              break;
          case COPY_WINDOW_BG_BUFFER_DIM1:
              src2 = sCorridorDim1;
-@@ -148,21 +190,28 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
++#ifdef PLATFORM_3DS
++            // the circle around the leader, moved down with it (DS size)
++            for (i = 0; i < 160; i++) {
++                *dst++ = *src1++;   // WIN0H
++                *dst++ = (i < PORT_LEADER_SHIFT) ? 0x100 : src2[i - PORT_LEADER_SHIFT];
++            }
++#else
+             for (i = 0; i < 10; i++) {
+                 UNROLL16(
+                     *dst++ = *src1++;   // WIN0H
                      *dst++ = *src2++;   // WIN1H (dim)
                  );
              }
++#endif
 +#ifdef PLATFORM_3DS
 +            ExtendLines(dst, win0);
 +            dst += LINES_PAST * 2;
