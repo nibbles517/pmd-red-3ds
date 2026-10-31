@@ -61,6 +61,8 @@ enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_
 // Fit size: the dungeon minimap one row lower (dungeon_map.c), below the
 // floor, level and HP, which are drawn 4 lines lower (gPortHudLines)
 #define PORT_MINIMAP_SHIFT (PORT_WIDE_SIZE && SCREEN_H > 192 ? 1 : 0)
+// Fit size: the dungeon message log (L+B) shows 11 messages instead of 8
+#define PORT_MESSAGE_LOG_TALL (PORT_WIDE_SIZE && SCREEN_H > 192)
 // Lines of window backgrounds (text_2.c DrawWindowBg, per-line WIN0H)
 #define WINDOW_BG_LINES SCREEN_H_MAX
 

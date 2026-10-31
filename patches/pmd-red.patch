@@ -1482,6 +1482,97 @@ index 0680f301..5348bec4 100644
  
      sub_80073E0(0);
  }
+diff --git a/src/dungeon_message_log.c b/src/dungeon_message_log.c
+index 18b83d51..acdbcdd2 100644
+--- a/src/dungeon_message_log.c
++++ b/src/dungeon_message_log.c
+@@ -14,7 +14,20 @@
+ #include "dungeon_tilemap.h"
+ #include "run_dungeon.h"
+ 
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++// How many log messages are shown: 3 more in Fit size, in a window 5 rows
++// taller (dungeon_vram.c). 11 messages (154 lines) are not a whole number
++// of rows: they start 2 lines higher (LOG_TOP), the window shows 152, the
++// last message's bottom 2 (blank) lines not.
++#define MESSAGE_LOG_ROW_COUNT (PORT_MESSAGE_LOG_TALL ? 11 : 8)
++#define LOG_TOP (PORT_MESSAGE_LOG_TALL ? 14 : 16)
++#define LOG_ARROW_DOWN_Y (PORT_MESSAGE_LOG_TALL ? 114 + 5 * 8 : 114)
++#else
+ #define MESSAGE_LOG_ROW_COUNT 8 // How many log messages are shown
++#define LOG_TOP 16
++#define LOG_ARROW_DOWN_Y 114
++#endif
+ 
+ static EWRAM_DATA s32 sMessageLogCursor = 0;
+ static EWRAM_DATA u8 sMessageLogFlags = 0;
+@@ -115,7 +128,7 @@ bool32 DisplayMessageLog(void)
+             CreateMessageLogArrow(TRUE, -8);
+         }
+         if (sMessageLogFlags & FLAG_CAN_SCROLL_DOWN) {
+-            CreateMessageLogArrow(FALSE, 114);
++            CreateMessageLogArrow(FALSE, LOG_ARROW_DOWN_Y);
+         }
+ 
+         if (!sub_80048C8()) {
+@@ -138,9 +151,9 @@ static void PutStringsOnMessageLog(void)
+ {
+     s32 i;
+     s32 arrId = gDungeon->unk16;
+-    s32 y = 16;
++    s32 y = LOG_TOP;
+ 
+-    arrId -= 8;
++    arrId -= MESSAGE_LOG_ROW_COUNT;
+     if (arrId < 0)
+         arrId += MESSAGE_LOG_STRINGS_COUNT;
+ 
+@@ -159,6 +172,15 @@ static void PutStringsOnMessageLog(void)
+             arrId = 0;
+     }
+ 
++#ifdef PLATFORM_3DS
++    if (PORT_MESSAGE_LOG_TALL) {
++        // the whole window to VRAM: the last message's lower tile row is
++        // past what the text drawing marks as changed
++        Window *window = &gWindows[0];
++        window->unk3C = window->unk1C;
++        window->unk40 = &window->unk1C[(u32)window->unk2C / 4 - 1];
++    }
++#endif
+     sub_80073E0(0);
+     sub_8007334(0);
+ }
+@@ -173,8 +195,8 @@ static bool8 TryScrollLogUp(s32 touchScreenArrow)
+     while (TRUE)
+     {
+         arrId = gDungeon->unk16 + sMessageLogCursor;
+-        y = 2;
+-        arrId -= 9;
++        y = LOG_TOP - 14;
++        arrId -= MESSAGE_LOG_ROW_COUNT + 1;
+         while (arrId < 0) {
+             arrId += MESSAGE_LOG_STRINGS_COUNT;
+         }
+@@ -182,7 +204,7 @@ static bool8 TryScrollLogUp(s32 touchScreenArrow)
+             arrId -= MESSAGE_LOG_STRINGS_COUNT;
+         }
+ 
+-        if (gDungeon->messageLogStrings[arrId].unk0 && sMessageLogCursor > -12) {
++        if (gDungeon->messageLogStrings[arrId].unk0 && sMessageLogCursor > MESSAGE_LOG_ROW_COUNT - MESSAGE_LOG_STRINGS_COUNT) {
+             sMessageLogFlags |= FLAG_CAN_SCROLL_UP;
+             if (gRealInputs.repeated & DPAD_UP)
+                 break;
+@@ -224,7 +246,7 @@ static bool8 TryScrollLogDown(s32 touchScreenArrow)
+     while (TRUE)
+     {
+         arrId = gDungeon->unk16 + sMessageLogCursor;
+-        y = 128;
++        y = LOG_TOP + MESSAGE_LOG_ROW_COUNT * 14;
+         while (arrId < 0) {
+             arrId += MESSAGE_LOG_STRINGS_COUNT;
+         }
 diff --git a/src/dungeon_name_banner.c b/src/dungeon_name_banner.c
 index 7a4e7b57..97d66197 100644
 --- a/src/dungeon_name_banner.c
@@ -1759,7 +1850,7 @@ index 60311546..1c3f273b 100644
  
              switch (GetEntityType(ent)) {
 diff --git a/src/dungeon_vram.c b/src/dungeon_vram.c
-index 99689873..2b51772f 100644
+index 99689873..05566409 100644
 --- a/src/dungeon_vram.c
 +++ b/src/dungeon_vram.c
 @@ -1,4 +1,7 @@
@@ -1798,7 +1889,49 @@ index 99689873..2b51772f 100644
      sub_806CC10();
      sub_804522C();
      sub_803F9CC();
-@@ -730,7 +754,11 @@ static void sub_803EDF0(void)
+@@ -544,6 +568,29 @@ static const WindowTemplates gUnknown_80F63D0 =
+     }
+ };
+ 
++#ifdef PLATFORM_3DS
++// Fit size: the message log 3 messages (5 rows) taller (dungeon_message_log.c);
++// its 26x23 tiles nearly all the windows' tiles can take (from tile 2, below
++// the text system's own at 0x279)
++static const WindowTemplates sPortMessageLogTall =
++{
++    .id = {
++        [0] = {
++            .type = WINDOW_TYPE_NORMAL,
++            .pos = { 2, 3 },
++            .width = 26,
++            .height = 19,
++            .totalHeight = 23,
++            .unk12 = 2,
++            .header = NULL,
++        },
++        [1] = WIN_TEMPLATE_DUMMY,
++        [2] = WIN_TEMPLATE_DUMMY,
++        [3] = WIN_TEMPLATE_DUMMY,
++    }
++};
++#endif
++
+ // kind==8 uses the `name` param.
+ void sub_803EAF0(u32 kind, u8 *name)
+ {
+@@ -624,7 +671,11 @@ void sub_803EAF0(u32 kind, u8 *name)
+             }
+ 
+             ResetUnusedInputStruct();
++#ifdef PLATFORM_3DS
++            ShowWindows(PORT_MESSAGE_LOG_TALL ? &sPortMessageLogTall : &gUnknown_80F63D0, FALSE, TRUE);
++#else
+             ShowWindows(&gUnknown_80F63D0, FALSE, TRUE);
++#endif
+             break;
+         }
+         case 10: {
+@@ -730,7 +781,11 @@ static void sub_803EDF0(void)
      y2 = (gDungeon->unk181e8.cameraPixelPos.y + 24);
      y = y1 - y2;
  
@@ -3508,7 +3641,7 @@ index 812df38d..68c59fea 100644
          // Set size to 1
          *oam++ = 0x4000;
 diff --git a/src/text_1.c b/src/text_1.c
-index e6612f2c..9c562d08 100644
+index e6612f2c..6c39b33a 100644
 --- a/src/text_1.c
 +++ b/src/text_1.c
 @@ -1,4 +1,10 @@
@@ -3522,7 +3655,21 @@ index e6612f2c..9c562d08 100644
  #include "globaldata.h"
  #include "structs/str_text.h"
  #include "bg_palette_buffer.h"
-@@ -37,7 +43,7 @@ EWRAM_INIT void (*ScrollUpWindowFunc)(s32 windowId) = ScrollUpWindow;
+@@ -21,7 +27,13 @@ EWRAM_DATA bool8 gUnknown_20274A5 = FALSE;
+ EWRAM_DATA u8 gUnknown_20274A6[6] = {0};
+ EWRAM_DATA s32 gCurrentCharmap = 0;
+ EWRAM_DATA static vu32 sUnknown_20274B0 = 0;
++#ifdef PLATFORM_3DS
++// room for the windows' tiles up to the text system's own (tile 0x279): the
++// taller message log of Fit size (dungeon_vram.c) takes 26x24 + 2
++EWRAM_DATA static u32 sWindowGFXPool[0x279 * 8] = {0};
++#else
+ EWRAM_DATA static u32 sWindowGFXPool[0xEC0] = {0};
++#endif
+ EWRAM_DATA static OpenedFile *sCharmapFiles[3] = { NULL };
+ EWRAM_DATA static WindowTemplates sSavedWindows = {0};
+ EWRAM_DATA s32 gUnknown_202B020 = 0; // NDS=020EDCEC
+@@ -37,7 +49,7 @@ EWRAM_INIT void (*ScrollUpWindowFunc)(s32 windowId) = ScrollUpWindow;
  EWRAM_INIT void (*gIwramTextFunc3)(s32 a0) = sub_82729A4;
  EWRAM_INIT void (*gIwramTextFunc4)(s32 a0) = sub_8272A78;
  
@@ -3531,7 +3678,7 @@ index e6612f2c..9c562d08 100644
  
  const u32 gUnknown_80B853C[16] =
  {
-@@ -148,7 +154,7 @@ void LoadCharmaps(void)
+@@ -148,7 +160,7 @@ void LoadCharmaps(void)
  
      gCharacterSpacing = 0;
  
@@ -3540,7 +3687,7 @@ index e6612f2c..9c562d08 100644
          gBgTilemaps[0][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x279);
          gBgTilemaps[1][i][0] = TILEMAP_PAL(15) | TILEMAP_TILE_NUM(0x27A);
  
-@@ -163,7 +169,7 @@ void LoadCharmaps(void)
+@@ -163,7 +175,7 @@ void LoadCharmaps(void)
      gWindowBgCopy = NULL;
      gUnknown_20274A5 = FALSE;
      gUnknown_202B020 = 1;
@@ -3549,7 +3696,7 @@ index e6612f2c..9c562d08 100644
      UpdateFadeInTile(0);
  }
  
-@@ -246,6 +252,22 @@ void ShowWindows(const WindowTemplates *winTemplates, bool8 a1, bool8 a2)
+@@ -246,6 +258,22 @@ void ShowWindows(const WindowTemplates *winTemplates, bool8 a1, bool8 a2)
      ShowWindowsInternal(winTemplates, a1, a2, &positionModifier);
  }
  
@@ -3572,7 +3719,7 @@ index e6612f2c..9c562d08 100644
  // red  https://decomp.me/scratch/EN6n0 (includes removed code from pmd-blue)
  // blue https://decomp.me/scratch/1y9BG
  // arm9.bin::020051B0
-@@ -258,6 +280,14 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+@@ -258,6 +286,14 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
          winTemplates = &sDummyWindows;
      if (a2)
          sub_8009388();
@@ -3587,7 +3734,7 @@ index e6612f2c..9c562d08 100644
  
      ResetWindowBgData();
  
-@@ -265,6 +295,11 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+@@ -265,6 +301,11 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
          sSavedWindows.id[i] = winTemplates->id[i];
  
          if (winTemplates->id[i].width != 0) {
@@ -3599,7 +3746,7 @@ index e6612f2c..9c562d08 100644
              AddWindow(gWindows, (u32 *)VRAM, sWindowGFXPool, gBgTilemaps, sUnknown_80B8804[i], &winTemplates->id[i], a1, startTileNum, positionModifier, FALSE);
              DrawWindowBg(&winTemplates->id[i], positionModifier);
  
-@@ -320,6 +355,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
+@@ -320,6 +361,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
      newWindow = &windows[windowId];
      x = winTemplate->pos.x + positionModifier->x;
      y =  winTemplate->pos.y + positionModifier->y;
