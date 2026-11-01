@@ -29,6 +29,7 @@
 #include "dungeon_util.h"
 #include "dungeon_vram.h"
 #include "items.h"
+#include "weather.h"
 #include "pokemon.h"
 #include "strings.h"
 #include "text_1.h"
@@ -590,6 +591,9 @@ static const u8 sNone[] = "None";
 static const u8 sLeader[] = "Leader";
 static const u8 sSlash[] = "/";
 static const u8 sHp[] = "HP: ";
+static const u8 sLv[] = "Lv. ";
+static const u8 sWeather[] = "Weather: ";
+static const u8 sMoney[] = "Money: ";
 static const u8 sBelly[] = "Belly: ";
 
 // Draws a number right-aligned at xRight with every digit in a cell as wide
@@ -1089,7 +1093,7 @@ bool8 Port_MinimapLeaderDot(DungeonPos *pos);
 #define SUBMAP_FIRST_ROW 2 // the rows the game's map shows (DrawMinimapTile)
 #define SUBMAP_ROWS (DUNGEON_MAX_SIZE_Y - 1 - SUBMAP_FIRST_ROW)
 #define SUBMAP_X ((W - DUNGEON_MAX_SIZE_X * 4) / 2)
-#define SUBMAP_Y (FIT ? 30 : 6) // (Fit: about the middle of the space above the window)
+#define SUBMAP_Y (FIT ? 16 : 6) // (Fit: the middle of the space above the window)
 #define MAP_GFX_PLAYER 8
 
 static int sDotFrames;
@@ -1173,8 +1177,8 @@ static void Restore(const u16 *from, int x, int y, int w, int h)
 
 #define TEAM_WIN_X 16
 #define TEAM_WIN_W (FIT ? 34 : 26) // inside, in tiles
-#define TEAM_WIN_H 6
-#define TEAM_WIN_Y (H - (TEAM_WIN_H + 2) * 8)
+#define TEAM_WIN_H (FIT ? 8 : 6) // (Fit: a fifth line, the weather and money)
+#define TEAM_WIN_Y (H - (TEAM_WIN_H + 2) * 8 - (FIT ? 8 : 0)) // (Fit: 8 lines above the bottom)
 
 // M+T, in layers: the grid and the empty window (sMtBase) change only with
 // the window settings; the map, the team's lines and the leader's blinking
@@ -1254,27 +1258,73 @@ static bool8 DrawMapAndTeam(void)
         }
     }
 
-    // The team's lines
+    // The team's lines (Fit: and the weather and money)
     k.size = 0;
     AddRowsText(&k);
+    u8 weather = 0;
+    s32 money = 0;
+    if (FIT) {
+        weather = GetApparentWeather(NULL);
+        money = gTeamInventoryRef->teamMoney;
+        KeyAdd(&k, &weather, sizeof(weather));
+        KeyAdd(&k, &money, sizeof(money));
+    }
     if (KeyChanged(&sLastText, &k)) {
-        // Positions as on the DS: names at 28, "Level" at 96, and HP as
-        // "hp/max" in three-digit cells ending at 197 (spread out over the
-        // wider window in Fit).
+        int cell = GlyphWidth('0');
         Restore(sMtBase, TEAM_WIN_X + 8, TEAM_WIN_Y + 8, TEAM_WIN_W * 8, TEAM_WIN_H * 8);
-        y = TEAM_WIN_Y + 8;
+        y = TEAM_WIN_Y + 8 + (FIT ? 2 : 0);
         for (int i = 0; i < MAX_TEAM_MEMBERS; i++, y += 12) {
             const PanelRow *row = &sRows[i];
-            int maxRight = TEAM_WIN_X + (FIT ? 237 : 181), slashX = maxRight - 3 * GlyphWidth('0') - TextWidth(sSlash);
             if (!row->used)
                 continue;
             DrawText(TEAM_WIN_X + 12, y, row->name, COLOR_NAME);
-            x = DrawText(TEAM_WIN_X + (FIT ? 104 : 80), y, sLevel, COLOR_TEXT);
-            FormatInt(buf, row->level);
-            DrawText(x, y, buf, COLOR_TEXT);
-            DrawNumberRight(slashX, y, row->hp);
-            DrawText(slashX, y, sSlash, COLOR_TEXT);
-            DrawNumberRight(maxRight, y, row->maxHp);
+            if (FIT) {
+                // "Lv. 100", "hp/max", and the HP bar (one pixel per max HP)
+                // up to as far from the window's right edge as the name is
+                // from its left
+                int hpRight = TEAM_WIN_X + 128 + 3 * cell;
+                int maxRight = hpRight + TextWidth(sSlash) + 3 * cell;
+                int barX = maxRight + 3, barMax = TEAM_WIN_X + (TEAM_WIN_W + 2) * 8 - 12 - barX;
+                x = DrawText(TEAM_WIN_X + 80, y, sLv, COLOR_TEXT);
+                FormatInt(buf, row->level);
+                DrawText(x, y, buf, COLOR_TEXT);
+                DrawNumberRight(hpRight, y, row->hp);
+                DrawText(hpRight, y, sSlash, COLOR_TEXT);
+                DrawNumberRight(maxRight, y, row->maxHp);
+                DrawHpBar(barX, y + 3, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
+            } else {
+                // Positions as on the DS: names at 28, "Level" at 96, and HP
+                // as "hp/max" in three-digit cells ending at 197.
+                int maxRight = TEAM_WIN_X + 181, slashX = maxRight - 3 * cell - TextWidth(sSlash);
+                x = DrawText(TEAM_WIN_X + 80, y, sLevel, COLOR_TEXT);
+                FormatInt(buf, row->level);
+                DrawText(x, y, buf, COLOR_TEXT);
+                DrawNumberRight(slashX, y, row->hp);
+                DrawText(slashX, y, sSlash, COLOR_TEXT);
+                DrawNumberRight(maxRight, y, row->maxHp);
+            }
+        }
+        if (FIT) {
+            // "Weather: Clear    Money: 210 (poké)", centred on the last line
+            u8 weatherText[64], moneyText[32], name[32];
+            int n = 0, wW, wM, gap = 32, x0;
+            GetWeatherName(name, weather);
+            for (const u8 *s = sWeather; *s; s++) weatherText[n++] = *s;
+            for (int i = 0; name[i] && n < 62; i++) weatherText[n++] = name[i];
+            weatherText[n] = 0;
+            FormatInt(buf, money);
+            n = 0;
+            for (const u8 *s = sMoney; *s; s++) moneyText[n++] = *s;
+            for (int i = 0; buf[i]; i++) moneyText[n++] = buf[i];
+            moneyText[n++] = ' ';
+            moneyText[n++] = 0x83; moneyText[n++] = 0xBF; moneyText[n++] = 0x83; moneyText[n++] = 0xC4; // {POKE}
+            moneyText[n] = 0;
+            wW = TextWidth(weatherText);
+            wM = TextWidth(moneyText);
+            y = TEAM_WIN_Y + 8 + 2 + 4 * 12;
+            x0 = TEAM_WIN_X + 8 + (TEAM_WIN_W * 8 - (wW + gap + wM)) / 2;
+            DrawText(x0, y, weatherText, COLOR_TEXT);
+            DrawText(x0 + wW + gap, y, moneyText, COLOR_TEXT);
         }
         Dirty(TEAM_WIN_X + 8, TEAM_WIN_Y + 8, TEAM_WIN_W * 8, TEAM_WIN_H * 8);
     }
