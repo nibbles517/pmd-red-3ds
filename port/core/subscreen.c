@@ -560,7 +560,9 @@ static void DrawRowText(int y0, const PanelRow *row)
     u8 buf[16];
     int x, barMax = FIT ? 140 : 80; // (Fit: as far as the wider panel allows)
 
-    y0 += ROW_EXTRA / 2; // the text in the middle of a taller row (Fit)
+    // Fit: four lines (name, level, item, tactics) in the middle of the
+    // taller row; else three, the tactics beside the item
+    y0 += FIT ? 1 : 0;
 
     DrawText(56, y0 + 5, row->name, COLOR_NAME);
 
@@ -579,10 +581,13 @@ static void DrawRowText(int y0, const PanelRow *row)
     x = DrawText(60, y0 + 29, sItem, COLOR_TEXT);
     DrawText(x, y0 + 29, row->item != NULL ? row->item : sNone, COLOR_TEXT);
 
-    if (row->leader)
-        DrawText(148, y0 + 29, sLeader, COLOR_TEXT);
-    else if (row->tactic != NULL)
-        DrawText(148, y0 + 29, row->tactic, COLOR_TEXT);
+    {
+        int tx = FIT ? 60 : 148, ty = y0 + (FIT ? 41 : 29);
+        if (row->leader)
+            DrawText(tx, ty, sLeader, COLOR_TEXT);
+        else if (row->tactic != NULL)
+            DrawText(tx, ty, row->tactic, COLOR_TEXT);
+    }
 }
 
 static bool8 sInDungeon;
