@@ -2132,7 +2132,7 @@ index 1179e657..13c8e87f 100644
  // arm9.bin::0200A178
  void InitGraphics(void)
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..654d33db 100644
+index 069cfc94..fd9ccc6c 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -2143,7 +2143,7 @@ index 069cfc94..654d33db 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,151 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,158 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -2155,6 +2155,10 @@ index 069cfc94..654d33db 100644
 +static u16 sPortWideMaps[2][64 * 64]; // BG2, BG3
 +
 +bool8 gPortGroundNarrow; // set by ground_map.c for screens made as maps
++// The weather's layers (ground_weather.c: drawn over the map, following its
++// camera; Deep-Sea Floor's water) past their edges are as the GBA draws them
++// there: repeated across, nothing below or above (not black).
++extern GroundBg *gUnknown_3001B78; // ground_weather.c
 +
 +static void Port_RenderWideLayers(MapRender *mapRender)
 +{
@@ -2164,8 +2168,11 @@ index 069cfc94..654d33db 100644
 +    s32 mapW = mapRender->mapSizePixels.x / 8, mapH = mapRender->mapSizePixels.y / 8;
 +    s32 tx0 = (mapRender->cameraPos.x - WIDE_OX) >> 3, ty0 = mapRender->cameraPos.y >> 3;
 +
++    bool8 overlay;
++
 +    if (gPortGroundNarrow || !PORT_WIDE_SIZE)
 +        return;
++    overlay = gUnknown_3001B78 != NULL && (u8 *)mapRender >= (u8 *)gUnknown_3001B78 && (u8 *)mapRender < (u8 *)(gUnknown_3001B78 + 1);
 +    for (j = 0; j < mapRender->numBgs; j++) {
 +        u16 *tilemap = mapRender->bgTilemaps[j];
 +        const u16 *chunks = mapRender->chunkMappings[j];
@@ -2189,7 +2196,7 @@ index 069cfc94..654d33db 100644
 +            s16 colChunk[SCREEN_W_MAX / 8 + 1], colIn[SCREEN_W_MAX / 8 + 1];
 +            for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++) {
 +                s32 mx = tx, i = tx - tx0;
-+                if (mapRender->wrapAround)
++                if (mapRender->wrapAround || overlay)
 +                    mx = ((mx % mapW) + mapW) % mapW;
 +                if (mx < 0 || mx >= mapW) {
 +                    colChunk[i] = -1;
@@ -2208,7 +2215,7 @@ index 069cfc94..654d33db 100644
 +                    my = ((my % mapH) + mapH) % mapH;
 +                if (my < 0 || my >= mapH) {
 +                    for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++)
-+                        out[tx & 63] = PORT_WIDE_BLACK;
++                        out[tx & 63] = overlay ? 0 : PORT_WIDE_BLACK;
 +                    continue;
 +                }
 +                chunkRow = &chunks[(my / cd) * 64];
