@@ -37,7 +37,7 @@ struct PortConfig
     // Graphics Options
     u8 frameSkip;           // PORT_FRAMESKIP_* (version 2)
     u8 dualCore;            // 0 Off, 1 On (version 3; until then: On on an Old 3DS, Off on a New 3DS)
-    // Control Options (version 4; placeholders for now)
+    // Controls Options (version 4)
     u8 buttonStyle;         // PORT_BUTTONS_*
     u8 touchScreenOff;      // Touch Screen: 0 On, 1 Off
 };
@@ -45,6 +45,9 @@ struct PortConfig
 extern struct PortConfig gPortConfig;
 enum { PORT_FRAMESKIP_OFF, PORT_FRAMESKIP_AUTO, PORT_FRAMESKIP_ALWAYS };
 enum { PORT_BUTTONS_GBA, PORT_BUTTONS_DS, PORT_BUTTONS_3DS };
+// Controls Options > Button Style: DS or 3DS (Rotate Mode on Y, held)
+#define PORT_DS_BUTTONS (gPortConfig.buttonStyle == PORT_BUTTONS_DS || gPortConfig.buttonStyle == PORT_BUTTONS_3DS)
+bool8 Port_YHeld(void); // port/core/frame.c
 enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_FIT, PORT_SIZE_3DS }; // 3DS: not yet (as GBA)
 enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_LAYOUT_MT };
 // Main Screen Settings > Size is DS or Fit: the 256x192 or 320x240 picture

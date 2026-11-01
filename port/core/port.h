@@ -24,6 +24,7 @@ enum {
     KEY_BIT_A = 1 << 0, KEY_BIT_B = 1 << 1, KEY_BIT_SELECT = 1 << 2, KEY_BIT_START = 1 << 3,
     KEY_BIT_RIGHT = 1 << 4, KEY_BIT_LEFT = 1 << 5, KEY_BIT_UP = 1 << 6, KEY_BIT_DOWN = 1 << 7,
     KEY_BIT_R = 1 << 8, KEY_BIT_L = 1 << 9,
+    KEY_BIT_Y = 1 << 10, // not a GBA key: the game asks with Port_YHeld()
 };
 
 // Called before each visible scanline is rendered, if set (test tooling).

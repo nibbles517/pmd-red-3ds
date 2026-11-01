@@ -105,9 +105,18 @@ void Port_Init(void)
 uint64_t Port_FrameCount(void) { return sFrames; }
 const uint16_t *Port_Framebuffer(void);
 
+static uint16_t sKeysHeld;
+
 static void UpdateKeys(void)
 {
-    W16(REG_KEYINPUT, (uint16_t)(~Backend_PollKeys() & 0x3FF));
+    sKeysHeld = Backend_PollKeys();
+    W16(REG_KEYINPUT, (uint16_t)(~sKeysHeld & 0x3FF));
+}
+
+// Y (DS and 3DS controls: held for Rotate Mode), as of the last frame
+uint8_t Port_YHeld(void)
+{
+    return (sKeysHeld & KEY_BIT_Y) != 0;
 }
 
 // --- Dual Core ------------------------------------------------------------

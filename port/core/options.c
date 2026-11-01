@@ -26,7 +26,7 @@ void Port_LoadConfig(void)
         c.version = 3;
         c.dualCore = gPortConfig.dualCore;
     }
-    if (c.version == 3) { // before Control Options (GBA buttons, touch screen on)
+    if (c.version == 3) { // before Controls Options (GBA buttons, touch screen on)
         c.version = 4;
         c.buttonStyle = PORT_BUTTONS_GBA;
         c.touchScreenOff = 0;

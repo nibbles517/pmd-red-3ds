@@ -608,6 +608,7 @@ uint16_t Backend_PollKeys(void)
     if (h & KEY_DOWN) k |= KEY_BIT_DOWN;
     if (h & KEY_R) k |= KEY_BIT_R;
     if (h & KEY_L) k |= KEY_BIT_L;
+    if (h & KEY_Y) k |= KEY_BIT_Y;
     return k;
 }
 
@@ -736,11 +737,6 @@ static void Shutdown(void)
 
 void Backend_EndFrame(void)
 {
-    hidScanInput();
-    if (hidKeysDown() & KEY_Y) {
-        sScaled = !sScaled;
-        ClearGameScreen();
-    }
     if (sFadeDir == 0 && Port_WantsBottomScreen() != sBottom)
         sFadeDir = -1;
     if (sFadeDir < 0) {

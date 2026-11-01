@@ -235,7 +235,7 @@ index deddec5b..db4551d5 100644
  #endif // GUARD_GBA_SYSCALL_H
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..ebfa12f0
+index 00000000..082531f8
 --- /dev/null
 +++ b/include/port_screen_menu.h
 @@ -0,0 +1,13 @@
@@ -246,7 +246,7 @@ index 00000000..ebfa12f0
 +#include "game_options.h"
 +
 +void PortScreenMenu_Create(GameOptions *options);
-+void PortControlMenu_Create(GameOptions *options); // Others > Control Options
++void PortControlMenu_Create(GameOptions *options); // Others > Controls Options
 +u32 PortScreenMenu_Update(void);
 +void PortScreenMenu_Destroy(void);
 +bool8 PortScreenMenu_Changed(void);
@@ -467,6 +467,59 @@ index 148a1118..359ba656 100644
          s32 tileNum;
  
          SpriteSetMatrixNum(&gUnknown_202EDC0, 0);
+diff --git a/src/dungeon_main.c b/src/dungeon_main.c
+index bec907ec..3fb38b23 100644
+--- a/src/dungeon_main.c
++++ b/src/dungeon_main.c
+@@ -66,6 +66,10 @@
+ 
+ static EWRAM_DATA bool8 sInDiagonalMode = 0;
+ static EWRAM_DATA bool8 sInRotateMode = 0;
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++static bool8 sRotateByY; // Rotate Mode came from holding Y (DS/3DS controls)
++#endif
+ // Frames counter for arrows in diagonal/rotate mode.
+ static EWRAM_DATA s16 sArrowsFrames = 0;
+ // If both of these are set to TRUE, there are 3 arrows visible instead of 1 in rotate mode
+@@ -319,11 +323,37 @@ void DungeonHandlePlayerInput(void)
+             }
+ 
+             highlightTiles = FALSE;
++#ifdef PLATFORM_3DS
++            // Controls Options > Button Style: DS and 3DS, as the DS version:
++            // Rotate Mode while Y is held (START does nothing)
++            if (gGameOptionsRef->controls == CONTROLS_GBA) {
++                if (gRealInputs.shortPress & R_BUTTON || rPress || (!PORT_DS_BUTTONS && (gRealInputs.pressed & START_BUTTON))) {
++                    highlightTiles = TRUE;
++                }
++            }
++            if (PORT_DS_BUTTONS) {
++                if (Port_YHeld() && !sInRotateMode) {
++                    highlightTiles = TRUE;
++                    sRotateByY = TRUE;
++                }
++                else if (sRotateByY && !Port_YHeld()) {
++                    sRotateByY = FALSE;
++                    if (sInRotateMode) { // released: as B leaves it
++                        if (unkPtr->unk1821A != 0)
++                            sub_804AA60();
++                        sInRotateMode = FALSE;
++                        ResetRepeatTimers();
++                        ResetUnusedInputStruct();
++                    }
++                }
++            }
++#else
+             if (gGameOptionsRef->controls == CONTROLS_GBA) {
+                 if (gRealInputs.shortPress & R_BUTTON || rPress || gRealInputs.pressed & START_BUTTON) {
+                     highlightTiles = TRUE;
+                 }
+             }
++#endif
+             if (highlightTiles) {
+                 sub_805E738(leader);
+                 sInRotateMode = TRUE;
 diff --git a/src/dungeon_map.c b/src/dungeon_map.c
 index 7e6792c7..b2875aa9 100644
 --- a/src/dungeon_map.c
@@ -960,7 +1013,7 @@ index 4a9a72ad..ebc461ad 100644
      gDungeon->unk181e8.unk1821A = 0;
  }
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..d51add1a 100644
+index 0680f301..3d640b15 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,11 @@
@@ -975,7 +1028,7 @@ index 0680f301..d51add1a 100644
  
  static void PrintOthersMenuOptions(void);
  static void ShowGameOptionsMenu(void);
-@@ -146,10 +151,355 @@ void ShowDungeonOthersMenu(void)
+@@ -146,10 +151,358 @@ void ShowDungeonOthersMenu(void)
  
  enum {
      GAME_OPTION_DUNGEON,
@@ -983,9 +1036,11 @@ index 0680f301..d51add1a 100644
 +#ifdef PLATFORM_3DS
 +    GAME_OPTION_LAYOUT,   // 3DS port: Layout Options
 +    GAME_OPTION_GRAPHICS, // 3DS port: Graphics Options (as outside dungeons)
-+    GAME_OPTION_CONTROLS, // 3DS port: Control Options (as outside dungeons)
 +#endif
 +    GAME_OPTION_OTHERS,   // (3DS port: Windows Options)
++#ifdef PLATFORM_3DS
++    GAME_OPTION_CONTROLS, // 3DS port: Controls Options (as outside dungeons)
++#endif
      GAME_OPTION_DEFAULT,
 +    GAME_OPTIONS_COUNT
  };
@@ -1043,7 +1098,8 @@ index 0680f301..d51add1a 100644
 +static const u8 sTextNone[] = _("None");
 +static const u8 sTextFull[] = _("Full");
 +static const u8 sTextStretch[] = _("Stretch");
-+static const u8 sTextControlOptions[] = _("Control Options");
++static const u8 sTextControlOptions[] = _("Controls Options");
++static const u8 sTextHintControlsY[] = _("{L_BUTTON}+{A_BUTTON}: Use set move\n{L_BUTTON}+{B_BUTTON}: Display message log\n{L_BUTTON}+{R_BUTTON}: Throw set item\n{R_BUTTON}+{DPAD}: Move diagonally\n{SELECT_BUTTON}: Floor map\nHold Y: Rotate mode\nSelect item/move + {START_BUTTON}: Description");
 +static const u8 sTextButtonStyle[] = _("Button Style");
 +static const u8 sTextTouchScreen[] = _("Touch Screen");
 +
@@ -1079,8 +1135,8 @@ index 0680f301..d51add1a 100644
 +        { sTextSize, 3, 64, 40, { sTextDS, sTextFit, sText3DS }, (1 << 2), NO_LINK },
 +        { sTextScale, 3, 64, 40, { sTextNone, sTextFull, sTextStretch }, 7, NO_LINK },
 +    },
-+    [PAGE_CONTROLS] = { // (placeholders for now)
-+        { sTextButtonStyle, 3, 96, 32, { sTextGBA, sTextDS, sText3DS }, 7, NO_LINK },
++    [PAGE_CONTROLS] = { // (Touch Screen: a placeholder for now)
++        { sTextButtonStyle, 3, 96, 32, { sTextGBA, sTextDS, sText3DS }, 0, NO_LINK },
 +        { sTextTouchScreen, 2, 96, 32, { sTextOn, sTextOff }, 3, NO_LINK },
 +    },
 +};
@@ -1332,7 +1388,7 @@ index 0680f301..d51add1a 100644
  static void ShowGameOptionsMenu(void)
  {
      while (TRUE) {
-@@ -185,6 +535,30 @@ static void ShowGameOptionsMenu(void)
+@@ -185,6 +538,30 @@ static void ShowGameOptionsMenu(void)
              break;
  
          sChangedGameOptions = *gGameOptionsRef;
@@ -1363,7 +1419,7 @@ index 0680f301..d51add1a 100644
          if (gDungeonMenu.menuIndex == GAME_OPTION_DUNGEON) {
              bPress = ShowDungeonOptions();
              TrySetNewGameOptions(bPress);
-@@ -193,6 +567,7 @@ static void ShowGameOptionsMenu(void)
+@@ -193,6 +570,7 @@ static void ShowGameOptionsMenu(void)
              bPress = ShowOthersOptions();
              TrySetNewGameOptions(bPress);
          }
@@ -1371,7 +1427,7 @@ index 0680f301..d51add1a 100644
          else if (gDungeonMenu.menuIndex == GAME_OPTION_DEFAULT) {
              AskToResetToDefault();
          }
-@@ -211,7 +586,11 @@ enum {
+@@ -211,7 +589,11 @@ enum {
      OPTION_COUNT
  };
  
@@ -1383,7 +1439,7 @@ index 0680f301..d51add1a 100644
  #define OTHERS_OPTIONS_COUNT (OPTION_COUNT - DUNGEON_OPTIONS_COUNT)
  
  static bool8 ShowDungeonOptions(void)
-@@ -240,12 +619,18 @@ static bool8 ShowDungeonOptions(void)
+@@ -240,12 +622,18 @@ static bool8 ShowDungeonOptions(void)
              if (gRealInputs.repeated & DPAD_LEFT) {
                  PlayDungeonCursorSE(FALSE);
                  ChangeGameOptionLeft(gDungeonMenu.menuIndex);
@@ -1402,7 +1458,7 @@ index 0680f301..d51add1a 100644
                  dpadMoved = TRUE;
                  break;
              }
-@@ -361,6 +746,12 @@ static void AskToResetToDefault(void)
+@@ -361,6 +749,12 @@ static void AskToResetToDefault(void)
  {
      if (DisplayDungeonYesNoMessage_Async(0, gUnknown_80FEC28, FALSE) == 1) {
          InitializeGameOptions(FALSE);
@@ -1415,7 +1471,7 @@ index 0680f301..d51add1a 100644
          sub_803E13C();
      }
  }
-@@ -562,7 +953,7 @@ static void PrintQuickSaveMenuOptions(void)
+@@ -562,7 +956,7 @@ static void PrintQuickSaveMenuOptions(void)
  static void PrintGameOptions(void)
  {
      s32 optionsCount;
@@ -1424,7 +1480,7 @@ index 0680f301..d51add1a 100644
      WindowHeader header;
      WindowTemplates windows = {
          .id = {
-@@ -585,7 +976,7 @@ static void PrintGameOptions(void)
+@@ -585,7 +979,7 @@ static void PrintGameOptions(void)
      header.currId = 0;
      header.f3 = 0;
      gDungeonMenu.menuIndex = 0;
@@ -1433,7 +1489,7 @@ index 0680f301..d51add1a 100644
      gDungeonMenu.currPageEntries = optionsCount;
      gDungeonMenu.entriesPerPage = optionsCount;
      gDungeonMenu.currPage = 0;
-@@ -604,14 +995,18 @@ static void PrintGameOptions(void)
+@@ -604,14 +998,18 @@ static void PrintGameOptions(void)
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
  
@@ -1458,7 +1514,7 @@ index 0680f301..d51add1a 100644
      sub_80073E0(0);
  }
  
-@@ -654,7 +1049,11 @@ static void PrintDungeonOptions(void)
+@@ -654,7 +1052,11 @@ static void PrintDungeonOptions(void)
      ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
      windows.id[0].width = 24;
      windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(DUNGEON_OPTIONS_COUNT, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
@@ -1470,7 +1526,7 @@ index 0680f301..d51add1a 100644
      windows.id[0].pos.x = 2;
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
-@@ -663,14 +1062,18 @@ static void PrintDungeonOptions(void)
+@@ -663,14 +1065,18 @@ static void PrintDungeonOptions(void)
      y[1] = GetMenuEntryYCoord(&gDungeonMenu, 1);
      y[2] = GetMenuEntryYCoord(&gDungeonMenu, 2);
      y[3] = GetMenuEntryYCoord(&gDungeonMenu, 3);
@@ -1489,7 +1545,7 @@ index 0680f301..d51add1a 100644
  
      if (sChangedGameOptions.dungeonSpeed != DUNGEON_SPEED_SLOW) {
          AddDoubleUnderScoreHighlight(0, 136, y[0] + 10, 21, 7);
-@@ -700,7 +1103,11 @@ static void PrintDungeonOptions(void)
+@@ -700,7 +1106,11 @@ static void PrintDungeonOptions(void)
          AddDoubleUnderScoreHighlight(0, 80, y[3] + 10, 16, 7);
      }
  
@@ -1501,6 +1557,20 @@ index 0680f301..d51add1a 100644
  
      sub_80073E0(0);
  }
+@@ -975,6 +1385,13 @@ static void ShowChosenHintWindow(s32 hintId)
+         gDungeonMenu.leftRightArrowsPos.y = ((gWindows[0].y + 1) * 8) - 2;
+         sub_80073B8(0);
+         PrintFormattedStringOnWindow(16 + hintId * 8, 0, gHintsNames[hintId], 0, '\0');
++#ifdef PLATFORM_3DS
++        // Controls Options > Button Style: DS or 3DS: Rotate Mode is on Y,
++        // held (no Y button symbol in the font: the letter)
++        if (hintId == HINTS_CONTROLS && !dsControls && PORT_DS_BUTTONS)
++            PrintFormattedStringOnWindow(8, 16, sTextHintControlsY, 0, '\0');
++        else
++#endif
+         PrintFormattedStringOnWindow(8, 16, gHintsDescriptions[dsControls][hintId], 0, '\0');
+         sub_80073E0(0);
+ 
 diff --git a/src/dungeon_message_log.c b/src/dungeon_message_log.c
 index 18b83d51..acdbcdd2 100644
 --- a/src/dungeon_message_log.c
@@ -2808,7 +2878,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..4eab17e9 100644
+index 86f582c2..56f1cad1 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -2835,7 +2905,7 @@ index 86f582c2..4eab17e9 100644
 -    MENU_OPTION_NO
 +    MENU_OPTION_NO,
 +    MENU_OPTION_SCREEN, // 3DS port: Graphics Options
-+    MENU_OPTION_CONTROLS, // 3DS port: Control Options
++    MENU_OPTION_CONTROLS, // 3DS port: Controls Options
  };
  
  enum OptionsMenuStates
@@ -2858,7 +2928,7 @@ index 86f582c2..4eab17e9 100644
 +static void LeaveSettings(bool8 portConfigChanged);
 +static void HandleChangesSaved(void);
 +ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Graphics Options");
-+ALIGNED(4) static const u8 sControlOptions[] = _("Control Options");
++ALIGNED(4) static const u8 sControlOptions[] = _("Controls Options");
 +ALIGNED(4) static const u8 sChangesSaved[] = _("Changes saved.");
 +// 3DS port: settings take effect as soon as a toggle changes; leaving the
 +// Windows Options or Graphics Options window then writes them and says
@@ -2948,7 +3018,7 @@ index 86f582c2..4eab17e9 100644
      }
  }
  
-@@ -180,6 +243,15 @@ static void CreateOthersMenu(void)
+@@ -180,8 +243,20 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -2957,14 +3027,19 @@ index 86f582c2..4eab17e9 100644
 +    sUnknown_203B25C->menuItems[loopMax].text = sScreenLayoutOptions;
 +    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SCREEN;
 +    loopMax++;
-+    sUnknown_203B25C->menuItems[loopMax].text = sControlOptions;
-+    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_CONTROLS;
-+    loopMax++;
 +#endif
      sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
      sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
++#ifdef PLATFORM_3DS
++    // 3DS port: Controls Options, after Windows Options
++    loopMax++;
++    sUnknown_203B25C->menuItems[loopMax].text = sControlOptions;
++    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_CONTROLS;
++#endif
  
-@@ -229,6 +301,14 @@ static void HandleOthersMenu(void)
+     loopMax++;
+     sUnknown_203B25C->menuItems[loopMax].text = sHints;
+@@ -229,6 +304,14 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -2979,7 +3054,7 @@ index 86f582c2..4eab17e9 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +352,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +355,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -2996,7 +3071,7 @@ index 86f582c2..4eab17e9 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +372,57 @@ static void sub_801E0FC(void)
+@@ -282,12 +375,57 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3166,7 +3241,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..54e8f257
+index 00000000..01171f2e
 --- /dev/null
 +++ b/src/port_screen_menu.c
 @@ -0,0 +1,346 @@
@@ -3257,7 +3332,7 @@ index 00000000..54e8f257
 +ALIGNED(4) static const u8 sScaleNone[] = _("None");
 +ALIGNED(4) static const u8 sScaleFull[] = _("Full");
 +ALIGNED(4) static const u8 sScaleStretch[] = _("Stretch");
-+ALIGNED(4) static const u8 sTitleControls[] = _("Control Options");
++ALIGNED(4) static const u8 sTitleControls[] = _("Controls Options");
 +ALIGNED(4) static const u8 sButtonStyle[] = _("Button Style");
 +ALIGNED(4) static const u8 sTouchScreen[] = _("Touch Screen");
 +static const struct {
@@ -3272,7 +3347,7 @@ index 00000000..54e8f257
 +    [SETTING_BUTTONS] = { sButtonStyle, 3, { sSizeGBA, sSizeDS, sSize3DS } },
 +    [SETTING_TOUCH] = { sTouchScreen, 2, { sOn, sOff } },
 +};
-+// (Control Options: further right, past the longer names)
++// (Controls Options: further right, past the longer names)
 +#define CHOICE_X(i) (sMenu.page == PAGE_CONTROLS ? 96 + (i) * 32 : 64 + (i) * 40)
 +#define FRAMESKIP_X(i) (80 + (i) * 40) // as Main Screen's choices
 +
@@ -3319,7 +3394,7 @@ index 00000000..54e8f257
 +// red: Scale; the 3DS size.
 +static bool8 IsPlaceholder(s32 setting, s32 choice)
 +{
-+    if (setting == SETTING_SCALE || setting == SETTING_BUTTONS || setting == SETTING_TOUCH)
++    if (setting == SETTING_SCALE || setting == SETTING_TOUCH)
 +        return TRUE;
 +    if (setting == SETTING_SIZE)
 +        return choice == PORT_SIZE_3DS;
@@ -3418,7 +3493,7 @@ index 00000000..54e8f257
 +    ShowPage(0);
 +}
 +
-+// Others > Control Options: the same window, with only its page
++// Others > Controls Options: the same window, with only its page
 +void PortControlMenu_Create(GameOptions *options)
 +{
 +    sMenu.options = options;
