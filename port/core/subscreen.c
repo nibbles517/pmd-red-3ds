@@ -36,6 +36,7 @@
 #include "text_3.h"
 #include "structs/axdata.h"
 #include "structs/str_dungeon.h"
+#include "number_util.h"
 #include "../core/port.h"
 #include "port_game.h"
 
@@ -359,6 +360,7 @@ typedef struct {
     u8 name[POKEMON_NAME_LENGTH + 1];
     u8 level;
     s16 hp, maxHp;
+    s16 belly, maxBelly;
     const u8 *item;     // NULL: none
     const u8 *tactic;
     const axmain *sprite;
@@ -496,6 +498,8 @@ static void ReadMember(PanelRow *row, Entity *entity)
     row->level = info->level;
     row->hp = info->HP;
     row->maxHp = info->maxHPStat;
+    row->belly = FixedPointToInt(info->belly);
+    row->maxBelly = FixedPointToInt(info->maxBelly);
     row->item = ItemExists(&info->heldItem) ? gItemParametersData[info->heldItem.id].name : NULL;
     row->tactic = info->tactic < NUM_TACTICS ? gTacticsNames[info->tactic] : NULL;
     row->symbolCount = Port_GetStatusSymbols(info->dungeonSpriteId, row->symbols);
@@ -540,6 +544,7 @@ static const u8 sNone[] = "None";
 static const u8 sLeader[] = "Leader";
 static const u8 sSlash[] = "/";
 static const u8 sHp[] = "HP: ";
+static const u8 sBelly[] = "Belly: ";
 
 // Draws a number right-aligned at xRight with every digit in a cell as wide
 // as '0', so that the columns line up.
@@ -571,23 +576,35 @@ static void DrawRowText(int y0, const PanelRow *row)
     FormatInt(buf, row->level);
     DrawText(x, y0 + 17, buf, COLOR_TEXT);
 
-    // HP: "hp/ max", each number right-aligned in three digit cells (Fit:
-    // after "HP: ")
-    {
-        int cell = GlyphWidth('0');
-        int hpRight = 136, barX = 163;
-        if (FIT) {
-            x = DrawText(136 - 3 * cell, y0 + 17, sHp, COLOR_TEXT);
-            hpRight = x + 3 * cell;
-            barX = hpRight + TextWidth(sSlash) + 3 * cell + 3;
-            barMax = W - 17 - barX; // ending 17 pixels from the screen's edge
-        }
-        DrawNumberRight(hpRight, y0 + 17, row->hp);
+    // HP: "hp/ max", each number right-aligned in three digit cells, then
+    // the bar, one pixel per max HP as on the DS (which stops at 60; here
+    // at 80).
+    // Fit: "HP: hp/max" on the name's line and "Belly: belly/max" on the
+    // level's, numbers and bars lined up, the bars ending 17 pixels from
+    // the screen's edge.
+    if (FIT) {
+        int cell = GlyphWidth('0'), labelX = 136 - 3 * cell;
+        int labelW = TextWidth(sBelly) > TextWidth(sHp) ? TextWidth(sBelly) : TextWidth(sHp);
+        int hpRight = labelX + labelW + 3 * cell, maxRight = hpRight + TextWidth(sSlash) + 3 * cell;
+        int barX = maxRight + 3;
+        barMax = W - 17 - barX;
+        DrawText(labelX, y0 + 5, sHp, COLOR_TEXT);
+        DrawNumberRight(hpRight, y0 + 5, row->hp);
+        DrawText(hpRight, y0 + 5, sSlash, COLOR_TEXT);
+        DrawNumberRight(maxRight, y0 + 5, row->maxHp);
+        DrawHpBar(barX, y0 + 8, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
+        DrawText(labelX, y0 + 17, sBelly, COLOR_TEXT);
+        DrawNumberRight(hpRight, y0 + 17, row->belly);
         DrawText(hpRight, y0 + 17, sSlash, COLOR_TEXT);
-        DrawNumberRight(FIT ? hpRight + TextWidth(sSlash) + 3 * cell : 160, y0 + 17, row->maxHp);
-        // As on the DS, the bar is one pixel per max HP (the DS stops at 60;
-        // here it goes up to 80, in Fit to 17 pixels from the edge).
-        DrawHpBar(barX, y0 + 20, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
+        DrawNumberRight(maxRight, y0 + 17, row->maxBelly);
+        // (always to 17 pixels from the edge: the belly scaled to the bar)
+        DrawHpBar(barX, y0 + 20, barMax, row->belly, row->maxBelly < 1 ? 1 : row->maxBelly);
+    }
+    else {
+        DrawNumberRight(136, y0 + 17, row->hp);
+        DrawText(136, y0 + 17, sSlash, COLOR_TEXT);
+        DrawNumberRight(160, y0 + 17, row->maxHp);
+        DrawHpBar(163, y0 + 20, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
     }
 
     x = DrawText(60, y0 + 29, sItem, COLOR_TEXT);
@@ -654,6 +671,8 @@ static void AddRowsText(DrawKey *k)
         KeyAdd(k, &row->level, sizeof(row->level));
         KeyAdd(k, &row->hp, sizeof(row->hp));
         KeyAdd(k, &row->maxHp, sizeof(row->maxHp));
+        KeyAdd(k, &row->belly, sizeof(row->belly));
+        KeyAdd(k, &row->maxBelly, sizeof(row->maxBelly));
         KeyAdd(k, &row->item, sizeof(row->item));
         KeyAdd(k, &row->tactic, sizeof(row->tactic));
     }
