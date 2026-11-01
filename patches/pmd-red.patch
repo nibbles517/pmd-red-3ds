@@ -64,6 +64,20 @@ index 9d59c8fc..10cdcf67 100644
  
  @ I/O register offsets
  	.set OFFSET_REG_DISPCNT,     0x0
+diff --git a/include/constants/main_menu.h b/include/constants/main_menu.h
+index 76eb3bd6..14977e96 100644
+--- a/include/constants/main_menu.h
++++ b/include/constants/main_menu.h
+@@ -25,7 +25,8 @@ enum MainMenuScreens
+     // NOTE: 27 - 34 used by Rescue Password Menu
+     MENU_DISPLAY_RESCUE_PASSWORD = 33,
+     MENU_RESCUE_PASSWORD_ENTRY,
+-    // 35 - 45
++    MENU_GAME_OPTIONS = 35, // 3DS port: Graphics, Windows and Controls Options
++    // 36 - 45
+     MENU_DELETE_SAVE = 46,
+     MENU_DEBUG_DUNGEON,
+     MENU_DEBUG_FIELD,
 diff --git a/include/gba/defines.h b/include/gba/defines.h
 index 1ccb7e9e..6f7d50d4 100644
 --- a/include/gba/defines.h
@@ -233,6 +247,34 @@ index deddec5b..db4551d5 100644
 +#endif
 +
  #endif // GUARD_GBA_SYSCALL_H
+diff --git a/include/graphics_memory.h b/include/graphics_memory.h
+index 1ac7b0fe..9540874d 100644
+--- a/include/graphics_memory.h
++++ b/include/graphics_memory.h
+@@ -14,6 +14,9 @@ struct unkStruct_8009A1C_ptr
+ void ResetVramPalOAM(void);
+ void sub_8009A1C(const EfoFileData *r0, u32 palId, u32 vramDstOffset, u32 r3);
+ void InitFontPalette(void);
++#ifdef PLATFORM_3DS
++void Port_ShowWindowColor(void);
++#endif
+ void InitGraphics(void);
+ void ResetScheduledMemCopies(void);
+ void ScheduleMemCopy(u32 *, const u32 *, u32);
+diff --git a/include/options_menu1.h b/include/options_menu1.h
+index d927bef9..3393487e 100644
+--- a/include/options_menu1.h
++++ b/include/options_menu1.h
+@@ -20,5 +20,8 @@ struct unkStruct_203B25C
+ bool8 sub_801DCC4(void);
+ u32 sub_801DCE8(void);
+ void sub_801DD50(void);
++#ifdef PLATFORM_3DS
++void Port_OptionsMenuFromTitle(bool8 fromTitle);
++#endif
+ 
+ #endif // GUARD_OPTIONS_MENU1_H
+\ No newline at end of file
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
 index 00000000..082531f8
@@ -2259,10 +2301,20 @@ index f3807983..fa116197 100644
      UpdateAnimatedColors(FadeScreen(), gFriendAreasMapPtr->unk4C4C, 0xB0, 16, gFriendAreasMapPtr->brightness, NULL);
      CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
 diff --git a/src/graphics_memory.c b/src/graphics_memory.c
-index 1179e657..13c8e87f 100644
+index 1179e657..025fbb27 100644
 --- a/src/graphics_memory.c
 +++ b/src/graphics_memory.c
-@@ -31,7 +31,11 @@ static EWRAM_DATA u32 gUnknown_202D2A0 = 0;
+@@ -4,6 +4,9 @@
+ #include "cpu.h"
+ #include "def_filearchives.h"
+ #include "file_system.h"
++#ifdef PLATFORM_3DS
++#include "game_options.h"
++#endif
+ #include "graphics_memory.h"
+ #include "text_1.h"
+ 
+@@ -31,7 +34,11 @@ static EWRAM_DATA u32 gUnknown_202D2A0 = 0;
  
  static EWRAM_INIT bool8 sUnknown_203B090 = FALSE; // Only written to.
  
@@ -2274,6 +2326,32 @@ index 1179e657..13c8e87f 100644
  
  // arm9.bin::0200A178
  void InitGraphics(void)
+@@ -110,6 +117,25 @@ void InitFontPalette(void)
+     CloseFile(fontpalFile);
+ }
+ 
++#ifdef PLATFORM_3DS
++// 3DS port: the title's menus use the chosen window color too (Game Options
++// shows a change at once): puts the font palette, with it, in BG palette 15.
++void Port_ShowWindowColor(void)
++{
++    s32 i;
++    RGB_Struct *ptr;
++
++    SetWindowBGColor();
++    if (sub_80063B0() == 1)
++        ptr = &gFontPalette[0];
++    else
++        ptr = &gFontPalette[16];
++
++    for (i = 0; i < 16; ptr++, i++)
++        SetBGPaletteBufferColorArray(i + 240, ptr);
++}
++#endif
++
+ // arm9.bin::0200A00C
+ void ResetVramPalOAM(void)
+ {
 diff --git a/src/ground_bg.c b/src/ground_bg.c
 index 069cfc94..fd9ccc6c 100644
 --- a/src/ground_bg.c
@@ -2778,7 +2856,7 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..de69a01f 100644
+index 372641a7..a2f8f47d 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
 @@ -1,4 +1,7 @@
@@ -2808,11 +2886,12 @@ index 372641a7..de69a01f 100644
  // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
  
  static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
-@@ -166,6 +181,17 @@ void GameLoop_Async(void)
+@@ -166,6 +181,18 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
 +#ifdef PLATFORM_3DS
++        Port_ShowWindowColor(); // the saved window color, as in the game
 +        gPortTitleMenu = TRUE; // for the port's second screen
 +        // ... which shows where the adventure goes on: the dungeon of a
 +        // quicksave, as the Continue screen does (load_screen.c)
@@ -2826,7 +2905,7 @@ index 372641a7..de69a01f 100644
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -241,6 +267,9 @@ void GameLoop_Async(void)
+@@ -241,6 +268,9 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
@@ -2836,7 +2915,7 @@ index 372641a7..de69a01f 100644
  
          switch (nextMenu) {
              case 2: {
-@@ -1095,7 +1124,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -1095,7 +1125,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
@@ -2854,6 +2933,196 @@ index 372641a7..de69a01f 100644
  }
  
  // arm9.bin::0200CA1C
+diff --git a/src/main_menu1.c b/src/main_menu1.c
+index f803cc06..fd96e5f0 100644
+--- a/src/main_menu1.c
++++ b/src/main_menu1.c
+@@ -14,6 +14,7 @@
+ #include "main_menu2.h"
+ #include "memory.h"
+ #include "menu_input.h"
++#include "options_menu1.h"
+ #include "other_menus1.h"
+ #include "rescue_password_menu.h"
+ #include "save_menu.h"
+@@ -122,6 +123,12 @@ void SetUpMenu(void)
+         case MENU_DEBUG:
+             CreateDebugMenu();
+             break;
++#ifdef PLATFORM_3DS
++        case MENU_GAME_OPTIONS: // 3DS port: the Others menu's options
++            Port_OptionsMenuFromTitle(TRUE);
++            sub_801DCC4();
++            break;
++#endif
+     }
+ 
+     sMainMenu->currMenu = sMainMenu->nextMenu;
+@@ -202,6 +209,12 @@ s32 UpdateMenu(void)
+         case MENU_DEBUG:
+             nextMenu = UpdateDebugMenu();
+             break;
++#ifdef PLATFORM_3DS
++        case MENU_GAME_OPTIONS:
++            if (sub_801DCE8() == 3)
++                nextMenu = MENU_MAIN_SCREEN;
++            break;
++#endif
+     }
+ 
+     if (nextMenu != MENU_NO_SCREEN_CHANGE)
+@@ -269,6 +282,14 @@ void CleanUpMenu(void)
+         case MENU_DEBUG:
+             DeleteDebugMenu();
+             break;
++#ifdef PLATFORM_3DS
++        case MENU_GAME_OPTIONS:
++            sub_801DD50();
++            Port_OptionsMenuFromTitle(FALSE);
++            ResetUnusedInputStruct();
++            ShowWindows(NULL, TRUE, TRUE);
++            break;
++#endif
+     }
+ 
+     sMainMenu->lastMenu = sMainMenu->nextMenu;
+diff --git a/src/main_menu2.c b/src/main_menu2.c
+index cfdf9bb1..71a8121f 100644
+--- a/src/main_menu2.c
++++ b/src/main_menu2.c
+@@ -18,6 +18,13 @@ static EWRAM_INIT u32 sUnknown_203B354 = {MENU_SEND_ITEMS};
+ #include "data/main_menu2.h"
+ 
+ static void SetMainMenuItems(void);
++#ifdef PLATFORM_3DS
++static const MenuItem sPortGameOptionsText[] = {
++    {_("Change the graphics, windows and"), 0xFFDE},
++    {_("controls settings."), 0xFFDE},
++    {NULL, 0xFFDD},
++};
++#endif
+ static bool8 SetMainMenuText(void);
+ 
+ static void sub_803623C(void);
+@@ -99,6 +106,9 @@ u32 UpdateMainMenu(void)
+                 case MENU_DUAL_SLOT:
+                 case MENU_WIRELESS_COMMS:
+                 case MENU_DEBUG:
++#ifdef PLATFORM_3DS
++                case MENU_GAME_OPTIONS:
++#endif
+                     sUnknown_203B350 = nextMenu;
+                     break;
+             }
+@@ -199,6 +209,11 @@ static bool8 SetMainMenuText(void)
+             // It won't be in the release version
+             SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 2, &sUnknown_80E5CB4, sUnknown_80E5D48, FALSE, 0, FALSE);
+             break;
++#ifdef PLATFORM_3DS
++        case MENU_GAME_OPTIONS:
++            SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 2, &sUnknown_80E5CB4, sPortGameOptionsText, FALSE, 0, FALSE);
++            break;
++#endif
+         default:
+             break;
+     }
+@@ -218,6 +233,34 @@ static void sub_803623C(void)
+     sub_8035CF4(sUnknown_203B34C->unk4, 0, TRUE);
+ }
+ 
++#ifdef PLATFORM_3DS
++// 3DS port: every main menu also offers Game Options (the Graphics, Windows
++// and Controls Options of the Others menu), last; the window grows to fit.
++ALIGNED(4) static const u8 sPortGameOptionsName[] = _("Game Options");
++
++static void SetMainMenuList(const WindowTemplate *win, const MenuItem *items)
++{
++    static MenuItem sItems[10];
++    static WindowTemplate sWin;
++    s32 n = 0;
++
++    while (items[n].text != NULL && n < 8) {
++        sItems[n] = items[n];
++        n++;
++    }
++    sItems[n].text = sPortGameOptionsName;
++    sItems[n].menuAction = MENU_GAME_OPTIONS;
++    sItems[n + 1].text = NULL;
++    sItems[n + 1].menuAction = 0xFFDD;
++    sWin = *win;
++    sub_8012D08(&sWin, n + 1);
++    SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sWin, sItems, TRUE, sUnknown_203B350, TRUE);
++}
++#define SET_MAIN_MENU_LIST(win, items) SetMainMenuList(win, items)
++#else
++#define SET_MAIN_MENU_LIST(win, items) SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, win, items, TRUE, sUnknown_203B350, TRUE)
++#endif
++
+ static void SetMainMenuItems(void)
+ {
+     if (sub_8011C34() != -1) {
+@@ -230,7 +273,7 @@ static void SetMainMenuItems(void)
+                     // Friend Rescue
+                     // Trade Items
+                     // Wonder Mail
+-                    SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sUnknown_80E5A78, sUnknown_80E5C18, TRUE, sUnknown_203B350, TRUE);
++                    SET_MAIN_MENU_LIST(&sUnknown_80E5A78, sUnknown_80E5C18);
+                 }
+                 else {
+                     // Revive Team
+@@ -238,7 +281,7 @@ static void SetMainMenuItems(void)
+                     // Adventure Log
+                     // Friend Rescue
+                     // Trade Items
+-                    SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sUnknown_80E5BC4, sUnknown_80E5BDC, TRUE, sUnknown_203B350, TRUE);
++                    SET_MAIN_MENU_LIST(&sUnknown_80E5BC4, sUnknown_80E5BDC);
+                 }
+             }
+             else {
+@@ -249,7 +292,7 @@ static void SetMainMenuItems(void)
+                     // Friend Rescue
+                     // Trade Items
+                     // Wonder Mail
+-                    SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sUnknown_80E5A78, sUnknown_80E5AFC, TRUE, sUnknown_203B350, TRUE);
++                    SET_MAIN_MENU_LIST(&sUnknown_80E5A78, sUnknown_80E5AFC);
+                 }
+                 else {
+                     // Continue
+@@ -257,7 +300,7 @@ static void SetMainMenuItems(void)
+                     // Adventure Log
+                     // Friend Rescue
+                     // Trade Items
+-                    SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sUnknown_80E5A60, sUnknown_80E5A90, TRUE, sUnknown_203B350, TRUE);
++                    SET_MAIN_MENU_LIST(&sUnknown_80E5A60, sUnknown_80E5A90);
+                 }
+             }
+         }
+@@ -269,7 +312,7 @@ static void SetMainMenuItems(void)
+                     // Friend Rescue
+                     // Trade Items
+                     // Wonder Mail
+-                SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sUnknown_80E5A78, sUnknown_80E5B8C, TRUE, sUnknown_203B350, TRUE);
++                SET_MAIN_MENU_LIST(&sUnknown_80E5A78, sUnknown_80E5B8C);
+             }
+             else {
+                     // Awaiting Rescue
+@@ -277,14 +320,14 @@ static void SetMainMenuItems(void)
+                     // Adventure Log
+                     // Friend Rescue
+                     // Trade Items
+-                SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sUnknown_80E5B34, sUnknown_80E5B4C, TRUE, sUnknown_203B350, TRUE);
++                SET_MAIN_MENU_LIST(&sUnknown_80E5B34, sUnknown_80E5B4C);
+             }
+         }
+     }
+     else {
+         // New Game
+         // Adventure Log
+-        SetMenuItems(sUnknown_203B34C->unk4, &sUnknown_203B34C->unk144, 0, &sUnknown_80E59E0, sUnknown_80E59F8, TRUE, sUnknown_203B350, TRUE);
++        SET_MAIN_MENU_LIST(&sUnknown_80E59E0, sUnknown_80E59F8);
+     }
+ }
+ 
 diff --git a/src/menu_input.c b/src/menu_input.c
 index aeeb69ed..8d2fd375 100644
 --- a/src/menu_input.c
@@ -2910,7 +3179,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..56f1cad1 100644
+index 86f582c2..1011f3d7 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -2918,19 +3187,20 @@ index 86f582c2..56f1cad1 100644
  #include "global.h"
  #include "globaldata.h"
  #include "code_8099360.h"
-@@ -9,6 +10,11 @@
+@@ -9,6 +10,12 @@
  #include "menu_input.h"
  #include "options_menu1.h"
  #include "options_menu2.h"
 +#ifdef PLATFORM_3DS
 +#include "port_screen_menu.h"
++#include "graphics_memory.h"
 +#include "port_game.h"
 +#include "save.h"
 +#endif
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +24,9 @@ enum
+@@ -18,7 +25,9 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -2941,7 +3211,7 @@ index 86f582c2..56f1cad1 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +39,8 @@ enum OptionsMenuStates
+@@ -31,6 +40,8 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -2950,7 +3220,7 @@ index 86f582c2..56f1cad1 100644
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +58,24 @@ static void sub_801DED0(void);
+@@ -48,6 +59,33 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -2968,6 +3238,15 @@ index 86f582c2..56f1cad1 100644
 +static GameOptions sOpenedOptions;
 +static struct PortConfig sOpenedConfig; // the port's settings in Windows Options
 +static bool8 sSaveGameOptions, sSavePortConfig;
++// opened from the title's main menu as "Game Options": no Hints there
++static bool8 sFromTitle;
++ALIGNED(4) static const u8 sTitleGameOptions[] = _("Game Options");
++static const WindowHeader sTitleHeader = {1, 0, 9, 0}; // wide enough for it
++
++void Port_OptionsMenuFromTitle(bool8 fromTitle)
++{
++    sFromTitle = fromTitle;
++}
 +#define OTHERS_MENU_WIDTH 11
 +#else
 +#define OTHERS_MENU_WIDTH 10
@@ -2975,7 +3254,7 @@ index 86f582c2..56f1cad1 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +104,18 @@ u32 sub_801DCE8(void)
+@@ -76,8 +114,18 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -2984,35 +3263,54 @@ index 86f582c2..56f1cad1 100644
 +#else
              HandleChangeSettingsMenu();
 +#endif
-             break;
++            break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
 +            HandleScreenMenu();
-+            break;
+             break;
 +#endif
          default:
              break;
      }
-@@ -122,7 +160,7 @@ static void sub_801DD84(void)
+@@ -122,7 +170,11 @@ static void sub_801DD84(void)
  
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
++#ifdef PLATFORM_3DS
++            if (sFromTitle)
++                sUnknown_203B25C->unkBC.id[0].header = &sTitleHeader;
++#endif
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -132,7 +170,7 @@ static void sub_801DD84(void)
+@@ -132,7 +184,11 @@ static void sub_801DD84(void)
  
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
++#ifdef PLATFORM_3DS
++            if (sFromTitle)
++                sUnknown_203B25C->unkBC.id[0].header = &sTitleHeader;
++#endif
              break;
          default:
              for (i = 0; i < 4; i++)
-@@ -164,12 +202,37 @@ static void sub_801DED0(void)
+@@ -150,6 +206,10 @@ static void sub_801DED0(void)
+         case OPTIONS_MENU_INIT:
+         case OPTIONS_MENU_MAIN:
+             sUnknown_203B25C->menu.unk0 = sOthers;
++#ifdef PLATFORM_3DS
++            if (sFromTitle)
++                sUnknown_203B25C->menu.unk0 = sTitleGameOptions;
++#endif
+             sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
+             break;
+         case OPTIONS_MENU_PRE_HINT_SELECTION:
+@@ -164,12 +224,37 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3050,7 +3348,7 @@ index 86f582c2..56f1cad1 100644
      }
  }
  
-@@ -180,8 +243,20 @@ static void CreateOthersMenu(void)
+@@ -180,12 +265,30 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3069,9 +3367,19 @@ index 86f582c2..56f1cad1 100644
 +    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_CONTROLS;
 +#endif
  
++#ifdef PLATFORM_3DS
++    if (!sFromTitle) {
++#endif
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = sHints;
-@@ -229,6 +304,14 @@ static void HandleOthersMenu(void)
+     sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_HINTS;
++#ifdef PLATFORM_3DS
++    }
++#endif
+ 
+     loopMax++;
+     sUnknown_203B25C->menuItems[loopMax].text = NULL;
+@@ -229,6 +332,14 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3086,7 +3394,7 @@ index 86f582c2..56f1cad1 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +355,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +383,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3103,7 +3411,7 @@ index 86f582c2..56f1cad1 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +375,57 @@ static void sub_801E0FC(void)
+@@ -282,12 +403,59 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3123,6 +3431,8 @@ index 86f582c2..56f1cad1 100644
 +    *gGameOptionsRef = sUnknown_203B25C->newOptions;
 +    SetWindowBGColor();
 +    sub_8099690(0);
++    if (sFromTitle)
++        Port_ShowWindowColor(); // the title doesn't use the palette fades
 +}
 +
 +static void LeaveSettings(bool8 portConfigChanged)
