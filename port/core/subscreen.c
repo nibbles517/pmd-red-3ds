@@ -227,14 +227,22 @@ static void FormatInt(u8 *buf, int v)
 
 // --- HP bar ---------------------------------------------------------------------
 
+static void DrawBar(int x, int y, int w, int hp, int maxHp, u16 fillColor);
+
 static void DrawHpBar(int x, int y, int w, int hp, int maxHp)
+{
+    DrawBar(x, y, w, hp, maxHp, Rgb(72, 216, 72));
+}
+
+// The HP bar's style, with another colour for what is left (the belly's)
+static void DrawBar(int x, int y, int w, int hp, int maxHp, u16 fillColor)
 {
     int fill = maxHp > 0 ? (hp * w + maxHp - 1) / maxHp : 0;
     if (fill > w) fill = w;
     if (hp > 0 && fill == 0) fill = 1;
     Fill(x, y, w, 1, Rgb(16, 16, 16));
     Fill(x, y + 1, w, 1, Rgb(248, 248, 248));
-    Fill(x, y + 2, fill, 4, Rgb(72, 216, 72));
+    Fill(x, y + 2, fill, 4, fillColor);
     Fill(x + fill, y + 2, w - fill, 4, Rgb(232, 120, 96));
     Fill(x, y + 6, w, 1, Rgb(248, 248, 248));
     Fill(x, y + 7, w, 1, Rgb(16, 16, 16));
@@ -661,7 +669,7 @@ static void DrawRowText(int y0, const PanelRow *row)
         DrawText(hpRight, y0 + 17, sSlash, COLOR_TEXT);
         DrawNumberRight(maxRight, y0 + 17, row->maxBelly);
         // (always to 17 pixels from the edge: the belly scaled to the bar)
-        DrawHpBar(barX, y0 + 20, barMax, row->belly, row->maxBelly < 1 ? 1 : row->maxBelly);
+        DrawBar(barX, y0 + 20, barMax, row->belly, row->maxBelly < 1 ? 1 : row->maxBelly, Rgb(248, 208, 48)); // yellow
         // the held item's sprite, as on the floor, under the belly's "/",
         // in the middle between its line and the panel's bottom
         if (row->itemIcon >= 0)
