@@ -539,6 +539,7 @@ static const u8 sItem[] = "Item: ";
 static const u8 sNone[] = "None";
 static const u8 sLeader[] = "Leader";
 static const u8 sSlash[] = "/";
+static const u8 sHp[] = "HP: ";
 
 // Draws a number right-aligned at xRight with every digit in a cell as wide
 // as '0', so that the columns line up.
@@ -570,13 +571,24 @@ static void DrawRowText(int y0, const PanelRow *row)
     FormatInt(buf, row->level);
     DrawText(x, y0 + 17, buf, COLOR_TEXT);
 
-    // HP: "hp/ max", each number right-aligned in three digit cells
-    DrawNumberRight(136, y0 + 17, row->hp);
-    DrawText(136, y0 + 17, sSlash, COLOR_TEXT);
-    DrawNumberRight(160, y0 + 17, row->maxHp);
-    // As on the DS, the bar is one pixel per max HP (the DS stops at 60;
-    // here it goes up to 80).
-    DrawHpBar(163, y0 + 20, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
+    // HP: "hp/ max", each number right-aligned in three digit cells (Fit:
+    // after "HP: ")
+    {
+        int cell = GlyphWidth('0');
+        int hpRight = 136, barX = 163;
+        if (FIT) {
+            x = DrawText(136 - 3 * cell, y0 + 17, sHp, COLOR_TEXT);
+            hpRight = x + 3 * cell;
+            barX = hpRight + TextWidth(sSlash) + 3 * cell + 3;
+            barMax = W - 17 - barX; // ending 17 pixels from the screen's edge
+        }
+        DrawNumberRight(hpRight, y0 + 17, row->hp);
+        DrawText(hpRight, y0 + 17, sSlash, COLOR_TEXT);
+        DrawNumberRight(FIT ? hpRight + TextWidth(sSlash) + 3 * cell : 160, y0 + 17, row->maxHp);
+        // As on the DS, the bar is one pixel per max HP (the DS stops at 60;
+        // here it goes up to 80, in Fit to 17 pixels from the edge).
+        DrawHpBar(barX, y0 + 20, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
+    }
 
     x = DrawText(60, y0 + 29, sItem, COLOR_TEXT);
     DrawText(x, y0 + 29, row->item != NULL ? row->item : sNone, COLOR_TEXT);
