@@ -235,10 +235,10 @@ index deddec5b..db4551d5 100644
  #endif // GUARD_GBA_SYSCALL_H
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..f4d4d1bb
+index 00000000..ebfa12f0
 --- /dev/null
 +++ b/include/port_screen_menu.h
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,13 @@
 +#ifndef GUARD_PORT_SCREEN_MENU_H
 +#define GUARD_PORT_SCREEN_MENU_H
 +
@@ -246,6 +246,7 @@ index 00000000..f4d4d1bb
 +#include "game_options.h"
 +
 +void PortScreenMenu_Create(GameOptions *options);
++void PortControlMenu_Create(GameOptions *options); // Others > Control Options
 +u32 PortScreenMenu_Update(void);
 +void PortScreenMenu_Destroy(void);
 +bool8 PortScreenMenu_Changed(void);
@@ -959,7 +960,7 @@ index 4a9a72ad..ebc461ad 100644
      gDungeon->unk181e8.unk1821A = 0;
  }
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..dc16ebd2 100644
+index 0680f301..d51add1a 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,11 @@
@@ -974,7 +975,7 @@ index 0680f301..dc16ebd2 100644
  
  static void PrintOthersMenuOptions(void);
  static void ShowGameOptionsMenu(void);
-@@ -146,10 +151,342 @@ void ShowDungeonOthersMenu(void)
+@@ -146,10 +151,355 @@ void ShowDungeonOthersMenu(void)
  
  enum {
      GAME_OPTION_DUNGEON,
@@ -982,6 +983,7 @@ index 0680f301..dc16ebd2 100644
 +#ifdef PLATFORM_3DS
 +    GAME_OPTION_LAYOUT,   // 3DS port: Layout Options
 +    GAME_OPTION_GRAPHICS, // 3DS port: Graphics Options (as outside dungeons)
++    GAME_OPTION_CONTROLS, // 3DS port: Control Options (as outside dungeons)
 +#endif
 +    GAME_OPTION_OTHERS,   // (3DS port: Windows Options)
      GAME_OPTION_DEFAULT,
@@ -993,7 +995,7 @@ index 0680f301..dc16ebd2 100644
 +// outside dungeons (the same settings: the port's config, and the game's own
 +// window color, player gender and Main Screen); Layout Options the second
 +// screen's layout and more. Changes take effect at once.
-+enum { PAGE_WINDOWS, PAGE_LAYOUT, PAGE_GRAPHICS, PAGE_MAIN_SETTINGS, PAGE_SUB_SETTINGS, PAGE_COUNT };
++enum { PAGE_WINDOWS, PAGE_LAYOUT, PAGE_GRAPHICS, PAGE_MAIN_SETTINGS, PAGE_SUB_SETTINGS, PAGE_CONTROLS, PAGE_COUNT };
 +#define PAGE_ROWS 5
 +#define NO_LINK 0xFF
 +static u8 sPortValues[PAGE_COUNT][PAGE_ROWS]; // [page][row]
@@ -1041,6 +1043,9 @@ index 0680f301..dc16ebd2 100644
 +static const u8 sTextNone[] = _("None");
 +static const u8 sTextFull[] = _("Full");
 +static const u8 sTextStretch[] = _("Stretch");
++static const u8 sTextControlOptions[] = _("Control Options");
++static const u8 sTextButtonStyle[] = _("Button Style");
++static const u8 sTextTouchScreen[] = _("Touch Screen");
 +
 +static const struct PortRow {
 +    const u8 *label;
@@ -1074,10 +1079,14 @@ index 0680f301..dc16ebd2 100644
 +        { sTextSize, 3, 64, 40, { sTextDS, sTextFit, sText3DS }, (1 << 2), NO_LINK },
 +        { sTextScale, 3, 64, 40, { sTextNone, sTextFull, sTextStretch }, 7, NO_LINK },
 +    },
++    [PAGE_CONTROLS] = { // (placeholders for now)
++        { sTextButtonStyle, 3, 96, 32, { sTextGBA, sTextDS, sText3DS }, 7, NO_LINK },
++        { sTextTouchScreen, 2, 96, 32, { sTextOn, sTextOff }, 3, NO_LINK },
++    },
 +};
-+static const u8 sPortRowCount[PAGE_COUNT] = { 2, 3, 5, 2, 3 };
++static const u8 sPortRowCount[PAGE_COUNT] = { 2, 3, 5, 2, 3, 2 };
 +static const u8 *const sPortTitles[PAGE_COUNT] = {
-+    NULL, sTextLayoutOptions, sTextGraphicsOptions, sTextMainScreenSettings, sTextSubScreenSettings
++    NULL, sTextLayoutOptions, sTextGraphicsOptions, sTextMainScreenSettings, sTextSubScreenSettings, sTextControlOptions
 +}; // (Windows Options: gOptionsOthersTextPtr)
 +
 +static void PortLoadValues(void)
@@ -1096,6 +1105,8 @@ index 0680f301..dc16ebd2 100644
 +    sPortValues[PAGE_SUB_SETTINGS][1] = gPortConfig.layout[1][0] >= PORT_SIZE_DS && gPortConfig.layout[1][0] <= PORT_SIZE_3DS
 +                                        ? gPortConfig.layout[1][0] - PORT_SIZE_DS : 0;
 +    sPortValues[PAGE_SUB_SETTINGS][2] = gPortConfig.layout[1][1] < 3 ? gPortConfig.layout[1][1] : 0;
++    sPortValues[PAGE_CONTROLS][0] = gPortConfig.buttonStyle < 3 ? gPortConfig.buttonStyle : PORT_BUTTONS_GBA;
++    sPortValues[PAGE_CONTROLS][1] = gPortConfig.touchScreenOff != 0; // On, Off
 +    memcpy(sPortOpened, sPortValues, sizeof(sPortValues));
 +}
 +
@@ -1106,7 +1117,8 @@ index 0680f301..dc16ebd2 100644
 +        || sPortOpened[PAGE_LAYOUT][2] != sPortValues[PAGE_LAYOUT][2]
 +        || memcmp(sPortOpened[PAGE_GRAPHICS], sPortValues[PAGE_GRAPHICS], 2) != 0
 +        || memcmp(sPortOpened[PAGE_MAIN_SETTINGS], sPortValues[PAGE_MAIN_SETTINGS], PAGE_ROWS) != 0
-+        || memcmp(sPortOpened[PAGE_SUB_SETTINGS], sPortValues[PAGE_SUB_SETTINGS], PAGE_ROWS) != 0;
++        || memcmp(sPortOpened[PAGE_SUB_SETTINGS], sPortValues[PAGE_SUB_SETTINGS], PAGE_ROWS) != 0
++        || memcmp(sPortOpened[PAGE_CONTROLS], sPortValues[PAGE_CONTROLS], PAGE_ROWS) != 0;
 +}
 +
 +// As outside dungeons (options_menu1.c): a change takes effect at once...
@@ -1133,6 +1145,8 @@ index 0680f301..dc16ebd2 100644
 +    gPortConfig.subScreenDisabled = sPortValues[PAGE_SUB_SETTINGS][0];
 +    gPortConfig.layout[1][0] = PORT_SIZE_DS + sPortValues[PAGE_SUB_SETTINGS][1];
 +    gPortConfig.layout[1][1] = sPortValues[PAGE_SUB_SETTINGS][2];
++    gPortConfig.buttonStyle = sPortValues[PAGE_CONTROLS][0];
++    gPortConfig.touchScreenOff = sPortValues[PAGE_CONTROLS][1];
 +    sub_803E13C();
 +    LoadDungeonMapPalette();
 +    // Size changed: the floor is kept in a different map in GBA size
@@ -1318,7 +1332,7 @@ index 0680f301..dc16ebd2 100644
  static void ShowGameOptionsMenu(void)
  {
      while (TRUE) {
-@@ -185,6 +522,26 @@ static void ShowGameOptionsMenu(void)
+@@ -185,6 +535,30 @@ static void ShowGameOptionsMenu(void)
              break;
  
          sChangedGameOptions = *gGameOptionsRef;
@@ -1341,11 +1355,15 @@ index 0680f301..dc16ebd2 100644
 +            ShowPortOptions(PAGE_GRAPHICS);
 +            PortFinishOptions();
 +        }
++        else if (gDungeonMenu.menuIndex == GAME_OPTION_CONTROLS) {
++            ShowPortOptions(PAGE_CONTROLS);
++            PortFinishOptions();
++        }
 +#else
          if (gDungeonMenu.menuIndex == GAME_OPTION_DUNGEON) {
              bPress = ShowDungeonOptions();
              TrySetNewGameOptions(bPress);
-@@ -193,6 +550,7 @@ static void ShowGameOptionsMenu(void)
+@@ -193,6 +567,7 @@ static void ShowGameOptionsMenu(void)
              bPress = ShowOthersOptions();
              TrySetNewGameOptions(bPress);
          }
@@ -1353,7 +1371,7 @@ index 0680f301..dc16ebd2 100644
          else if (gDungeonMenu.menuIndex == GAME_OPTION_DEFAULT) {
              AskToResetToDefault();
          }
-@@ -211,7 +569,11 @@ enum {
+@@ -211,7 +586,11 @@ enum {
      OPTION_COUNT
  };
  
@@ -1365,7 +1383,7 @@ index 0680f301..dc16ebd2 100644
  #define OTHERS_OPTIONS_COUNT (OPTION_COUNT - DUNGEON_OPTIONS_COUNT)
  
  static bool8 ShowDungeonOptions(void)
-@@ -240,12 +602,18 @@ static bool8 ShowDungeonOptions(void)
+@@ -240,12 +619,18 @@ static bool8 ShowDungeonOptions(void)
              if (gRealInputs.repeated & DPAD_LEFT) {
                  PlayDungeonCursorSE(FALSE);
                  ChangeGameOptionLeft(gDungeonMenu.menuIndex);
@@ -1384,7 +1402,7 @@ index 0680f301..dc16ebd2 100644
                  dpadMoved = TRUE;
                  break;
              }
-@@ -361,6 +729,12 @@ static void AskToResetToDefault(void)
+@@ -361,6 +746,12 @@ static void AskToResetToDefault(void)
  {
      if (DisplayDungeonYesNoMessage_Async(0, gUnknown_80FEC28, FALSE) == 1) {
          InitializeGameOptions(FALSE);
@@ -1397,7 +1415,7 @@ index 0680f301..dc16ebd2 100644
          sub_803E13C();
      }
  }
-@@ -562,7 +936,7 @@ static void PrintQuickSaveMenuOptions(void)
+@@ -562,7 +953,7 @@ static void PrintQuickSaveMenuOptions(void)
  static void PrintGameOptions(void)
  {
      s32 optionsCount;
@@ -1406,7 +1424,7 @@ index 0680f301..dc16ebd2 100644
      WindowHeader header;
      WindowTemplates windows = {
          .id = {
-@@ -585,7 +959,7 @@ static void PrintGameOptions(void)
+@@ -585,7 +976,7 @@ static void PrintGameOptions(void)
      header.currId = 0;
      header.f3 = 0;
      gDungeonMenu.menuIndex = 0;
@@ -1415,7 +1433,7 @@ index 0680f301..dc16ebd2 100644
      gDungeonMenu.currPageEntries = optionsCount;
      gDungeonMenu.entriesPerPage = optionsCount;
      gDungeonMenu.currPage = 0;
-@@ -604,14 +978,17 @@ static void PrintGameOptions(void)
+@@ -604,14 +995,18 @@ static void PrintGameOptions(void)
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
  
@@ -1434,12 +1452,13 @@ index 0680f301..dc16ebd2 100644
 +#ifdef PLATFORM_3DS
 +    PrintFormattedStringOnWindow(8, y[GAME_OPTION_GRAPHICS], sTextGraphicsOptions, 0, '\0');
 +    PrintFormattedStringOnWindow(8, y[GAME_OPTION_LAYOUT], sTextLayoutOptions, 0, '\0');
++    PrintFormattedStringOnWindow(8, y[GAME_OPTION_CONTROLS], sTextControlOptions, 0, '\0');
 +#endif
 +    PrintFormattedStringOnWindow(8, y[GAME_OPTION_DEFAULT], gUnknown_80FE748, 0, '\0');
      sub_80073E0(0);
  }
  
-@@ -654,7 +1031,11 @@ static void PrintDungeonOptions(void)
+@@ -654,7 +1049,11 @@ static void PrintDungeonOptions(void)
      ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
      windows.id[0].width = 24;
      windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(DUNGEON_OPTIONS_COUNT, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
@@ -1451,7 +1470,7 @@ index 0680f301..dc16ebd2 100644
      windows.id[0].pos.x = 2;
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
-@@ -663,14 +1044,18 @@ static void PrintDungeonOptions(void)
+@@ -663,14 +1062,18 @@ static void PrintDungeonOptions(void)
      y[1] = GetMenuEntryYCoord(&gDungeonMenu, 1);
      y[2] = GetMenuEntryYCoord(&gDungeonMenu, 2);
      y[3] = GetMenuEntryYCoord(&gDungeonMenu, 3);
@@ -1470,7 +1489,7 @@ index 0680f301..dc16ebd2 100644
  
      if (sChangedGameOptions.dungeonSpeed != DUNGEON_SPEED_SLOW) {
          AddDoubleUnderScoreHighlight(0, 136, y[0] + 10, 21, 7);
-@@ -700,7 +1085,11 @@ static void PrintDungeonOptions(void)
+@@ -700,7 +1103,11 @@ static void PrintDungeonOptions(void)
          AddDoubleUnderScoreHighlight(0, 80, y[3] + 10, 16, 7);
      }
  
@@ -2789,7 +2808,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..fecec5d8 100644
+index 86f582c2..4eab17e9 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -2809,25 +2828,27 @@ index 86f582c2..fecec5d8 100644
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +24,8 @@ enum
+@@ -18,7 +24,9 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
 -    MENU_OPTION_NO
 +    MENU_OPTION_NO,
 +    MENU_OPTION_SCREEN, // 3DS port: Graphics Options
++    MENU_OPTION_CONTROLS, // 3DS port: Control Options
  };
  
  enum OptionsMenuStates
-@@ -31,6 +38,7 @@ enum OptionsMenuStates
+@@ -31,6 +39,8 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
 +    OPTIONS_MENU_SCREEN, // 3DS port
++    OPTIONS_MENU_CONTROLS, // 3DS port
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +56,23 @@ static void sub_801DED0(void);
+@@ -48,6 +58,24 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -2837,6 +2858,7 @@ index 86f582c2..fecec5d8 100644
 +static void LeaveSettings(bool8 portConfigChanged);
 +static void HandleChangesSaved(void);
 +ALIGNED(4) static const u8 sScreenLayoutOptions[] = _("Graphics Options");
++ALIGNED(4) static const u8 sControlOptions[] = _("Control Options");
 +ALIGNED(4) static const u8 sChangesSaved[] = _("Changes saved.");
 +// 3DS port: settings take effect as soon as a toggle changes; leaving the
 +// Windows Options or Graphics Options window then writes them and says
@@ -2851,7 +2873,7 @@ index 86f582c2..fecec5d8 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +101,17 @@ u32 sub_801DCE8(void)
+@@ -76,8 +104,18 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -2863,13 +2885,14 @@ index 86f582c2..fecec5d8 100644
              break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
++        case OPTIONS_MENU_CONTROLS:
 +            HandleScreenMenu();
 +            break;
 +#endif
          default:
              break;
      }
-@@ -122,7 +156,7 @@ static void sub_801DD84(void)
+@@ -122,7 +160,7 @@ static void sub_801DD84(void)
  
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
@@ -2878,7 +2901,7 @@ index 86f582c2..fecec5d8 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -132,7 +166,7 @@ static void sub_801DD84(void)
+@@ -132,7 +170,7 @@ static void sub_801DD84(void)
  
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
@@ -2887,7 +2910,7 @@ index 86f582c2..fecec5d8 100644
              break;
          default:
              for (i = 0; i < 4; i++)
-@@ -164,12 +198,32 @@ static void sub_801DED0(void)
+@@ -164,12 +202,37 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -2902,6 +2925,11 @@ index 86f582c2..fecec5d8 100644
 +            sUnknown_203B25C->newOptions = *gGameOptionsRef;
 +            sOpenedOptions = *gGameOptionsRef;
 +            PortScreenMenu_Create(&sUnknown_203B25C->newOptions);
++            break;
++        case OPTIONS_MENU_CONTROLS:
++            sUnknown_203B25C->newOptions = *gGameOptionsRef;
++            sOpenedOptions = *gGameOptionsRef;
++            PortControlMenu_Create(&sUnknown_203B25C->newOptions);
 +            break;
 +        case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
 +            // write what changed, then say so (like "Save completed.")
@@ -2920,7 +2948,7 @@ index 86f582c2..fecec5d8 100644
      }
  }
  
-@@ -180,6 +234,12 @@ static void CreateOthersMenu(void)
+@@ -180,6 +243,15 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -2929,11 +2957,14 @@ index 86f582c2..fecec5d8 100644
 +    sUnknown_203B25C->menuItems[loopMax].text = sScreenLayoutOptions;
 +    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SCREEN;
 +    loopMax++;
++    sUnknown_203B25C->menuItems[loopMax].text = sControlOptions;
++    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_CONTROLS;
++    loopMax++;
 +#endif
      sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
      sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
  
-@@ -229,6 +289,11 @@ static void HandleOthersMenu(void)
+@@ -229,6 +301,14 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -2941,11 +2972,14 @@ index 86f582c2..fecec5d8 100644
 +        case MENU_OPTION_SCREEN:
 +            SetOptionsMenuState(OPTIONS_MENU_SCREEN);
 +            break;
++        case MENU_OPTION_CONTROLS:
++            SetOptionsMenuState(OPTIONS_MENU_CONTROLS);
++            break;
 +#endif
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +337,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +352,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -2962,7 +2996,7 @@ index 86f582c2..fecec5d8 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +357,57 @@ static void sub_801E0FC(void)
+@@ -282,12 +372,57 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3132,10 +3166,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..d2952377
+index 00000000..54e8f257
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,346 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -3168,14 +3202,14 @@ index 00000000..d2952377
 +
 +#ifdef PLATFORM_3DS
 +
-+enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN };
++enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN, PAGE_CONTROLS };
 +// First page entries
 +enum { TOP_FRAMESKIP, TOP_DUALCORE, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
 +
 +#define TOP_ENTRIES 5
 +#define MAX_CHOICES 4
 +
-+enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP };
++enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP, SETTING_BUTTONS, SETTING_TOUCH };
 +
 +static struct {
 +    GameOptions *options;
@@ -3223,6 +3257,9 @@ index 00000000..d2952377
 +ALIGNED(4) static const u8 sScaleNone[] = _("None");
 +ALIGNED(4) static const u8 sScaleFull[] = _("Full");
 +ALIGNED(4) static const u8 sScaleStretch[] = _("Stretch");
++ALIGNED(4) static const u8 sTitleControls[] = _("Control Options");
++ALIGNED(4) static const u8 sButtonStyle[] = _("Button Style");
++ALIGNED(4) static const u8 sTouchScreen[] = _("Touch Screen");
 +static const struct {
 +    const u8 *name;
 +    u8 count;
@@ -3232,8 +3269,11 @@ index 00000000..d2952377
 +    [SETTING_SIZE] = { sSize, 4, { sSizeGBA, sSizeDS, sSizeFit, sSize3DS } },
 +    [SETTING_SCALE] = { sScale, 3, { sScaleNone, sScaleFull, sScaleStretch } },
 +    [SETTING_FRAMESKIP] = { sFrameSkip, 3, { sOff, sAuto, sAlways } },
++    [SETTING_BUTTONS] = { sButtonStyle, 3, { sSizeGBA, sSizeDS, sSize3DS } },
++    [SETTING_TOUCH] = { sTouchScreen, 2, { sOn, sOff } },
 +};
-+#define CHOICE_X(i) (64 + (i) * 40)
++// (Control Options: further right, past the longer names)
++#define CHOICE_X(i) (sMenu.page == PAGE_CONTROLS ? 96 + (i) * 32 : 64 + (i) * 40)
 +#define FRAMESKIP_X(i) (80 + (i) * 40) // as Main Screen's choices
 +
 +static s32 EntryCount(void)
@@ -3241,6 +3281,7 @@ index 00000000..d2952377
 +    switch (sMenu.page) {
 +        case PAGE_TOP: return TOP_ENTRIES;
 +        case PAGE_SUB_SCREEN: return 3;
++        case PAGE_CONTROLS: return 2;
 +        default: return 2;
 +    }
 +}
@@ -3248,12 +3289,18 @@ index 00000000..d2952377
 +// Which setting entry `i` of the current settings page is.
 +static s32 EntrySetting(s32 i)
 +{
++    if (sMenu.page == PAGE_CONTROLS)
++        return SETTING_BUTTONS + i;
 +    return sMenu.page == PAGE_SUB_SCREEN ? i : i + 1;
 +}
 +
 +static u8 *SettingValue(s32 setting)
 +{
 +    s32 screen = sMenu.page == PAGE_MAIN_SCREEN ? 0 : 1;
++    if (setting == SETTING_BUTTONS)
++        return &gPortConfig.buttonStyle;
++    if (setting == SETTING_TOUCH)
++        return &gPortConfig.touchScreenOff;
 +    if (setting == SETTING_ENABLED)
 +        return &gPortConfig.subScreenDisabled;
 +    if (setting == SETTING_FRAMESKIP)
@@ -3272,7 +3319,7 @@ index 00000000..d2952377
 +// red: Scale; the 3DS size.
 +static bool8 IsPlaceholder(s32 setting, s32 choice)
 +{
-+    if (setting == SETTING_SCALE)
++    if (setting == SETTING_SCALE || setting == SETTING_BUTTONS || setting == SETTING_TOUCH)
 +        return TRUE;
 +    if (setting == SETTING_SIZE)
 +        return choice == PORT_SIZE_3DS;
@@ -3328,7 +3375,7 @@ index 00000000..d2952377
 +        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, TOP_SUB_SETTINGS), sSubScreenSettings, win, 0);
 +    }
 +    else {
-+        PrintStringOnWindow(16, 0, sMenu.page == PAGE_MAIN_SCREEN ? sTitleMain : sTitleSub, win, 0);
++        PrintStringOnWindow(16, 0, sMenu.page == PAGE_MAIN_SCREEN ? sTitleMain : sMenu.page == PAGE_CONTROLS ? sTitleControls : sTitleSub, win, 0);
 +        for (i = 0; i < EntryCount(); i++) {
 +            s32 setting = EntrySetting(i);
 +            s32 c, value = *SettingValue(setting), first = FirstChoice(setting);
@@ -3371,6 +3418,16 @@ index 00000000..d2952377
 +    ShowPage(0);
 +}
 +
++// Others > Control Options: the same window, with only its page
++void PortControlMenu_Create(GameOptions *options)
++{
++    sMenu.options = options;
++    sMenu.windowId = 0;
++    sMenu.page = PAGE_CONTROLS;
++    sMenu.startConfig = gPortConfig;
++    ShowPage(0);
++}
++
 +// Whether the port settings changed since the menu was opened.
 +bool8 PortScreenMenu_Changed(void)
 +{
@@ -3389,6 +3446,10 @@ index 00000000..d2952377
 +        case INPUT_B_BUTTON:
 +        case INPUT_A_BUTTON: {
 +            bool8 accept = input == INPUT_A_BUTTON;
++            if (sMenu.page == PAGE_CONTROLS) { // its own menu: closed
++                PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
++                return accept ? 3 : 2;
++            }
 +            if (sMenu.page != PAGE_TOP) {
 +                // back to the first page, on the entry that led here
 +                PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);

@@ -7,7 +7,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 3
+#define PORT_CONFIG_VERSION 4
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO };
 
 void Port_LoadConfig(void)
@@ -25,6 +25,11 @@ void Port_LoadConfig(void)
     if (c.version == 2) { // before Dual Core
         c.version = 3;
         c.dualCore = gPortConfig.dualCore;
+    }
+    if (c.version == 3) { // before Control Options (GBA buttons, touch screen on)
+        c.version = 4;
+        c.buttonStyle = PORT_BUTTONS_GBA;
+        c.touchScreenOff = 0;
     }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
