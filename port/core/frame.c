@@ -106,11 +106,23 @@ uint64_t Port_FrameCount(void) { return sFrames; }
 const uint16_t *Port_Framebuffer(void);
 
 static uint16_t sKeysHeld;
+uint8_t gPortFieldControl; // set by the game each frame the player walks freely (no menu)
 
+// DS and 3DS buttons: X is A in menus, and B where the player walks freely
+// (it opens the menu there), whichever it was when pressed until released.
 static void UpdateKeys(void)
 {
-    sKeysHeld = Backend_PollKeys();
-    W16(REG_KEYINPUT, (uint16_t)(~sKeysHeld & 0x3FF));
+    static uint16_t sXAs;
+    uint16_t keys = Backend_PollKeys();
+    if (!(keys & KEY_BIT_X) || !Port_DsButtons())
+        sXAs = 0;
+    else if (sXAs == 0)
+        sXAs = gPortFieldControl ? KEY_BIT_B : KEY_BIT_A;
+    if (gPortFieldControl)
+        gPortFieldControl--;
+    keys |= sXAs;
+    sKeysHeld = keys;
+    W16(REG_KEYINPUT, (uint16_t)(~keys & 0x3FF));
 }
 
 // Y (DS and 3DS controls: held for Rotate Mode), as of the last frame

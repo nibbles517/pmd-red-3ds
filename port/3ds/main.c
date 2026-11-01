@@ -609,6 +609,7 @@ uint16_t Backend_PollKeys(void)
     if (h & KEY_R) k |= KEY_BIT_R;
     if (h & KEY_L) k |= KEY_BIT_L;
     if (h & KEY_Y) k |= KEY_BIT_Y;
+    if (h & KEY_X) k |= KEY_BIT_X;
     return k;
 }
 

@@ -93,6 +93,11 @@ bool Port_WideSize(void)
     return PORT_WIDE_SIZE;
 }
 
+bool Port_DsButtons(void)
+{
+    return PORT_DS_BUTTONS;
+}
+
 bool Port_WantsBottomScreen(void)
 {
     return gGameOptionsRef == NULL || !gGameOptionsRef->touchScreen;

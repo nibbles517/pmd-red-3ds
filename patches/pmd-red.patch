@@ -468,7 +468,7 @@ index 148a1118..359ba656 100644
  
          SpriteSetMatrixNum(&gUnknown_202EDC0, 0);
 diff --git a/src/dungeon_main.c b/src/dungeon_main.c
-index bec907ec..3fb38b23 100644
+index bec907ec..c4835a73 100644
 --- a/src/dungeon_main.c
 +++ b/src/dungeon_main.c
 @@ -66,6 +66,10 @@
@@ -482,7 +482,17 @@ index bec907ec..3fb38b23 100644
  // Frames counter for arrows in diagonal/rotate mode.
  static EWRAM_DATA s16 sArrowsFrames = 0;
  // If both of these are set to TRUE, there are 3 arrows visible instead of 1 in rotate mode
-@@ -319,11 +323,37 @@ void DungeonHandlePlayerInput(void)
+@@ -249,6 +253,9 @@ void DungeonHandlePlayerInput(void)
+                 }
+             }
+ 
++#ifdef PLATFORM_3DS
++            gPortFieldControl = 2; // free to act: X opens the menu (as B)
++#endif
+             if (gRealInputs.shortPress & B_BUTTON) {
+                 r6.a0_8 = 1;
+                 r6.a0_16 = 0;
+@@ -319,11 +326,37 @@ void DungeonHandlePlayerInput(void)
              }
  
              highlightTiles = FALSE;
@@ -2435,6 +2445,28 @@ index 069cfc94..fd9ccc6c 100644
  }
  
  static void ClearSingleBgTilemap(MapRender *mapRender)
+diff --git a/src/ground_lives_helper.c b/src/ground_lives_helper.c
+index b403f8d0..ef63c073 100644
+--- a/src/ground_lives_helper.c
++++ b/src/ground_lives_helper.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/direction.h"
+ #include "ground_lives_helper.h"
+@@ -92,6 +95,9 @@ u32 sub_809CDC8(struct GroundLives_Sub120 *strPtr, u32 *r6, s8 *direction, s32 *
+         {
+             u16 held = gRealInputs.held;
+             u16 pressed = gRealInputs.pressed;
++#ifdef PLATFORM_3DS
++            gPortFieldControl = 2; // walking freely: X opens the menu (as B)
++#endif
+             if (held & DPAD_ANY) {
+                 if (held & B_BUTTON) {
+                     strPtr->unk10 = 0;
 diff --git a/src/ground_main.c b/src/ground_main.c
 index 1dea7998..d585e375 100644
 --- a/src/ground_main.c

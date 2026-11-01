@@ -25,7 +25,9 @@ enum {
     KEY_BIT_RIGHT = 1 << 4, KEY_BIT_LEFT = 1 << 5, KEY_BIT_UP = 1 << 6, KEY_BIT_DOWN = 1 << 7,
     KEY_BIT_R = 1 << 8, KEY_BIT_L = 1 << 9,
     KEY_BIT_Y = 1 << 10, // not a GBA key: the game asks with Port_YHeld()
+    KEY_BIT_X = 1 << 11, // not a GBA key: A in menus, B in the field (UpdateKeys)
 };
+bool Port_DsButtons(void);          // Controls Options > Button Style is DS or 3DS
 
 // Called before each visible scanline is rendered, if set (test tooling).
 extern void (*gPortLineHook)(int line);
