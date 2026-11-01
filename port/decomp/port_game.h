@@ -20,6 +20,8 @@ struct PortStatusSymbol
 
 // Fills up to 2 symbols; returns how many.
 s32 Port_GetStatusSymbols(s32 dungeonSpriteId, struct PortStatusSymbol *out);
+// All of them at once (dx: which graphic), up to max.
+s32 Port_GetAllStatusSymbols(s32 dungeonSpriteId, struct PortStatusSymbol *out, s32 max);
 
 // Port settings that have no room in the game's save (Others > Screen/Layout
 // Options). Kept by the backend in a file of their own.

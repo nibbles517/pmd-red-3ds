@@ -1615,7 +1615,7 @@ index 7a4e7b57..97d66197 100644
          }
  
 diff --git a/src/dungeon_pokemon_sprites.c b/src/dungeon_pokemon_sprites.c
-index b965ec4a..a66128bd 100644
+index b965ec4a..8641ab7f 100644
 --- a/src/dungeon_pokemon_sprites.c
 +++ b/src/dungeon_pokemon_sprites.c
 @@ -1,4 +1,7 @@
@@ -1638,7 +1638,7 @@ index b965ec4a..a66128bd 100644
          switch (spriteInfo.gfxIndex) {
              case STATUS_GFX_SLEEPLESS:
              case STATUS_GFX_BLINKER:
-@@ -502,6 +509,48 @@ void DeletePokemonDungeonSprite(s32 dungeonSpriteId)
+@@ -502,6 +509,92 @@ void DeletePokemonDungeonSprite(s32 dungeonSpriteId)
      MemoryClear8(dSprite, sizeof(*dSprite));
  }
  
@@ -1678,6 +1678,50 @@ index b965ec4a..a66128bd 100644
 +        out[n].anchor = i == 0 ? 0 : 3;
 +        out[n].dx = -gfxInfo->width * 4 + (spriteInfo.gfxIndex == STATUS_GFX_SLEEP ? 8 : 0);
 +        out[n].dy = -gfxInfo->height * 4 - (spriteInfo.gfxIndex == STATUS_GFX_FROZEN ? 0 : 16);
++        n++;
++    }
++    return n;
++}
++
++// ... and all the Pokémon's status symbols at once (not cycling): one per
++// symbol graphic, up to max.
++s32 Port_GetAllStatusSymbols(s32 dungeonSpriteId, struct PortStatusSymbol *out, s32 max)
++{
++    DungeonPokemonSprite *sprite;
++    s32 b, j, n = 0;
++
++    if (sDungeonPokemonSprites == NULL)
++        return 0;
++    sprite = GetSpriteById(dungeonSpriteId);
++    if (sprite == NULL || sprite->status == 0)
++        return 0;
++
++    for (b = 0; b < 32 && n < max; b++) {
++        struct StatusSprite spriteInfo;
++        const struct StatusGraphicsInfo *gfxInfo;
++        const u8 *first;
++        s32 size;
++
++        if (!(sprite->status & (1u << b)))
++            continue;
++        spriteInfo = sStatusSpritesInfo[StatusSymbolBitToIndex(1u << b)];
++        if (spriteInfo.gfxIndex == STATUS_GFX_NONE)
++            continue;
++        gfxInfo = &sStatusGfxInfo[spriteInfo.gfxIndex];
++        first = sStatusGfx + gfxInfo->offsetIntoGraphic;
++        for (j = 0; j < n; j++)
++            if (out[j].dx == spriteInfo.gfxIndex)
++                break;
++        if (j < n)
++            continue; // the same symbol already
++        size = gfxInfo->width * gfxInfo->height * 32;
++        out[n].gfx = first + ((sDungeonPokemonSprites->frame / 4) % gfxInfo->graphicsCount) * size;
++        out[n].width = gfxInfo->width;
++        out[n].height = gfxInfo->height;
++        out[n].palNum = spriteInfo.palIndex;
++        out[n].anchor = 0;
++        out[n].dx = spriteInfo.gfxIndex; // (here: which graphic)
++        out[n].dy = 0;
 +        n++;
 +    }
 +    return n;

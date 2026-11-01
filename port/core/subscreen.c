@@ -354,6 +354,8 @@ static bool8 LoadPalet(void)
 // results screen after clearing or fainting), the rows stay as they were and
 // the sprites keep animating on their own.
 
+#define MAX_ROW_SYMBOLS 8
+
 typedef struct {
     bool8 used;
     bool8 leader;
@@ -370,6 +372,8 @@ typedef struct {
     s16 frame, frameLeft; // position in the down-left animation
     struct PortStatusSymbol symbols[2]; // status symbols over the sprite
     u8 symbolCount;
+    struct PortStatusSymbol allSymbols[MAX_ROW_SYMBOLS]; // all, not cycling (Blue in Fit)
+    u8 allCount;
 } PanelRow;
 
 static PanelRow sRows[MAX_TEAM_MEMBERS];
@@ -468,6 +472,33 @@ static void DrawStatusSymbol(const PanelRow *row, const struct PortStatusSymbol 
     }
 }
 
+static int BlueBarX(void);
+
+// Blue in Fit: all the status symbols, side by side under the belly bar
+// (from where the bars start), level with the held item's sprite.
+static void DrawRowSymbols(const PanelRow *row, int y0)
+{
+    int x = BlueBarX(), mid = y0 + 1 + 35 + 8; // the item sprite's middle
+    if (!LoadPalet())
+        return;
+    for (int i = 0; i < row->allCount; i++) {
+        const struct PortStatusSymbol *sym = &row->allSymbols[i];
+        const u16 *pal = &sPalet[sym->palNum * 16];
+        int top = mid - sym->height * 4;
+        for (int y = 0; y < sym->height * 8; y++) {
+            for (int xx = 0; xx < sym->width * 8; xx++) {
+                int t = (y / 8) * sym->width + xx / 8;
+                int c = (sym->gfx[t * 32 + (y & 7) * 4 + (xx & 7) / 2] >> ((xx & 1) * 4)) & 0xF;
+                if (c)
+                    Plot(x + xx, top + y, pal[c] & 0x7FFF);
+            }
+        }
+        x += sym->width * 8 + 2;
+        if (x >= W)
+            break;
+    }
+}
+
 static void DrawRowSprite(const PanelRow *row, int ax, int ay)
 {
     int n;
@@ -478,6 +509,8 @@ static void DrawRowSprite(const PanelRow *row, int ax, int ay)
         return;
     DrawPose(row->sprite->poses[sw[row->frame].poseId], row->sprite->spriteData, NULL, 0,
              sPalet, row->palNum, ax + sw[row->frame].offset.x, ay + sw[row->frame].offset.y);
+    if (FIT)
+        return; // the symbols go under the belly instead (DrawRowSymbols)
     for (int i = 0; i < row->symbolCount; i++)
         DrawStatusSymbol(row, &row->symbols[i], &sw[row->frame], ax, ay);
 }
@@ -507,6 +540,7 @@ static void ReadMember(PanelRow *row, Entity *entity)
     row->itemPal = row->item != NULL ? gItemParametersData[info->heldItem.id].palette : 0;
     row->tactic = info->tactic < NUM_TACTICS ? gTacticsNames[info->tactic] : NULL;
     row->symbolCount = Port_GetStatusSymbols(info->dungeonSpriteId, row->symbols);
+    row->allCount = Port_GetAllStatusSymbols(info->dungeonSpriteId, row->allSymbols, MAX_ROW_SYMBOLS);
 }
 
 // Updates the rows from the dungeon, unless the team's sprites are not loaded.
@@ -581,6 +615,16 @@ static void DrawItemSprite(int x0, int y0, int icon, int pal)
     }
 }
 
+// Blue in Fit: where the "HP:"/"Belly:" labels start, where their first
+// numbers end (the "/"), and where the bars start
+static int BlueLabelX(void) { return 136 - 3 * GlyphWidth('0') + 12; } // (the bars up to 100 pixels)
+static int BlueHpRight(void)
+{
+    int labelW = TextWidth(sBelly) > TextWidth(sHp) ? TextWidth(sBelly) : TextWidth(sHp);
+    return BlueLabelX() + labelW + 3 * GlyphWidth('0');
+}
+static int BlueBarX(void) { return BlueHpRight() + TextWidth(sSlash) + 3 * GlyphWidth('0') + 3; }
+
 static void DrawRowText(int y0, const PanelRow *row)
 {
     u8 buf[16];
@@ -603,10 +647,9 @@ static void DrawRowText(int y0, const PanelRow *row)
     // level's, numbers and bars lined up, the bars ending 17 pixels from
     // the screen's edge.
     if (FIT) {
-        int cell = GlyphWidth('0'), labelX = 136 - 3 * cell + 12; // (the bars up to 100 pixels)
-        int labelW = TextWidth(sBelly) > TextWidth(sHp) ? TextWidth(sBelly) : TextWidth(sHp);
-        int hpRight = labelX + labelW + 3 * cell, maxRight = hpRight + TextWidth(sSlash) + 3 * cell;
-        int barX = maxRight + 3;
+        int cell = GlyphWidth('0'), labelX = BlueLabelX();
+        int hpRight = BlueHpRight(), maxRight = hpRight + TextWidth(sSlash) + 3 * cell;
+        int barX = BlueBarX();
         barMax = W - 17 - barX;
         DrawText(labelX, y0 + 5, sHp, COLOR_TEXT);
         DrawNumberRight(hpRight, y0 + 5, row->hp);
@@ -738,15 +781,23 @@ static bool8 DrawTeamPanel(void)
         KeyAdd(&k, &row->anim, sizeof(row->anim));
         KeyAdd(&k, &row->palNum, sizeof(row->palNum));
         KeyAdd(&k, &row->frame, sizeof(row->frame));
-        KeyAdd(&k, &row->symbolCount, sizeof(row->symbolCount));
-        KeyAdd(&k, row->symbols, sizeof(row->symbols[0]) * row->symbolCount);
+        if (FIT) {
+            KeyAdd(&k, &row->allCount, sizeof(row->allCount));
+            KeyAdd(&k, row->allSymbols, sizeof(row->allSymbols[0]) * row->allCount);
+        } else {
+            KeyAdd(&k, &row->symbolCount, sizeof(row->symbolCount));
+            KeyAdd(&k, row->symbols, sizeof(row->symbols[0]) * row->symbolCount);
+        }
     }
     if (!KeyChanged(&sLast, &k))
         return FALSE;
     memcpy(canvas, sTeamBg, W * H * sizeof(u16));
     for (int i = 0; i < MAX_TEAM_MEMBERS; i++)
-        if (sRows[i].used)
+        if (sRows[i].used) {
             DrawRowSprite(&sRows[i], 23, i * ROW_H + 41 + ROW_EXTRA); // feet on the middle of the floor
+            if (FIT)
+                DrawRowSymbols(&sRows[i], i * ROW_H);
+        }
     return TRUE;
 }
 
