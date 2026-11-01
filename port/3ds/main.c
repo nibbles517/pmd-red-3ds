@@ -10,7 +10,8 @@
 // elsewhere), or a short status text when there is none (title screen).
 // Sound goes through the DSP (needs sdmc:/3ds/dspfirm.cdc, which most custom
 // firmware setups already have).
-// The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save.
+// The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save
+// (Save Data 1; Save Data 2 and 3 are pmd-red-2.sav and pmd-red-3.sav).
 
 #include <3ds.h>
 #include <stdarg.h>
@@ -21,14 +22,21 @@
 #include "../core/port.h"
 
 #define DATA_DIR "sdmc:/3ds/pmd-red-3ds"
-#define SAVE_PATH DATA_DIR "/pmd-red.sav"
+// Save Data 1 (Game Options > Change Current Save Data on the title picks
+// another: pmd-red-2.sav, pmd-red-3.sav)
+static const char *const sSavePaths[3] = {
+    DATA_DIR "/pmd-red.sav", DATA_DIR "/pmd-red-2.sav", DATA_DIR "/pmd-red-3.sav",
+};
+static const char *sSavePath = DATA_DIR "/pmd-red.sav";
+static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
+#define SAVE_PATH sSavePath
 #define LOG_PATH DATA_DIR "/port.log"
 #define CONFIG_PATH DATA_DIR "/config.bin"
 #define DEBUG_FLAG DATA_DIR "/debug.txt"
 
 void AgbMain(void);
 
-const int Backend_Version11_UpdateRepoIfMissing = 11;
+const int Backend_Version12_UpdateRepoIfMissing = 12;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -710,19 +718,33 @@ void Backend_StoreConfig(const uint8_t *data, uint32_t size)
     fclose(f);
 }
 
+static void FlushSave(void);
+
+void Backend_SetSaveSlot(int slot)
+{
+    if (slot < 0 || slot > 2)
+        slot = 0;
+    if (sSavePaths[slot] == sSavePath)
+        return;
+    FlushSave(); // what is pending goes to the file in use until now
+    sSavePath = sSavePaths[slot];
+    snprintf(sSaveTmpPath, sizeof(sSaveTmpPath), "%s.tmp", sSavePath);
+    Backend_Log("save: now %s", sSavePath);
+}
+
 static void FlushSave(void)
 {
     if (!sSaveDirty)
         return;
     sSaveDirty = 0;
-    FILE *f = fopen(SAVE_PATH ".tmp", "wb");
+    FILE *f = fopen(sSaveTmpPath, "wb");
     if (!f) { Backend_Log("save: cannot open for writing"); return; }
     size_t n = fwrite(sSaveData, 1, sSaveSize, f);
     int ok = (n == sSaveSize) && fflush(f) == 0;
     fclose(f);
-    if (!ok) { Backend_Log("save: write failed"); remove(SAVE_PATH ".tmp"); return; }
+    if (!ok) { Backend_Log("save: write failed"); remove(sSaveTmpPath); return; }
     remove(SAVE_PATH);
-    rename(SAVE_PATH ".tmp", SAVE_PATH);
+    rename(sSaveTmpPath, SAVE_PATH);
 }
 
 // --- Frame, logging, errors ---------------------------------------------------

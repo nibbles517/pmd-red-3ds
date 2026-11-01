@@ -163,6 +163,13 @@ class Harness:
                 ids.append(v)
         return ids
 
+    def save_path(self):
+        slot = getattr(self, 'save_slot', 0)
+        if not self.args.save or slot == 0:
+            return self.args.save
+        stem, ext = os.path.splitext(self.args.save)
+        return f'{stem}-{slot + 1}{ext}'
+
     def save_state(self, path):
         import pickle
         regs = {}
@@ -260,12 +267,15 @@ class Harness:
             uc.emu_stop()
         elif reg == 7:  # save command
             buf, length = self.regs[5], self.regs[6]
-            if value == 1 and self.args.save:
-                open(self.args.save, 'wb').write(bytes(uc.mem_read(buf, length)))
+            save = self.save_path()
+            if value == 1 and save:
+                open(save, 'wb').write(bytes(uc.mem_read(buf, length)))
+            elif value == 5:  # Change Current Save Data: FILE, FILE-2, FILE-3
+                self.save_slot = length
             elif value == 2:
                 ok = 0
-                if self.args.save and os.path.exists(self.args.save):
-                    d = open(self.args.save, 'rb').read()[:length]
+                if save and os.path.exists(save):
+                    d = open(save, 'rb').read()[:length]
                     uc.mem_write(buf, d)
                     ok = 1
                 self.regs[8] = ok

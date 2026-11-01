@@ -44,7 +44,9 @@ The build has two halves:
 
 The save file is `SD:/3ds/pmd-red-3ds/pmd-red.sav`, a standard 128 KiB GBA save:
 you can copy a save from a GBA emulator there, or take the port's save back to
-an emulator. Back up saves before testing early builds.
+an emulator. Back up saves before testing early builds. That is Save Data 1;
+Game Options > Change Current Save Data on the title's main menu switches to
+Save Data 2 or 3 (`pmd-red-2.sav`, `pmd-red-3.sav` in the same folder).
 
 Controls are the GBA's (A, B, L, R, START, SELECT, D-pad or Circle Pad).
 **Y** switches the picture between 1:1 and 1.5x. Use **HOME** to quit, after

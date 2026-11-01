@@ -7,7 +7,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 4
+#define PORT_CONFIG_VERSION 5
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO };
 
 void Port_LoadConfig(void)
@@ -31,10 +31,21 @@ void Port_LoadConfig(void)
         c.buttonStyle = PORT_BUTTONS_GBA;
         c.touchScreenOff = 0;
     }
+    if (c.version == 4) { // before Change Current Save Data (Save Data 1)
+        c.version = 5;
+        c.saveSlot = 0;
+    }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
+    if (gPortConfig.saveSlot > 2)
+        gPortConfig.saveSlot = 0;
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));
     Port_UpdateScreenSize();
+}
+
+int Port_ConfigSaveSlot(void)
+{
+    return gPortConfig.saveSlot;
 }
 
 // The picture's size (port_view.h): 320x240 in Fit size, else 256x192.

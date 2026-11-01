@@ -13,6 +13,7 @@ void Port_FlashInit(void)
     if (sLoaded)
         return;
     memset(sFlash, 0xFF, sizeof(sFlash)); // erased flash
+    Backend_SetSaveSlot(Port_ConfigSaveSlot());
     if (!Backend_LoadSave(sFlash, sizeof(sFlash)))
         memset(sFlash, 0xFF, sizeof(sFlash));
     sLoaded = 1;
@@ -42,4 +43,15 @@ void Port_FlashErase(void)
 {
     memset(sFlash, 0xFF, sizeof(sFlash));
     Backend_StoreSave(sFlash, sizeof(sFlash));
+}
+
+// Change Current Save Data: the save file of that slot replaces the flash's
+// contents (erased flash for a slot not yet used).
+void Port_ChangeSaveSlot(int slot)
+{
+    Port_FlashInit(); // (the current slot loaded, if it wasn't yet)
+    Backend_SetSaveSlot(slot); // writes what is pending for the current one
+    memset(sFlash, 0xFF, sizeof(sFlash));
+    if (!Backend_LoadSave(sFlash, sizeof(sFlash)))
+        memset(sFlash, 0xFF, sizeof(sFlash));
 }

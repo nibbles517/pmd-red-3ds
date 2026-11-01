@@ -40,6 +40,8 @@ struct PortConfig
     // Controls Options (version 4)
     u8 buttonStyle;         // PORT_BUTTONS_*
     u8 touchScreenOff;      // Touch Screen: 0 On, 1 Off
+    // Game Options > Change Current Save Data (version 5)
+    u8 saveSlot;            // 0-2: Save Data 1-3
 };
 
 extern struct PortConfig gPortConfig;
@@ -86,5 +88,7 @@ void Port_DrawWideMapArrays(const u16 (*bg2)[64], const u16 (*bg3)[64], s32 bgX,
 void Port_ShowWideMapArrays(s32 bgX, s32 bgY);
 void Port_WideMapFollow(struct DungeonPos *bgPos, const struct DungeonPos *mon, s32 maxX, s32 maxY);
 void Port_SaveConfig(void);
+// Change Current Save Data: Save Data 1-3 (port/core/save.c)
+void Port_ChangeSaveSlot(int slot);
 
 #endif

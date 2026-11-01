@@ -20,9 +20,9 @@ enum {
     IO_PRESENT_SIZE = 17, // write: the next IO_PRESENT's width << 16 | height
     IO_SUB_SIZE = 18,     // write: the next IO_SUBSCREEN picture's width << 16 | height
 };
-enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4 };
+enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4, CMD_SAVE_SLOT = 5 };
 
-const int Backend_Version11_UpdateRepoIfMissing = 11;
+const int Backend_Version12_UpdateRepoIfMissing = 12;
 
 // Dual Core: one core here, so the second core's part is drawn at once.
 void Backend_RunAsync(void (*fn)(void *), void *arg) { fn(arg); }
@@ -114,6 +114,13 @@ bool Backend_LoadSave(uint8_t *data, uint32_t size)
     IO[IO_LEN] = size;
     IO[IO_CMD] = CMD_SAVE_LOAD;
     return IO[IO_RESULT] != 0;
+}
+
+// harness.py --save FILE is Save Data 1; FILE-2 and FILE-3 the others.
+void Backend_SetSaveSlot(int slot)
+{
+    IO[IO_LEN] = (uint32_t)slot;
+    IO[IO_CMD] = CMD_SAVE_SLOT;
 }
 
 // The port's settings: harness.py --config FILE.

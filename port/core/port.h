@@ -109,12 +109,19 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version11_UpdateRepoIfMissing;
+extern const int Backend_Version12_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
 bool Backend_LoadSave(uint8_t *data, uint32_t size);
 void Backend_StoreSave(const uint8_t *data, uint32_t size);
+// Which of the three save files the two calls above use (0-2; the first is
+// the original one). A pending write to the current file is done first.
+void Backend_SetSaveSlot(int slot);
+// The game's Change Current Save Data (Game Options on the title): uses
+// another save file from now on (port/core/save.c).
+void Port_ChangeSaveSlot(int slot);
+int Port_ConfigSaveSlot(void); // options.c
 // The port's own settings (options.c), a few bytes kept apart from the save.
 bool Backend_LoadConfig(uint8_t *data, uint32_t size);
 void Backend_StoreConfig(const uint8_t *data, uint32_t size);

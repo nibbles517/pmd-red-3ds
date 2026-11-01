@@ -65,7 +65,7 @@ index 9d59c8fc..10cdcf67 100644
  @ I/O register offsets
  	.set OFFSET_REG_DISPCNT,     0x0
 diff --git a/include/constants/main_menu.h b/include/constants/main_menu.h
-index 76eb3bd6..14977e96 100644
+index 76eb3bd6..dd20263d 100644
 --- a/include/constants/main_menu.h
 +++ b/include/constants/main_menu.h
 @@ -25,7 +25,8 @@ enum MainMenuScreens
@@ -78,6 +78,14 @@ index 76eb3bd6..14977e96 100644
      MENU_DELETE_SAVE = 46,
      MENU_DEBUG_DUNGEON,
      MENU_DEBUG_FIELD,
+@@ -33,6 +34,7 @@ enum MainMenuScreens
+     MENU_DEBUG_FIELD_SCRIPT,
+     MENU_DEBUG_DEBUG_MENU,
+     MENU_DEBUG_UNKNOWN_1,
++    MENU_RELOAD_SAVE, // 3DS port: another save was chosen; read it as at power-on
+     MENU_NO_SCREEN_CHANGE = 65500 // (s16)-36
+ };
+ 
 diff --git a/include/gba/defines.h b/include/gba/defines.h
 index 1ccb7e9e..6f7d50d4 100644
 --- a/include/gba/defines.h
@@ -262,15 +270,16 @@ index 1ac7b0fe..9540874d 100644
  void ResetScheduledMemCopies(void);
  void ScheduleMemCopy(u32 *, const u32 *, u32);
 diff --git a/include/options_menu1.h b/include/options_menu1.h
-index d927bef9..3393487e 100644
+index d927bef9..9ce44cd9 100644
 --- a/include/options_menu1.h
 +++ b/include/options_menu1.h
-@@ -20,5 +20,8 @@ struct unkStruct_203B25C
+@@ -20,5 +20,9 @@ struct unkStruct_203B25C
  bool8 sub_801DCC4(void);
  u32 sub_801DCE8(void);
  void sub_801DD50(void);
 +#ifdef PLATFORM_3DS
 +void Port_OptionsMenuFromTitle(bool8 fromTitle);
++bool8 Port_OptionsMenuLoadedSave(void); // Change Current Save Data was used
 +#endif
  
  #endif // GUARD_OPTIONS_MENU1_H
@@ -2856,7 +2865,7 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..a2f8f47d 100644
+index 372641a7..b1dbf665 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
 @@ -1,4 +1,7 @@
@@ -2867,7 +2876,7 @@ index 372641a7..a2f8f47d 100644
  #include "globaldata.h"
  #include "constants/bg_music.h"
  #include "constants/friend_area.h"
-@@ -60,6 +63,18 @@ typedef struct unkTalkTable
+@@ -60,6 +63,19 @@ typedef struct unkTalkTable
  } unkTalkTable;
  
  static EWRAM_DATA s32 sTitleBrightness = 0; // NDS=210FAC0
@@ -2878,6 +2887,7 @@ index 372641a7..a2f8f47d 100644
 +extern bool8 gPortTitleMenu;
 +extern s32 gPortTitleQuickSave;
 +bool8 gPortQuickSaved;
++static bool8 sPortReloadingSave; // Change Current Save Data
 +s32 Port_TitleBrightness(void)
 +{
 +    return sTitleBrightness;
@@ -2886,7 +2896,38 @@ index 372641a7..a2f8f47d 100644
  // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
  
  static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
-@@ -166,6 +181,18 @@ void GameLoop_Async(void)
+@@ -140,6 +156,9 @@ void GameLoop_Async(void)
+     LoadMailInfo();
+     sub_800CD64(0x8000, FALSE);
+     sub_8012284();
++#ifdef PLATFORM_3DS
++reloadSave: // Change Current Save Data: the new save, read as at power-on
++#endif
+     InitializeGameOptions(TRUE);
+     SetWindowTitle(_("PKDi ver 1.0 [Apr 28 2006] 16:37:54"));
+     sub_800DAAC();
+@@ -149,6 +168,9 @@ void GameLoop_Async(void)
+     if (ReadSaveFromPak(&tmp))
+         ThoroughlyResetScriptVars();
+ 
++#ifdef PLATFORM_3DS
++    if (!sPortReloadingSave) { // (the opening scenes: not again for another save)
++#endif
+     xxx_script_related_8001334_Async(STARTMODE_14);
+     xxx_script_related_8001334_Async(STARTMODE_15);
+     ClearScriptVarArray(NULL, EVENT_LOCAL);
+@@ -156,6 +178,10 @@ void GameLoop_Async(void)
+ 
+     if (GetScriptVarValue(NULL, EVENT_LOCAL) == 0)
+         xxx_script_related_8001334_Async(STARTMODE_17);
++#ifdef PLATFORM_3DS
++    }
++    sPortReloadingSave = FALSE;
++#endif
+ 
+     while (TRUE) {
+         sMainLoopsUnk = MAINLOOPS_UNK_0;
+@@ -166,6 +192,18 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
@@ -2905,17 +2946,42 @@ index 372641a7..a2f8f47d 100644
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -241,6 +268,9 @@ void GameLoop_Async(void)
+@@ -224,6 +262,10 @@ void GameLoop_Async(void)
+                 break;
+             if (nextMenu == MENU_NEW_GAME)
+                 break;
++#ifdef PLATFORM_3DS
++            if (nextMenu == MENU_RELOAD_SAVE)
++                break;
++#endif
+         }
+ 
+         DeleteMainMenu();
+@@ -241,7 +283,22 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
+-
 +#ifdef PLATFORM_3DS
 +        gPortTitleMenu = FALSE;
 +#endif
- 
++
++#ifdef PLATFORM_3DS
++        if (nextMenu == MENU_RELOAD_SAVE) {
++            // everything of the last save forgotten (as at power-on), the
++            // new one read; then the title and the main menu again
++            ResetAdventureInfo();
++            sub_8012284();
++            gPortQuickSaved = FALSE;
++            sPortReloadingSave = TRUE;
++            tmp3 = 1;
++            goto reloadSave;
++        }
++#endif
          switch (nextMenu) {
              case 2: {
-@@ -1095,7 +1125,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+                 s32 mailIndex = GetFirstIndexofMailType(7);
+@@ -1095,7 +1152,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
@@ -2934,7 +3000,7 @@ index 372641a7..a2f8f47d 100644
  
  // arm9.bin::0200CA1C
 diff --git a/src/main_menu1.c b/src/main_menu1.c
-index f803cc06..fd96e5f0 100644
+index f803cc06..61a861c1 100644
 --- a/src/main_menu1.c
 +++ b/src/main_menu1.c
 @@ -14,6 +14,7 @@
@@ -2965,7 +3031,7 @@ index f803cc06..fd96e5f0 100644
 +#ifdef PLATFORM_3DS
 +        case MENU_GAME_OPTIONS:
 +            if (sub_801DCE8() == 3)
-+                nextMenu = MENU_MAIN_SCREEN;
++                nextMenu = Port_OptionsMenuLoadedSave() ? MENU_RELOAD_SAVE : MENU_MAIN_SCREEN;
 +            break;
 +#endif
      }
@@ -3179,7 +3245,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..1011f3d7 100644
+index 86f582c2..d589a1cb 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3200,7 +3266,7 @@ index 86f582c2..1011f3d7 100644
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +25,9 @@ enum
+@@ -18,7 +25,13 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -3208,19 +3274,25 @@ index 86f582c2..1011f3d7 100644
 +    MENU_OPTION_NO,
 +    MENU_OPTION_SCREEN, // 3DS port: Graphics Options
 +    MENU_OPTION_CONTROLS, // 3DS port: Controls Options
++    MENU_OPTION_SAVE_DATA, // 3DS port: Change Current Save Data (title only)
++    MENU_OPTION_SAVE_SLOT1, // ... Save Data 1, 2, 3
++    MENU_OPTION_SAVE_SLOT2,
++    MENU_OPTION_SAVE_SLOT3,
  };
  
  enum OptionsMenuStates
-@@ -31,6 +40,8 @@ enum OptionsMenuStates
+@@ -31,6 +44,10 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
 +    OPTIONS_MENU_SCREEN, // 3DS port
 +    OPTIONS_MENU_CONTROLS, // 3DS port
++    OPTIONS_MENU_SAVE_DATA, // 3DS port: picking Save Data 1-3
++    OPTIONS_MENU_SAVE_LOADED, // 3DS port: "Loaded a new save data."
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +59,33 @@ static void sub_801DED0(void);
+@@ -48,6 +65,75 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3235,6 +3307,7 @@ index 86f582c2..1011f3d7 100644
 +// 3DS port: settings take effect as soon as a toggle changes; leaving the
 +// Windows Options or Graphics Options window then writes them and says
 +// "Changes saved." (instead of asking "Change settings?").
++#define OTHERS_MENU_WIDTH 11
 +static GameOptions sOpenedOptions;
 +static struct PortConfig sOpenedConfig; // the port's settings in Windows Options
 +static bool8 sSaveGameOptions, sSavePortConfig;
@@ -3243,18 +3316,59 @@ index 86f582c2..1011f3d7 100644
 +ALIGNED(4) static const u8 sTitleGameOptions[] = _("Game Options");
 +static const WindowHeader sTitleHeader = {1, 0, 9, 0}; // wide enough for it
 +
++// Change Current Save Data (only there): Save Data 1-3 in a smaller window
++ALIGNED(4) static const u8 sChangeSaveData[] = _("Change Current Save Data");
++ALIGNED(4) static const u8 sSaveData1[] = _("Save Data 1");
++ALIGNED(4) static const u8 sSaveData2[] = _("Save Data 2");
++ALIGNED(4) static const u8 sSaveData3[] = _("Save Data 3");
++ALIGNED(4) static const u8 sSaveDataLoaded[] = _("Loaded a new save data.\nReturning to the main menu.");
++static const MenuItem sSaveDataItems[] = {
++    {sSaveData1, MENU_OPTION_SAVE_SLOT1},
++    {sSaveData2, MENU_OPTION_SAVE_SLOT2},
++    {sSaveData3, MENU_OPTION_SAVE_SLOT3},
++    {NULL, MENU_OPTION_DEFAULT},
++};
++static const WindowTemplate sSaveDataWindow = {
++    0,
++    3,
++    20, 5,
++    8, 5,
++    5, 0,
++    NULL
++};
++static MenuStruct sSaveDataMenu;
++static bool8 sReloadSave; // a save was loaded: the main menu reads it again
++static void HandleSaveDataMenu(void);
++static void HandleSaveDataLoaded(void);
++
 +void Port_OptionsMenuFromTitle(bool8 fromTitle)
 +{
 +    sFromTitle = fromTitle;
++    sReloadSave = FALSE;
 +}
-+#define OTHERS_MENU_WIDTH 11
++
++bool8 Port_OptionsMenuLoadedSave(void)
++{
++    return sReloadSave;
++}
++
++// The Game Options window, as in OPTIONS_MENU_MAIN
++static void SetGameOptionsWindow(void)
++{
++    sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
++    sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
++    if (!sFromTitle || sUnknown_203B25C->unkBC.id[0].width < OTHERS_MENU_WIDTH)
++        sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
++    if (sFromTitle)
++        sUnknown_203B25C->unkBC.id[0].header = &sTitleHeader;
++}
 +#else
 +#define OTHERS_MENU_WIDTH 10
 +#endif
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +114,18 @@ u32 sub_801DCE8(void)
+@@ -76,8 +162,24 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3268,38 +3382,61 @@ index 86f582c2..1011f3d7 100644
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
 +            HandleScreenMenu();
++            break;
++        case OPTIONS_MENU_SAVE_DATA:
++            HandleSaveDataMenu();
              break;
++        case OPTIONS_MENU_SAVE_LOADED:
++            HandleSaveDataLoaded();
++            break;
 +#endif
          default:
              break;
      }
-@@ -122,7 +170,11 @@ static void sub_801DD84(void)
+@@ -120,9 +222,13 @@ static void sub_801DD84(void)
+             for(i = 0; i < 4; i++)
+                 sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
++#ifdef PLATFORM_3DS
++            SetGameOptionsWindow();
++#else
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
-+#ifdef PLATFORM_3DS
-+            if (sFromTitle)
-+                sUnknown_203B25C->unkBC.id[0].header = &sTitleHeader;
 +#endif
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -132,7 +184,11 @@ static void sub_801DD84(void)
+@@ -130,10 +236,26 @@ static void sub_801DD84(void)
+             for (i = 0; i < 4; i++)
+                 sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
++#ifdef PLATFORM_3DS
++            SetGameOptionsWindow();
++#else
              sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
              sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
-+#ifdef PLATFORM_3DS
-+            if (sFromTitle)
-+                sUnknown_203B25C->unkBC.id[0].header = &sTitleHeader;
 +#endif
++            break;
++#ifdef PLATFORM_3DS
++        case OPTIONS_MENU_SAVE_DATA:
++            CreateOthersMenu();
++
++            for (i = 0; i < 4; i++)
++                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
++
++            SetGameOptionsWindow();
++            sUnknown_203B25C->unkBC.id[1] = sSaveDataWindow;
++            sub_8012D08(&sUnknown_203B25C->unkBC.id[1], 3);
              break;
++#endif
          default:
              for (i = 0; i < 4; i++)
-@@ -150,6 +206,10 @@ static void sub_801DED0(void)
+                 sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
+@@ -150,6 +272,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3310,7 +3447,7 @@ index 86f582c2..1011f3d7 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +224,37 @@ static void sub_801DED0(void)
+@@ -164,12 +290,48 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3331,6 +3468,17 @@ index 86f582c2..1011f3d7 100644
 +            sOpenedOptions = *gGameOptionsRef;
 +            PortControlMenu_Create(&sUnknown_203B25C->newOptions);
 +            break;
++        case OPTIONS_MENU_SAVE_DATA:
++            // the Game Options list stays, without its cursor
++            sUnknown_203B25C->menu.unk0 = sTitleGameOptions;
++            sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
++            sUnknown_203B25C->menu.unk4C = FALSE;
++            sub_8012EBC(&sUnknown_203B25C->menu);
++            sub_8012D60(&sSaveDataMenu, sSaveDataItems, 0, NULL, MENU_OPTION_SAVE_SLOT1 + gPortConfig.saveSlot, 1);
++            break;
++        case OPTIONS_MENU_SAVE_LOADED:
++            CreateDialogueBoxAndPortrait(sSaveDataLoaded, 0, NULL, 0x101);
++            break;
 +        case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
 +            // write what changed, then say so (like "Save completed.")
 +            if (sSaveGameOptions)
@@ -3348,7 +3496,7 @@ index 86f582c2..1011f3d7 100644
      }
  }
  
-@@ -180,12 +265,30 @@ static void CreateOthersMenu(void)
+@@ -180,12 +342,36 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3365,6 +3513,12 @@ index 86f582c2..1011f3d7 100644
 +    loopMax++;
 +    sUnknown_203B25C->menuItems[loopMax].text = sControlOptions;
 +    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_CONTROLS;
++    // ... and, on the title only, Change Current Save Data
++    if (sFromTitle) {
++        loopMax++;
++        sUnknown_203B25C->menuItems[loopMax].text = sChangeSaveData;
++        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SAVE_DATA;
++    }
 +#endif
  
 +#ifdef PLATFORM_3DS
@@ -3379,7 +3533,7 @@ index 86f582c2..1011f3d7 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +332,14 @@ static void HandleOthersMenu(void)
+@@ -229,6 +415,17 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3390,11 +3544,14 @@ index 86f582c2..1011f3d7 100644
 +        case MENU_OPTION_CONTROLS:
 +            SetOptionsMenuState(OPTIONS_MENU_CONTROLS);
 +            break;
++        case MENU_OPTION_SAVE_DATA:
++            SetOptionsMenuState(OPTIONS_MENU_SAVE_DATA);
++            break;
 +#endif
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +383,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +469,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3411,7 +3568,7 @@ index 86f582c2..1011f3d7 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +403,59 @@ static void sub_801E0FC(void)
+@@ -282,12 +489,92 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3459,6 +3616,39 @@ index 86f582c2..1011f3d7 100644
      }
  }
  
++// Save Data 1-3: that save file is used from now on (and next time); the
++// main menu then reads it as at power-on.
++static void HandleSaveDataMenu(void)
++{
++    s32 menuAction = 0;
++
++    if (sub_8012FD8(&sSaveDataMenu) == 0)
++        sub_8013114(&sSaveDataMenu, &menuAction);
++
++    switch (menuAction) {
++        case MENU_OPTION_SAVE_SLOT1:
++        case MENU_OPTION_SAVE_SLOT2:
++        case MENU_OPTION_SAVE_SLOT3:
++            gPortConfig.saveSlot = menuAction - MENU_OPTION_SAVE_SLOT1;
++            Port_SaveConfig();
++            Port_ChangeSaveSlot(gPortConfig.saveSlot);
++            sReloadSave = TRUE;
++            SetOptionsMenuState(OPTIONS_MENU_SAVE_LOADED);
++            break;
++        case MENU_OPTION_DEFAULT:
++            SetOptionsMenuState(OPTIONS_MENU_MAIN);
++            break;
++    }
++}
++
++static void HandleSaveDataLoaded(void)
++{
++    s32 menuAction;
++
++    if (sub_80144A4(&menuAction) == 0)
++        SetOptionsMenuState(OPTIONS_MENU_EXIT);
++}
++
 +static void HandleChangesSaved(void)
 +{
 +    s32 menuAction;
