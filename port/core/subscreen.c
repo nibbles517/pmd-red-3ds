@@ -583,7 +583,7 @@ static void DrawRowText(int y0, const PanelRow *row)
     // level's, numbers and bars lined up, the bars ending 17 pixels from
     // the screen's edge.
     if (FIT) {
-        int cell = GlyphWidth('0'), labelX = 136 - 3 * cell;
+        int cell = GlyphWidth('0'), labelX = 136 - 3 * cell + 12; // (the bars up to 100 pixels)
         int labelW = TextWidth(sBelly) > TextWidth(sHp) ? TextWidth(sBelly) : TextWidth(sHp);
         int hpRight = labelX + labelW + 3 * cell, maxRight = hpRight + TextWidth(sSlash) + 3 * cell;
         int barX = maxRight + 3;
