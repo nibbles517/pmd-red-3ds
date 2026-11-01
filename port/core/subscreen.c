@@ -362,6 +362,8 @@ typedef struct {
     s16 hp, maxHp;
     s16 belly, maxBelly;
     const u8 *item;     // NULL: none
+    s16 itemIcon;       // the item's sprite as on the floor (-1: none): its tiles
+    u8 itemPal;         // ... and OBJ palette
     const u8 *tactic;
     const axmain *sprite;
     u8 anim, palNum;
@@ -501,6 +503,8 @@ static void ReadMember(PanelRow *row, Entity *entity)
     row->belly = FixedPointToInt(info->belly);
     row->maxBelly = FixedPointToInt(info->maxBelly);
     row->item = ItemExists(&info->heldItem) ? gItemParametersData[info->heldItem.id].name : NULL;
+    row->itemIcon = row->item != NULL ? gItemParametersData[info->heldItem.id].icon : -1;
+    row->itemPal = row->item != NULL ? gItemParametersData[info->heldItem.id].palette : 0;
     row->tactic = info->tactic < NUM_TACTICS ? gTacticsNames[info->tactic] : NULL;
     row->symbolCount = Port_GetStatusSymbols(info->dungeonSpriteId, row->symbols);
 }
@@ -561,6 +565,22 @@ static void DrawNumberRight(int xRight, int y, int v)
     }
 }
 
+// An item's sprite as dungeon_items.c puts it on the floor: 16x16, from OBJ
+// tile 0x1A0 + icon * 4 (where the dungeon loads them), in OBJ palette pal.
+static void DrawItemSprite(int x0, int y0, int icon, int pal)
+{
+    const u8 *tiles = &gPortVram[0x10000 + (0x1A0 + icon * 4) * 32];
+    const u16 *colors = &sPltt[256 + (pal & 15) * 16];
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 16; x++) {
+            int t = (y >> 3) * 2 + (x >> 3); // 1D: top-left, top-right, bottom-left, bottom-right
+            int c = (tiles[t * 32 + (y & 7) * 4 + (x & 7) / 2] >> ((x & 1) * 4)) & 0xF;
+            if (c)
+                Plot(x0 + x, y0 + y, colors[c] & 0x7FFF);
+        }
+    }
+}
+
 static void DrawRowText(int y0, const PanelRow *row)
 {
     u8 buf[16];
@@ -599,6 +619,9 @@ static void DrawRowText(int y0, const PanelRow *row)
         DrawNumberRight(maxRight, y0 + 17, row->maxBelly);
         // (always to 17 pixels from the edge: the belly scaled to the bar)
         DrawHpBar(barX, y0 + 20, barMax, row->belly, row->maxBelly < 1 ? 1 : row->maxBelly);
+        // the held item's sprite, as on the floor, under the belly's "/"
+        if (row->itemIcon >= 0)
+            DrawItemSprite(hpRight + TextWidth(sSlash) / 2 - 8, y0 + 29, row->itemIcon, row->itemPal);
     }
     else {
         DrawNumberRight(136, y0 + 17, row->hp);
@@ -674,6 +697,9 @@ static void AddRowsText(DrawKey *k)
         KeyAdd(k, &row->belly, sizeof(row->belly));
         KeyAdd(k, &row->maxBelly, sizeof(row->maxBelly));
         KeyAdd(k, &row->item, sizeof(row->item));
+        KeyAdd(k, &row->itemIcon, sizeof(row->itemIcon));
+        if (row->itemIcon >= 0) // (its colours: drawn again when they change)
+            KeyAdd(k, &sPltt[256 + (row->itemPal & 15) * 16], 16 * sizeof(u16));
         KeyAdd(k, &row->tactic, sizeof(row->tactic));
     }
 }
