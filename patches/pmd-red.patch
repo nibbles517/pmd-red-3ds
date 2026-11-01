@@ -519,7 +519,7 @@ index 148a1118..359ba656 100644
  
          SpriteSetMatrixNum(&gUnknown_202EDC0, 0);
 diff --git a/src/dungeon_main.c b/src/dungeon_main.c
-index bec907ec..c4835a73 100644
+index bec907ec..4f86b58d 100644
 --- a/src/dungeon_main.c
 +++ b/src/dungeon_main.c
 @@ -66,6 +66,10 @@
@@ -581,6 +581,26 @@ index bec907ec..c4835a73 100644
              if (highlightTiles) {
                  sub_805E738(leader);
                  sInRotateMode = TRUE;
+@@ -615,6 +648,9 @@ static void TryCreateModeArrows(Entity *leader)
+             yMul = sDiagonalArrowsInfo[i].y * 10;
+             y2 = (sArrowsFrames / 2) & 7;
+             y = (y2 * sDiagonalArrowsInfo[i].y) + yMul + 82;
++#ifdef PLATFORM_3DS
++            y += PORT_LEADER_SHIFT; // around the leader, lower in the wide view
++#endif
+             SpriteSetY(&sprite, y);
+ 
+             AddSprite(&sprite, 0x100, NULL, NULL);
+@@ -638,6 +674,9 @@ static void TryCreateModeArrows(Entity *leader)
+             yMul = sRotateArrowsInfo[direction].y * 10;
+             y2 = (sArrowsFrames / 2) & 7;
+             y = (y2 * sRotateArrowsInfo[direction].y) + yMul + 82;
++#ifdef PLATFORM_3DS
++            y += PORT_LEADER_SHIFT; // around the leader, lower in the wide view
++#endif
+             for (i = 0; i < to; i++) {
+                 u32 flips;
+ 
 diff --git a/src/dungeon_map.c b/src/dungeon_map.c
 index 7e6792c7..b2875aa9 100644
 --- a/src/dungeon_map.c
