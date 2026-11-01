@@ -54,7 +54,9 @@ static int sSubW = 256, sSubH = 192;
 #define W sSubW
 #define H sSubH
 #define CANVAS_PIXELS (SUBSCREEN_W_MAX * SUBSCREEN_H_MAX)
-#define ROW_H 48
+#define FIT (W > 256) // the picture is 320x240 (Sub-Screen Settings > Size: Fit)
+#define ROW_H (H / 4)  // Blue: a member's row, 48 lines (60 in Fit)
+#define ROW_EXTRA (ROW_H - 48)
 
 static u16 *sOut;       // where drawing goes
 static u16 *sOutFrame;  // the caller's buffer
@@ -115,13 +117,13 @@ static void DrawSpriteBox(int y0, bool8 gray)
             int r, g, b;
             if (y < 4) {
                 r = Lerp(196, 142, y, 4); g = Lerp(150, 77, y, 4); b = Lerp(88, 16, y, 4);
-            } else if (y < 27) {
+            } else if (y < 27 + ROW_EXTRA) {
                 r = 134; g = 63; b = 2;
             } else {
                 // floor, lighter towards the middle of an ellipse
-                int dx = x - 23, dy = y - 37;
+                int dx = x - 23, dy = y - 37 - ROW_EXTRA;
                 int d = dx * dx * 100 / (22 * 22) + dy * dy * 100 / (9 * 9); // < 100 inside
-                if (y < 29) { r = 170; g = 115; b = 50; }
+                if (y < 29 + ROW_EXTRA) { r = 170; g = 115; b = 50; }
                 else if (d < 100) {
                     r = Lerp(250, 222, d, 100); g = Lerp(230, 190, d, 100); b = Lerp(190, 132, d, 100);
                 } else { r = 212; g = 172; b = 110; }
@@ -556,7 +558,9 @@ static void DrawNumberRight(int xRight, int y, int v)
 static void DrawRowText(int y0, const PanelRow *row)
 {
     u8 buf[16];
-    int x;
+    int x, barMax = FIT ? 140 : 80; // (Fit: as far as the wider panel allows)
+
+    y0 += ROW_EXTRA / 2; // the text in the middle of a taller row (Fit)
 
     DrawText(56, y0 + 5, row->name, COLOR_NAME);
 
@@ -570,7 +574,7 @@ static void DrawRowText(int y0, const PanelRow *row)
     DrawNumberRight(160, y0 + 17, row->maxHp);
     // As on the DS, the bar is one pixel per max HP (the DS stops at 60;
     // here it goes up to 80).
-    DrawHpBar(163, y0 + 20, row->maxHp < 1 ? 1 : row->maxHp > 80 ? 80 : row->maxHp, row->hp, row->maxHp);
+    DrawHpBar(163, y0 + 20, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
 
     x = DrawText(60, y0 + 29, sItem, COLOR_TEXT);
     DrawText(x, y0 + 29, row->item != NULL ? row->item : sNone, COLOR_TEXT);
@@ -679,7 +683,7 @@ static bool8 DrawTeamPanel(void)
     memcpy(canvas, sTeamBg, W * H * sizeof(u16));
     for (int i = 0; i < MAX_TEAM_MEMBERS; i++)
         if (sRows[i].used)
-            DrawRowSprite(&sRows[i], 23, i * ROW_H + 41); // feet on the middle of the floor
+            DrawRowSprite(&sRows[i], 23, i * ROW_H + 41 + ROW_EXTRA); // feet on the middle of the floor
     return TRUE;
 }
 
@@ -963,7 +967,7 @@ bool8 Port_MinimapLeaderDot(DungeonPos *pos);
 #define SUBMAP_FIRST_ROW 2 // the rows the game's map shows (DrawMinimapTile)
 #define SUBMAP_ROWS (DUNGEON_MAX_SIZE_Y - 1 - SUBMAP_FIRST_ROW)
 #define SUBMAP_X ((W - DUNGEON_MAX_SIZE_X * 4) / 2)
-#define SUBMAP_Y 6
+#define SUBMAP_Y (FIT ? 30 : 6) // (Fit: about the middle of the space above the window)
 #define MAP_GFX_PLAYER 8
 
 static int sDotFrames;
@@ -1046,7 +1050,7 @@ static void Restore(const u16 *from, int x, int y, int w, int h)
 }
 
 #define TEAM_WIN_X 16
-#define TEAM_WIN_W 26 // inside, in tiles
+#define TEAM_WIN_W (FIT ? 34 : 26) // inside, in tiles
 #define TEAM_WIN_H 6
 #define TEAM_WIN_Y (H - (TEAM_WIN_H + 2) * 8)
 
@@ -1133,16 +1137,17 @@ static bool8 DrawMapAndTeam(void)
     AddRowsText(&k);
     if (KeyChanged(&sLastText, &k)) {
         // Positions as on the DS: names at 28, "Level" at 96, and HP as
-        // "hp/max" in three-digit cells ending at 197.
+        // "hp/max" in three-digit cells ending at 197 (spread out over the
+        // wider window in Fit).
         Restore(sMtBase, TEAM_WIN_X + 8, TEAM_WIN_Y + 8, TEAM_WIN_W * 8, TEAM_WIN_H * 8);
         y = TEAM_WIN_Y + 8;
         for (int i = 0; i < MAX_TEAM_MEMBERS; i++, y += 12) {
             const PanelRow *row = &sRows[i];
-            int maxRight = TEAM_WIN_X + 181, slashX = maxRight - 3 * GlyphWidth('0') - TextWidth(sSlash);
+            int maxRight = TEAM_WIN_X + (FIT ? 237 : 181), slashX = maxRight - 3 * GlyphWidth('0') - TextWidth(sSlash);
             if (!row->used)
                 continue;
             DrawText(TEAM_WIN_X + 12, y, row->name, COLOR_NAME);
-            x = DrawText(TEAM_WIN_X + 80, y, sLevel, COLOR_TEXT);
+            x = DrawText(TEAM_WIN_X + (FIT ? 104 : 80), y, sLevel, COLOR_TEXT);
             FormatInt(buf, row->level);
             DrawText(x, y, buf, COLOR_TEXT);
             DrawNumberRight(slashX, y, row->hp);
@@ -1163,9 +1168,10 @@ static bool8 DrawMapAndTeam(void)
 
 #define LOG_WIN_X 16
 #define LOG_WIN_Y 16
-#define LOG_WIN_W 26 // inside, in tiles
-#define LOG_WIN_H 18
-#define LOG_LINES 11
+#define LOG_WIN_W (FIT ? 34 : 26) // inside, in tiles
+#define LOG_WIN_H (FIT ? 24 : 18)
+#define LOG_LINES (FIT ? 14 : 11)
+#define LOG_LINES_MAX 14
 #define LOG_LINE_H 13
 
 // The game's text colour codes (InterpretColorChar, text_3.c).
@@ -1234,7 +1240,7 @@ static void DrawLogText(int x0, int y, const u8 *str)
 static bool8 DrawMessageLog(void)
 {
     static DrawKey sLast, k;
-    const struct MessageLogString *lines[LOG_LINES];
+    const struct MessageLogString *lines[LOG_LINES_MAX];
     int count = 0, id = gDungeon->unk16;
 
     StartDungeonLayout(PORT_SUB_LAYOUT_LOG, &k);
@@ -1543,7 +1549,7 @@ bool Port_RenderSubScreen(u16 *out)
     sDirtyY0 = sDirtyY1 = 0;
     sOut = sOutFrame = sCanvas;
     {
-        bool8 fit = gPortConfig.layout[1][0] == PORT_SIZE_FIT && gDungeon == NULL;
+        bool8 fit = gPortConfig.layout[1][0] == PORT_SIZE_FIT;
         int w = fit ? 320 : 256, h = fit ? 240 : 192;
         if (w != sSubW) { // a new size: everything again
             sSubW = w;
