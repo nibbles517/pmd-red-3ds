@@ -1282,7 +1282,7 @@ static bool8 DrawMapAndTeam(void)
                 // "Lv. 100", "hp/max", and the HP bar (one pixel per max HP)
                 // up to as far from the window's right edge as the name is
                 // from its left
-                int hpRight = TEAM_WIN_X + 128 + 3 * cell;
+                int hpRight = TEAM_WIN_X + 132 + 3 * cell; // (the bar up to 100 pixels)
                 int maxRight = hpRight + TextWidth(sSlash) + 3 * cell;
                 int barX = maxRight + 3, barMax = TEAM_WIN_X + (TEAM_WIN_W + 2) * 8 - 12 - barX;
                 x = DrawText(TEAM_WIN_X + 80, y, sLv, COLOR_TEXT);
@@ -1291,7 +1291,8 @@ static bool8 DrawMapAndTeam(void)
                 DrawNumberRight(hpRight, y, row->hp);
                 DrawText(hpRight, y, sSlash, COLOR_TEXT);
                 DrawNumberRight(maxRight, y, row->maxHp);
-                DrawHpBar(barX, y + 3, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
+                // (centred on the digits: their rows 1-8)
+                DrawHpBar(barX, y + 1, row->maxHp < 1 ? 1 : row->maxHp > barMax ? barMax : row->maxHp, row->hp, row->maxHp);
             } else {
                 // Positions as on the DS: names at 28, "Level" at 96, and HP
                 // as "hp/max" in three-digit cells ending at 197.
