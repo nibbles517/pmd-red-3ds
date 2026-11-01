@@ -959,7 +959,7 @@ index 4a9a72ad..ebc461ad 100644
      gDungeon->unk181e8.unk1821A = 0;
  }
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..5348bec4 100644
+index 0680f301..dc16ebd2 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,11 @@
@@ -1071,7 +1071,7 @@ index 0680f301..5348bec4 100644
 +    },
 +    [PAGE_SUB_SETTINGS] = { // (the second screen has no GBA size)
 +        { sTextEnabled, 2, 64, 40, { sTextYes, sTextNo }, 0, NO_LINK },
-+        { sTextSize, 3, 64, 40, { sTextDS, sTextFit, sText3DS }, (1 << 1) | (1 << 2), NO_LINK },
++        { sTextSize, 3, 64, 40, { sTextDS, sTextFit, sText3DS }, (1 << 2), NO_LINK },
 +        { sTextScale, 3, 64, 40, { sTextNone, sTextFull, sTextStretch }, 7, NO_LINK },
 +    },
 +};
@@ -3088,7 +3088,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..78d3eaf1
+index 00000000..d2952377
 --- /dev/null
 +++ b/src/port_screen_menu.c
 @@ -0,0 +1,319 @@
@@ -3225,13 +3225,13 @@ index 00000000..78d3eaf1
 +}
 +
 +// Settings (setting, or one of its choices) that do nothing yet are shown in
-+// red: Scale; the 3DS size, and Fit for the second screen.
++// red: Scale; the 3DS size.
 +static bool8 IsPlaceholder(s32 setting, s32 choice)
 +{
 +    if (setting == SETTING_SCALE)
 +        return TRUE;
 +    if (setting == SETTING_SIZE)
-+        return choice == PORT_SIZE_3DS || (choice == PORT_SIZE_FIT && sMenu.page == PAGE_SUB_SCREEN);
++        return choice == PORT_SIZE_3DS;
 +    return FALSE;
 +}
 +

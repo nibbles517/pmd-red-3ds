@@ -238,6 +238,8 @@ class Harness:
                 self.line.clear()
             else:
                 self.line.append(value & 0xFF)
+        elif reg == 18:  # the size of the next second-screen picture
+            self.sub_size = (value >> 16, value & 0xFFFF)
         elif reg == 17:  # the size of the next picture presented
             self.frame_size = (value >> 16, value & 0xFFFF)
         elif reg == 1:  # present
@@ -287,7 +289,8 @@ class Harness:
             self.maps_dumped = getattr(self, 'maps_dumped', 0) + 1
             write_png(os.path.join(self.args.out, f'worldmap{self.maps_dumped}.png'), bytes(uc.mem_read(value, 512 * 512 * 2)), 512, 512)
         elif reg == 14 and value and self.wants_shot():  # second screen rendered (256x192)
-            write_png(os.path.join(self.args.out, f'sub_{self.frame:05d}.png'), bytes(uc.mem_read(value, 256 * 192 * 2)), 256, 192)
+            sw, sh = getattr(self, 'sub_size', (256, 192))
+            write_png(os.path.join(self.args.out, f'sub_{self.frame:05d}.png'), bytes(uc.mem_read(value, sw * sh * 2)), sw, sh)
         elif reg == 12:  # audio chunk: `value` interleaved 16-bit stereo samples
             self.audio += bytes(uc.mem_read(self.regs[9], value * 4))
             self.audio_rate = self.regs[11]

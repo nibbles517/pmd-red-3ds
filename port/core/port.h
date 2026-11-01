@@ -67,11 +67,15 @@ int Port_DualCore(void);            // Graphics Options > Dual Core: On       //
 
 // subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
 // true when there is something to show.
-#define SUBSCREEN_W 256
-#define SUBSCREEN_H 192
+#define SUBSCREEN_W_MAX 320 // the second screen's picture: 256x192, or 320x240 (Fit)
+#define SUBSCREEN_H_MAX 240
 // The caller keeps `out` between calls: when nothing changed since the last
 // call, out is left as it was and Port_SubScreenChanged() returns false.
+// `out` holds SUBSCREEN_W_MAX x SUBSCREEN_H_MAX pixels; the picture is
+// Port_SubScreenSize() (rows that wide) after the call. When the size
+// changes, the whole picture is drawn again.
 bool Port_RenderSubScreen(uint16_t *out);
+void Port_SubScreenSize(int *w, int *h);
 bool Port_SubScreenChanged(void);
 void Port_SubScreenChangedArea(int *x0, int *y0, int *x1, int *y1); // what changed (x1/y1 exclusive)
 

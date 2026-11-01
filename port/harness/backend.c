@@ -18,6 +18,7 @@ enum {
     IO_SUBSCREEN = 14, // read: nonzero = render the second screen; write: its buffer (0 = nothing)
     IO_LATE = 16,      // read: nonzero = report the last frame as late (Frame Skip: Auto)
     IO_PRESENT_SIZE = 17, // write: the next IO_PRESENT's width << 16 | height
+    IO_SUB_SIZE = 18,     // write: the next IO_SUBSCREEN picture's width << 16 | height
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4 };
 
@@ -86,9 +87,14 @@ void Backend_Present(const uint16_t *frame, int width, int height)
         width = 256;
         height = 192;
     }
-    static uint16_t sub[SUBSCREEN_W * SUBSCREEN_H];
-    if (IO[IO_SUBSCREEN])
-        IO[IO_SUBSCREEN] = Port_RenderSubScreen(sub) ? (uint32_t)(uintptr_t)sub : 0;
+    static uint16_t sub[SUBSCREEN_W_MAX * SUBSCREEN_H_MAX];
+    if (IO[IO_SUBSCREEN]) {
+        bool shown = Port_RenderSubScreen(sub);
+        int sw, sh;
+        Port_SubScreenSize(&sw, &sh);
+        IO[IO_SUB_SIZE] = (uint32_t)(sw << 16 | sh);
+        IO[IO_SUBSCREEN] = shown ? (uint32_t)(uintptr_t)sub : 0;
+    }
     IO[IO_PRESENT_SIZE] = (uint32_t)(width << 16 | height);
     IO[IO_PRESENT] = (uint32_t)(uintptr_t)frame;
 }
@@ -174,7 +180,7 @@ void HarnessMain(void)
             IO[IO_DUMPMAPS] = (uint32_t)(uintptr_t)map;
         }
         void Port_DebugRenderMapSprites(uint16_t *out);
-        static uint16_t sprites[SUBSCREEN_W * SUBSCREEN_H];
+        static uint16_t sprites[SUBSCREEN_W_MAX * SUBSCREEN_H_MAX];
         Port_DebugRenderMapSprites(sprites);
         IO[IO_SUBSCREEN] = (uint32_t)(uintptr_t)sprites;
     }

@@ -261,7 +261,7 @@ static void Part(int part)
 
 enum { SUB_UNSET, SUB_TEXT, SUB_PICTURE };
 static int sSubMode;
-static uint16_t sSubFrame[SUBSCREEN_W * SUBSCREEN_H];
+static uint16_t sSubFrame[SUBSCREEN_W_MAX * SUBSCREEN_H_MAX];
 
 static void PrintStatus(void);
 
@@ -271,6 +271,8 @@ static void PresentSub(void)
     const int width = sBottom ? 400 : 320;
 
     bool shown = Port_RenderSubScreen(sSubFrame);
+    int subW, subH;
+    Port_SubScreenSize(&subW, &subH);
     Part(T_SUB);
     if (!shown) {
         if (sSubMode != SUB_TEXT) {
@@ -283,12 +285,13 @@ static void PresentSub(void)
     // The second screen is double-buffered: what changed is drawn into this
     // frame's buffer, and again into the other one next frame (it missed it).
     // While nothing changes, neither is touched.
-    static int sSubFade = -1;
+    static int sSubFade = -1, sSubShownW;
     static int sPend[4]; // the area the other buffer still lacks (x0, y0, x1, y1)
     int area[4] = { 0, 0, 0, 0 };
     int full = sFadeLevel != sSubFade;
     sSubFade = sFadeLevel;
-    if (sSubMode != SUB_PICTURE) {
+    if (sSubMode != SUB_PICTURE || subW != sSubShownW) { // (a new size: the old border cleared)
+        sSubShownW = subW;
         full = 1;
         gfxSetScreenFormat(screen, GSP_RGB565_OES);
         gfxSetDoubleBuffering(screen, true);
@@ -299,7 +302,8 @@ static void PresentSub(void)
         sSubMode = SUB_PICTURE;
     }
     if (full) {
-        area[2] = SUBSCREEN_W; area[3] = SUBSCREEN_H;
+        area[2] = subW; area[3] = subH;
+        memset(sPend, 0, sizeof(sPend));
     } else if (Port_SubScreenChanged()) {
         Port_SubScreenChangedArea(&area[0], &area[1], &area[2], &area[3]);
     }
@@ -320,8 +324,8 @@ static void PresentSub(void)
 
     const uint16_t *lut = sPresentLut;
     uint16_t *fb = (uint16_t *)gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL);
-    const int ox = (width - SUBSCREEN_W) / 2, oy = (240 - SUBSCREEN_H) / 2;
-    BlitArgs b = { sSubFrame, SUBSCREEN_W, fb, ox, oy, draw[0], draw[1], draw[2], draw[3], sIdentity, sIdentity, lut };
+    const int ox = (width - subW) / 2, oy = (240 - subH) / 2;
+    BlitArgs b = { sSubFrame, subW, fb, ox, oy, draw[0], draw[1], draw[2], draw[3], sIdentity, sIdentity, lut };
     Blit(&b);
     Part(T_SUBOUT);
 }

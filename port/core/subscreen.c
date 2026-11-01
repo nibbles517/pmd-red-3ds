@@ -48,8 +48,12 @@ s32 Port_TitleBrightness(void);                   // main_loops.c
 u16 Port_GroundBrightness(void);                  // palette_util.c
 bool8 Port_FriendAreaMapPos(u8 areaId, DungeonPos *pos); // friend_areas_map.c
 
-#define W SUBSCREEN_W
-#define H SUBSCREEN_H
+// The picture's size: 320x240 with Sub-Screen Settings > Size: Fit outside
+// dungeons (the world map), else 256x192 (set by Port_RenderSubScreen).
+static int sSubW = 256, sSubH = 192;
+#define W sSubW
+#define H sSubH
+#define CANVAS_PIXELS (SUBSCREEN_W_MAX * SUBSCREEN_H_MAX)
 #define ROW_H 48
 
 static u16 *sOut;       // where drawing goes
@@ -640,7 +644,7 @@ static void DrawRowText(int y0, const PanelRow *row);
 
 static bool8 DrawTeamPanel(void)
 {
-    static u16 sTeamBg[W * H];
+    static u16 sTeamBg[CANVAS_PIXELS];
     static DrawKey sLastBg, sLast, k;
     u16 *canvas = sOut;
 
@@ -672,7 +676,7 @@ static bool8 DrawTeamPanel(void)
     }
     if (!KeyChanged(&sLast, &k))
         return FALSE;
-    memcpy(canvas, sTeamBg, sizeof(sTeamBg));
+    memcpy(canvas, sTeamBg, W * H * sizeof(u16));
     for (int i = 0; i < MAX_TEAM_MEMBERS; i++)
         if (sRows[i].used)
             DrawRowSprite(&sRows[i], 23, i * ROW_H + 41); // feet on the middle of the floor
@@ -1051,7 +1055,7 @@ static void Restore(const u16 *from, int x, int y, int w, int h)
 // dot are each drawn over it when they change, and only they are copied out.
 static bool8 DrawMapAndTeam(void)
 {
-    static u16 sMtBase[W * H];
+    static u16 sMtBase[CANVAS_PIXELS];
     static DrawKey sLastBase, sLastMap, sLastText, k;
     static bool8 sDotShown;
     static DungeonPos sDotAt;
@@ -1075,7 +1079,7 @@ static bool8 DrawMapAndTeam(void)
         DrawGrid();
         DrawGameWindow(TEAM_WIN_X, TEAM_WIN_Y, TEAM_WIN_W, TEAM_WIN_H);
         sOut = canvas;
-        memcpy(canvas, sMtBase, sizeof(sMtBase));
+        memcpy(canvas, sMtBase, W * H * sizeof(u16));
         DirtyAll();
         sLastMap.size = sLastText.size = -1; // all drawn again
         sDotShown = FALSE;
@@ -1289,8 +1293,8 @@ static bool8 DrawWorldMap(void)
 {
     // The map only changes with the place, so it is drawn once per place;
     // the marker goes on top every frame.
-    static u16 sCache[W * H];
-    static s32 sCachedPlace = -1, sCachedArea = -1;
+    static u16 sCache[CANVAS_PIXELS];
+    static s32 sCachedPlace = -1, sCachedArea = -1, sCachedW = -1;
     static int sLoadedSet = -1, sDotX, sDotY;
     static bool8 sSpritesLoaded;
     s32 place = GetScriptVarValue(NULL, GROUND_PLACE);
@@ -1316,7 +1320,7 @@ static bool8 DrawWorldMap(void)
     bool8 newColors = LoadWindowPalette();
     sWorldMapChanged = sLayoutDrawn != -2;
     sLayoutDrawn = -2;
-    if (place != sCachedPlace || area != sCachedArea || newColors) {
+    if (place != sCachedPlace || area != sCachedArea || W != sCachedW || newColors) {
         int set = dungeon == PLACE_TOWN ? 0 : 1;
         int x = dungeon == PLACE_TOWN ? TEAM_BASE_X : gDungeonCoordinates[dungeon].x;
         int y = dungeon == PLACE_TOWN ? TEAM_BASE_Y : gDungeonCoordinates[dungeon].y;
@@ -1345,11 +1349,12 @@ static bool8 DrawWorldMap(void)
         DrawNameBox(name);
         sCachedPlace = place;
         sCachedArea = area;
+        sCachedW = W;
         sOut = sOutFrame;
         sWorldMapChanged = TRUE;
     }
     if (sWorldMapChanged) { // (the marker does not move)
-        memcpy(sOutFrame, sCache, sizeof(sCache));
+        memcpy(sOutFrame, sCache, W * H * sizeof(u16));
         DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
     }
     return TRUE;
@@ -1507,9 +1512,15 @@ static int EnableBrightness(void)
 
 // The picture is drawn into sCanvas, and copied out (darkened during
 // transitions) only when it or the brightness changed.
-static u16 sCanvas[W * H];
+static u16 sCanvas[CANVAS_PIXELS];
 static int sOutBrightness = -2; // what `out` holds: -2 unknown, else the brightness it was made at
 static bool8 sChanged;
+
+void Port_SubScreenSize(int *w, int *h)
+{
+    *w = sSubW;
+    *h = sSubH;
+}
 
 bool Port_SubScreenChanged(void)
 {
@@ -1531,6 +1542,16 @@ bool Port_RenderSubScreen(u16 *out)
     sDirtyX0 = sDirtyX1 = 0;
     sDirtyY0 = sDirtyY1 = 0;
     sOut = sOutFrame = sCanvas;
+    {
+        bool8 fit = gPortConfig.layout[1][0] == PORT_SIZE_FIT && gDungeon == NULL;
+        int w = fit ? 320 : 256, h = fit ? 240 : 192;
+        if (w != sSubW) { // a new size: everything again
+            sSubW = w;
+            sSubH = h;
+            sOutBrightness = -2;
+            sLayoutDrawn = -1;
+        }
+    }
     if (gDungeon == NULL)
         sInDungeon = FALSE;
     brightness = TransitionBrightness();
@@ -1582,7 +1603,7 @@ bool Port_RenderSubScreen(u16 *out)
     } else {
         DirtyAll();
         if (brightness == 0x100)
-            memcpy(out, sCanvas, sizeof(sCanvas));
+            memcpy(out, sCanvas, W * H * sizeof(u16));
         else
             Darken(out, sCanvas, brightness);
     }
