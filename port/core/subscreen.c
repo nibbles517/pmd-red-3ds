@@ -619,9 +619,10 @@ static void DrawRowText(int y0, const PanelRow *row)
         DrawNumberRight(maxRight, y0 + 17, row->maxBelly);
         // (always to 17 pixels from the edge: the belly scaled to the bar)
         DrawHpBar(barX, y0 + 20, barMax, row->belly, row->maxBelly < 1 ? 1 : row->maxBelly);
-        // the held item's sprite, as on the floor, under the belly's "/"
+        // the held item's sprite, as on the floor, under the belly's "/",
+        // in the middle between its line and the panel's bottom
         if (row->itemIcon >= 0)
-            DrawItemSprite(hpRight + TextWidth(sSlash) / 2 - 8, y0 + 29, row->itemIcon, row->itemPal);
+            DrawItemSprite(hpRight + TextWidth(sSlash) / 2 - 8, y0 + 35, row->itemIcon, row->itemPal);
     }
     else {
         DrawNumberRight(136, y0 + 17, row->hp);
