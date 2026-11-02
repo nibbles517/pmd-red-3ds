@@ -54,12 +54,11 @@ music: put your own dump of Pokémon Mystery Dungeon: Blue Rescue Team, named
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 
-Game Options > Music Matching (Dev) is a temporary development aid for making
-those matches: it lists the GBA songs (A plays one), and L/R or ZL/ZR pick
-the DS track for it (Y plays it, X clears it). START, or leaving with B,
-writes `music-map.txt` to the same folder; while that file is there, the game
-uses its matches instead of the built-in ones (port/core/music.c,
-sDefaultMap, filled in from it).
+The matches are built in (port/core/music.c, sDefaultMap). Music Matching, the
+development aid they were made with, is hidden; a build with
+`-DPORT_DEV_MUSIC_MATCHING=1` shows it again in Game Options. It writes
+`music-map.txt` to the same folder, and while that file is there the game uses
+its matches instead of the built-in ones.
 
 Controls are the GBA's (A, B, L, R, START, SELECT, D-pad or Circle Pad).
 **Y** switches the picture between 1:1 and 1.5x. Use **HOME** to quit, after

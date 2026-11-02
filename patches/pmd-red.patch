@@ -3464,7 +3464,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..1b4342d4 100644
+index 86f582c2..f9036bca 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3532,7 +3532,7 @@ index 86f582c2..1b4342d4 100644
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +86,105 @@ static void sub_801DED0(void);
+@@ -48,6 +86,109 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3559,6 +3559,10 @@ index 86f582c2..1b4342d4 100644
 +// Change Current Save Data (only there): Save Data 1-3 in a smaller window
 +ALIGNED(4) static const u8 sChangeSaveData[] = _("Change Current Save Data");
 +ALIGNED(4) static const u8 sMusicOptions[] = _("Music Options");
++// Music Matching: built with -DPORT_DEV_MUSIC_MATCHING=1 to show it again
++#ifndef PORT_DEV_MUSIC_MATCHING
++#define PORT_DEV_MUSIC_MATCHING 0
++#endif
 +ALIGNED(4) static const u8 sMusicMatching[] = _("Music Matching (Dev)");
 +ALIGNED(4) static const u8 sReturnToMainMenu[] = _("{COLOR YELLOW}Return to Main Menu{RESET}");
 +ALIGNED(4) static const u8 sReturnPrompt[] = _("Would you like to save your adventure\nand return to the main menu?");
@@ -3638,7 +3642,7 @@ index 86f582c2..1b4342d4 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +213,55 @@ u32 sub_801DCE8(void)
+@@ -76,8 +217,55 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3694,7 +3698,7 @@ index 86f582c2..1b4342d4 100644
          default:
              break;
      }
-@@ -120,9 +304,13 @@ static void sub_801DD84(void)
+@@ -120,9 +308,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3709,7 +3713,7 @@ index 86f582c2..1b4342d4 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +318,32 @@ static void sub_801DD84(void)
+@@ -130,10 +322,32 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3743,7 +3747,7 @@ index 86f582c2..1b4342d4 100644
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +360,10 @@ static void sub_801DED0(void)
+@@ -150,6 +364,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3754,7 +3758,7 @@ index 86f582c2..1b4342d4 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +378,81 @@ static void sub_801DED0(void)
+@@ -164,12 +382,81 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3836,7 +3840,7 @@ index 86f582c2..1b4342d4 100644
      }
  }
  
-@@ -180,12 +463,47 @@ static void CreateOthersMenu(void)
+@@ -180,12 +467,49 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3861,9 +3865,11 @@ index 86f582c2..1b4342d4 100644
 +        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sMusicOptions;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_MUSIC;
++#if PORT_DEV_MUSIC_MATCHING // (a development aid, hidden: the matches are built in)
 +        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sMusicMatching;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_MUSIC_MATCH;
++#endif
 +        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sChangeSaveData;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SAVE_DATA;
@@ -3884,7 +3890,7 @@ index 86f582c2..1b4342d4 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +547,42 @@ static void HandleOthersMenu(void)
+@@ -229,6 +553,42 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3927,7 +3933,7 @@ index 86f582c2..1b4342d4 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +626,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +632,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3944,7 +3950,7 @@ index 86f582c2..1b4342d4 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,11 +646,762 @@ static void sub_801E0FC(void)
+@@ -282,11 +652,762 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
