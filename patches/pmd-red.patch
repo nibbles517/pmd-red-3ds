@@ -286,10 +286,10 @@ index d927bef9..9ce44cd9 100644
 \ No newline at end of file
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..082531f8
+index 00000000..46348dc7
 --- /dev/null
 +++ b/include/port_screen_menu.h
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,14 @@
 +#ifndef GUARD_PORT_SCREEN_MENU_H
 +#define GUARD_PORT_SCREEN_MENU_H
 +
@@ -298,6 +298,7 @@ index 00000000..082531f8
 +
 +void PortScreenMenu_Create(GameOptions *options);
 +void PortControlMenu_Create(GameOptions *options); // Others > Controls Options
++void PortMusicMenu_Create(GameOptions *options, bool8 locked, s32 entry); // the title's Music Options
 +u32 PortScreenMenu_Update(void);
 +void PortScreenMenu_Destroy(void);
 +bool8 PortScreenMenu_Changed(void);
@@ -3306,7 +3307,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..7a61f3e4 100644
+index 86f582c2..8cdba7c3 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3348,7 +3349,7 @@ index 86f582c2..7a61f3e4 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +50,15 @@ enum OptionsMenuStates
+@@ -31,6 +50,16 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -3361,10 +3362,11 @@ index 86f582c2..7a61f3e4 100644
 +    OPTIONS_MENU_MUSIC_MISSING2, // ... "Please make sure ..."
 +    OPTIONS_MENU_MUSIC_OTHER, // 3DS port: "The file appears to not be ..."
 +    OPTIONS_MENU_MUSIC_OTHER2, // ... "The music may only be played here. ..."
++    OPTIONS_MENU_MUSIC_SETTINGS, // 3DS port: Music Style, Music Player
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +76,87 @@ static void sub_801DED0(void);
+@@ -48,6 +77,90 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3402,6 +3404,9 @@ index 86f582c2..7a61f3e4 100644
 +static void HandleMusicMenu(void);
 +static void HandleMusicMissing(void);
 +static void SetMusicWindows(void);
++static void HandleMusicSettings(void);
++static bool8 sMusicLocked; // pmd-blue.nds is another game's: GBA music only
++static s32 sMusicSettingsEntry; // where the cursor goes in Music Options
 +ALIGNED(4) static const u8 sSaveData1[] = _("Save Data 1");
 +ALIGNED(4) static const u8 sSaveData2[] = _("Save Data 2");
 +ALIGNED(4) static const u8 sSaveData3[] = _("Save Data 3");
@@ -3452,7 +3457,7 @@ index 86f582c2..7a61f3e4 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +185,33 @@ u32 sub_801DCE8(void)
+@@ -76,8 +189,36 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3461,7 +3466,7 @@ index 86f582c2..7a61f3e4 100644
 +#else
              HandleChangeSettingsMenu();
 +#endif
-+            break;
+             break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
@@ -3475,18 +3480,21 @@ index 86f582c2..7a61f3e4 100644
 +            break;
 +        case OPTIONS_MENU_MUSIC:
 +            HandleMusicMenu();
-             break;
++            break;
 +        case OPTIONS_MENU_MUSIC_MISSING:
 +        case OPTIONS_MENU_MUSIC_MISSING2:
 +        case OPTIONS_MENU_MUSIC_OTHER:
 +        case OPTIONS_MENU_MUSIC_OTHER2:
 +            HandleMusicMissing();
 +            break;
++        case OPTIONS_MENU_MUSIC_SETTINGS:
++            HandleMusicSettings();
++            break;
 +#endif
          default:
              break;
      }
-@@ -120,9 +254,13 @@ static void sub_801DD84(void)
+@@ -120,9 +261,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3501,7 +3509,7 @@ index 86f582c2..7a61f3e4 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +268,31 @@ static void sub_801DD84(void)
+@@ -130,10 +275,31 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3534,7 +3542,7 @@ index 86f582c2..7a61f3e4 100644
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +309,10 @@ static void sub_801DED0(void)
+@@ -150,6 +316,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3545,7 +3553,7 @@ index 86f582c2..7a61f3e4 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +327,63 @@ static void sub_801DED0(void)
+@@ -164,12 +334,67 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3592,6 +3600,10 @@ index 86f582c2..7a61f3e4 100644
 +        case OPTIONS_MENU_MUSIC_OTHER2:
 +            CreateDialogueBoxAndPortrait(sMusicOther2, 0, NULL, 0x101);
 +            break;
++        case OPTIONS_MENU_MUSIC_SETTINGS:
++            sUnknown_203B25C->newOptions = *gGameOptionsRef;
++            PortMusicMenu_Create(&sUnknown_203B25C->newOptions, sMusicLocked, sMusicSettingsEntry);
++            break;
 +        case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
 +            // write what changed, then say so (like "Save completed.")
 +            if (sSaveGameOptions)
@@ -3609,7 +3621,7 @@ index 86f582c2..7a61f3e4 100644
      }
  }
  
-@@ -180,12 +394,39 @@ static void CreateOthersMenu(void)
+@@ -180,12 +405,39 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3649,7 +3661,7 @@ index 86f582c2..7a61f3e4 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +470,30 @@ static void HandleOthersMenu(void)
+@@ -229,6 +481,31 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3665,13 +3677,14 @@ index 86f582c2..7a61f3e4 100644
 +            break;
 +        case MENU_OPTION_MUSIC:
 +            // the DS version's music, from pmd-blue.nds (if it is there and usable)
++            sOpenedOptions = *gGameOptionsRef;
++            sOpenedConfig = gPortConfig;
++            sMusicSettingsEntry = 0;
 +            if (Port_MusicOpen() > 0) {
-+                // another game's ROM: its music, but here only
++                // another game's ROM: its music, but here only (GBA music)
 +                const char *code = Port_MusicGameCode();
-+                if (strncmp(code, MUSIC_GAME_CODE, 3) != 0 || (code[3] != 'E' && code[3] != 'P' && code[3] != 'J'))
-+                    SetOptionsMenuState(OPTIONS_MENU_MUSIC_OTHER);
-+                else
-+                    SetOptionsMenuState(OPTIONS_MENU_MUSIC);
++                sMusicLocked = strncmp(code, MUSIC_GAME_CODE, 3) != 0 || (code[3] != 'E' && code[3] != 'P' && code[3] != 'J');
++                SetOptionsMenuState(sMusicLocked ? OPTIONS_MENU_MUSIC_OTHER : OPTIONS_MENU_MUSIC_SETTINGS);
 +            }
 +            else
 +                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
@@ -3680,7 +3693,7 @@ index 86f582c2..7a61f3e4 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +537,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +549,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3697,7 +3710,7 @@ index 86f582c2..7a61f3e4 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +557,368 @@ static void sub_801E0FC(void)
+@@ -282,12 +569,387 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3741,10 +3754,10 @@ index 86f582c2..7a61f3e4 100644
 +        case 3:
 +            PortScreenMenu_Destroy();
 +            LeaveSettings(PortScreenMenu_Changed());
-             break;
-     }
- }
- 
++            break;
++    }
++}
++
 +// Save Data 1-3: that save file is used from now on (and next time); the
 +// main menu then reads it as at power-on.
 +static void HandleSaveDataMenu(void)
@@ -3961,17 +3974,36 @@ index 86f582c2..7a61f3e4 100644
 +    }
 +}
 +
++// The player, left: back to Music Options, on Music Player
 +static void LeaveMusicMenu(void)
 +{
 +    sMusicCursor = GET_CURRENT_MENU_ENTRY(sMusicInput);
-+    Port_MusicClose();
++    Port_MusicStop();
 +    sMusicTrack = -1;
 +    gPortRawXY = FALSE;
 +    if (sMusicStoppedBgm) {
 +        StartNewBGM(MUS_FILE_SELECT); // the title's music again
 +        sMusicStoppedBgm = FALSE;
 +    }
-+    SetOptionsMenuState(OPTIONS_MENU_MAIN);
++    sMusicSettingsEntry = 1; // (Music Player)
++    SetOptionsMenuState(OPTIONS_MENU_MUSIC_SETTINGS);
++}
++
++// Music Options: Music Style (GBA or DS; GBA only for another game's ROM),
++// and Music Player. Leaving it saves the settings that changed.
++static void HandleMusicSettings(void)
++{
++    switch (PortScreenMenu_Update()) {
++        case 2: // B: back to Game Options
++            PortScreenMenu_Destroy();
++            Port_MusicClose();
++            LeaveSettings(memcmp(&sOpenedConfig, &gPortConfig, sizeof(gPortConfig)) != 0);
++            break;
++        case 3: // A on Music Player
++            PortScreenMenu_Destroy();
++            SetOptionsMenuState(OPTIONS_MENU_MUSIC);
++            break;
++    }
 +}
 +
 +static void HandleMusicMenu(void)
@@ -4046,14 +4078,14 @@ index 86f582c2..7a61f3e4 100644
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC_OTHER2);
 +            break;
 +        case OPTIONS_MENU_MUSIC_OTHER2:
-+            SetOptionsMenuState(OPTIONS_MENU_MUSIC); // the player after all
++            SetOptionsMenuState(OPTIONS_MENU_MUSIC_SETTINGS); // Music Options after all
 +            break;
 +        default:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
-+            break;
-+    }
-+}
-+
+             break;
+     }
+ }
+ 
 +static void HandleChangesSaved(void)
 +{
 +    s32 menuAction;
@@ -4178,10 +4210,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..01171f2e
+index 00000000..b170defd
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,346 @@
+@@ -0,0 +1,392 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -4214,14 +4246,16 @@ index 00000000..01171f2e
 +
 +#ifdef PLATFORM_3DS
 +
-+enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN, PAGE_CONTROLS };
++enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN, PAGE_CONTROLS, PAGE_MUSIC };
 +// First page entries
 +enum { TOP_FRAMESKIP, TOP_DUALCORE, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
 +
 +#define TOP_ENTRIES 5
 +#define MAX_CHOICES 4
 +
-+enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP, SETTING_BUTTONS, SETTING_TOUCH };
++enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP, SETTING_BUTTONS, SETTING_TOUCH, SETTING_MUSIC_STYLE };
++// Music Options: Music Style, then Music Player (no choices: opens the player)
++enum { MUSIC_STYLE, MUSIC_PLAYER };
 +
 +static struct {
 +    GameOptions *options;
@@ -4230,6 +4264,7 @@ index 00000000..01171f2e
 +    WindowTemplates windows;
 +    s32 page;
 +    struct PortConfig startConfig; // the settings when the menu was opened
++    bool8 musicLocked; // Music Options for another game's ROM: GBA music only
 +} sMenu;
 +
 +static const WindowTemplate sNoWindow = { 0, 3, 0, 0, 0, 0, 0, 0, NULL };
@@ -4272,6 +4307,9 @@ index 00000000..01171f2e
 +ALIGNED(4) static const u8 sTitleControls[] = _("Controls Options");
 +ALIGNED(4) static const u8 sButtonStyle[] = _("Button Style");
 +ALIGNED(4) static const u8 sTouchScreen[] = _("Touch Screen");
++ALIGNED(4) static const u8 sTitleMusic[] = _("Music Options");
++ALIGNED(4) static const u8 sMusicStyle[] = _("Music Style");
++ALIGNED(4) static const u8 sMusicPlayer[] = _("Music Player");
 +static const struct {
 +    const u8 *name;
 +    u8 count;
@@ -4283,9 +4321,10 @@ index 00000000..01171f2e
 +    [SETTING_FRAMESKIP] = { sFrameSkip, 3, { sOff, sAuto, sAlways } },
 +    [SETTING_BUTTONS] = { sButtonStyle, 3, { sSizeGBA, sSizeDS, sSize3DS } },
 +    [SETTING_TOUCH] = { sTouchScreen, 2, { sOn, sOff } },
++    [SETTING_MUSIC_STYLE] = { sMusicStyle, 2, { sSizeGBA, sSizeDS } },
 +};
 +// (Controls Options: further right, past the longer names)
-+#define CHOICE_X(i) (sMenu.page == PAGE_CONTROLS ? 96 + (i) * 32 : 64 + (i) * 40)
++#define CHOICE_X(i) (sMenu.page == PAGE_CONTROLS || sMenu.page == PAGE_MUSIC ? 96 + (i) * 32 : 64 + (i) * 40)
 +#define FRAMESKIP_X(i) (80 + (i) * 40) // as Main Screen's choices
 +
 +static s32 EntryCount(void)
@@ -4294,6 +4333,7 @@ index 00000000..01171f2e
 +        case PAGE_TOP: return TOP_ENTRIES;
 +        case PAGE_SUB_SCREEN: return 3;
 +        case PAGE_CONTROLS: return 2;
++        case PAGE_MUSIC: return 2;
 +        default: return 2;
 +    }
 +}
@@ -4303,6 +4343,8 @@ index 00000000..01171f2e
 +{
 +    if (sMenu.page == PAGE_CONTROLS)
 +        return SETTING_BUTTONS + i;
++    if (sMenu.page == PAGE_MUSIC)
++        return i == MUSIC_STYLE ? SETTING_MUSIC_STYLE : -1;
 +    return sMenu.page == PAGE_SUB_SCREEN ? i : i + 1;
 +}
 +
@@ -4313,6 +4355,8 @@ index 00000000..01171f2e
 +        return &gPortConfig.buttonStyle;
 +    if (setting == SETTING_TOUCH)
 +        return &gPortConfig.touchScreenOff;
++    if (setting == SETTING_MUSIC_STYLE)
++        return &gPortConfig.musicStyle;
 +    if (setting == SETTING_ENABLED)
 +        return &gPortConfig.subScreenDisabled;
 +    if (setting == SETTING_FRAMESKIP)
@@ -4333,6 +4377,8 @@ index 00000000..01171f2e
 +{
 +    if (setting == SETTING_SCALE || setting == SETTING_TOUCH)
 +        return TRUE;
++    if (setting == SETTING_MUSIC_STYLE) // another game's ROM: not to be chosen
++        return sMenu.musicLocked;
 +    if (setting == SETTING_SIZE)
 +        return choice == PORT_SIZE_3DS;
 +    return FALSE;
@@ -4387,9 +4433,14 @@ index 00000000..01171f2e
 +        PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, TOP_SUB_SETTINGS), sSubScreenSettings, win, 0);
 +    }
 +    else {
-+        PrintStringOnWindow(16, 0, sMenu.page == PAGE_MAIN_SCREEN ? sTitleMain : sMenu.page == PAGE_CONTROLS ? sTitleControls : sTitleSub, win, 0);
++        PrintStringOnWindow(16, 0, sMenu.page == PAGE_MAIN_SCREEN ? sTitleMain : sMenu.page == PAGE_CONTROLS ? sTitleControls
++                                   : sMenu.page == PAGE_MUSIC ? sTitleMusic : sTitleSub, win, 0);
 +        for (i = 0; i < EntryCount(); i++) {
 +            s32 setting = EntrySetting(i);
++            if (setting < 0) { // Music Player
++                PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, i), sMusicPlayer, win, 0);
++                continue;
++            }
 +            s32 c, value = *SettingValue(setting), first = FirstChoice(setting);
 +            if (value >= sSettings[setting].count || value < first)
 +                value = first;
@@ -4440,6 +4491,23 @@ index 00000000..01171f2e
 +    ShowPage(0);
 +}
 +
++// Game Options > Music Options (on the title): Music Style, and Music Player.
++// locked: pmd-blue.nds is another game's: GBA music, and the cursor can't go
++// to Music Style.
++void PortMusicMenu_Create(GameOptions *options, bool8 locked, s32 entry)
++{
++    sMenu.options = options;
++    sMenu.windowId = 0;
++    sMenu.page = PAGE_MUSIC;
++    sMenu.musicLocked = locked;
++    if (locked) {
++        gPortConfig.musicStyle = PORT_MUSIC_GBA;
++        entry = MUSIC_PLAYER;
++    }
++    sMenu.startConfig = gPortConfig;
++    ShowPage(entry);
++}
++
 +// Whether the port settings changed since the menu was opened.
 +bool8 PortScreenMenu_Changed(void)
 +{
@@ -4459,6 +4527,12 @@ index 00000000..01171f2e
 +        case INPUT_A_BUTTON: {
 +            bool8 accept = input == INPUT_A_BUTTON;
 +            if (sMenu.page == PAGE_CONTROLS) { // its own menu: closed
++                PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
++                return accept ? 3 : 2;
++            }
++            if (sMenu.page == PAGE_MUSIC) { // A on Music Player opens it
++                if (accept && index != MUSIC_PLAYER)
++                    break;
 +                PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
 +                return accept ? 3 : 2;
 +            }
@@ -4497,6 +4571,9 @@ index 00000000..01171f2e
 +                    changed = TRUE;
 +                }
 +            }
++            else if (sMenu.page == PAGE_MUSIC && (index != MUSIC_STYLE || sMenu.musicLocked)) {
++                // (Music Player has no choices; a locked Music Style stays GBA)
++            }
 +            else {
 +                s32 setting = EntrySetting(index);
 +                s32 first = FirstChoice(setting);
@@ -4513,7 +4590,8 @@ index 00000000..01171f2e
 +        }
 +    }
 +
-+    if (MenuCursorUpdate(&sMenu.input, 1) || changed) {
++    // A locked Music Style: the cursor stays on Music Player
++    if (MenuCursorUpdate(&sMenu.input, !(sMenu.page == PAGE_MUSIC && sMenu.musicLocked)) || changed) {
 +        Draw();
 +        return 1;
 +    }

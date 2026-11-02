@@ -7,7 +7,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 5
+#define PORT_CONFIG_VERSION 6
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO };
 
 void Port_LoadConfig(void)
@@ -35,8 +35,14 @@ void Port_LoadConfig(void)
         c.version = 5;
         c.saveSlot = 0;
     }
+    if (c.version == 5) { // before Music Options (GBA music)
+        c.version = 6;
+        c.musicStyle = PORT_MUSIC_GBA;
+    }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
+    if (gPortConfig.musicStyle > PORT_MUSIC_DS)
+        gPortConfig.musicStyle = PORT_MUSIC_GBA;
     if (gPortConfig.saveSlot > 2)
         gPortConfig.saveSlot = 0;
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));

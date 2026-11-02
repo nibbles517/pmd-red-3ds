@@ -42,11 +42,14 @@ struct PortConfig
     u8 touchScreenOff;      // Touch Screen: 0 On, 1 Off
     // Game Options > Change Current Save Data (version 5)
     u8 saveSlot;            // 0-2: Save Data 1-3
+    // Game Options > Music Options (version 6)
+    u8 musicStyle;          // PORT_MUSIC_GBA, PORT_MUSIC_DS
 };
 
 extern struct PortConfig gPortConfig;
 enum { PORT_FRAMESKIP_OFF, PORT_FRAMESKIP_AUTO, PORT_FRAMESKIP_ALWAYS };
 enum { PORT_BUTTONS_GBA, PORT_BUTTONS_DS, PORT_BUTTONS_3DS };
+enum { PORT_MUSIC_GBA, PORT_MUSIC_DS }; // Music Style: the game's own music, or pmd-blue.nds's
 // Controls Options > Button Style: DS or 3DS (Rotate Mode on Y, held)
 #define PORT_DS_BUTTONS (gPortConfig.buttonStyle == PORT_BUTTONS_DS || gPortConfig.buttonStyle == PORT_BUTTONS_3DS)
 bool8 Port_YHeld(void); // port/core/frame.c
