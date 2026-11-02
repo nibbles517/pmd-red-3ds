@@ -1,6 +1,7 @@
 // Port settings: those that live in the game's own options (chosen in its
 // menus, kept in its save), and those kept in a file of their own. Compiled with pmd-red's include path.
 
+#include <string.h>
 #include "global.h"
 #include "game_options.h"
 #include "structs/str_dungeon.h"
@@ -10,21 +11,49 @@
 #define PORT_CONFIG_VERSION 8
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19 };
 
+// The settings before any are chosen (no config file yet). Those kept in the
+// game's own options have theirs in InitializeGameOptions (game_options.c):
+// Main Screen Bottom, BG and Border Color Blue (the border follows the
+// player's gender), the dungeon map Clear.
+static void SetDefaultConfig(void)
+{
+    memset(&gPortConfig, 0, sizeof(gPortConfig));
+    gPortConfig.version = PORT_CONFIG_VERSION;
+    // Graphics Options
+    gPortConfig.frameSkip = Backend_IsNew3DS() ? PORT_FRAMESKIP_OFF : PORT_FRAMESKIP_AUTO;
+    gPortConfig.dualCore = 1;
+    gPortConfig.layout[0][0] = PORT_SIZE_FIT; // Main Screen Settings: Size Fit,
+    gPortConfig.layout[0][1] = 1;             // Scale Full
+    gPortConfig.subScreenDisabled = 0;        // Sub-Screen Settings: Enabled? Yes,
+    gPortConfig.layout[1][0] = PORT_SIZE_FIT; // Size Fit,
+    gPortConfig.layout[1][1] = 1;             // Scale Full
+    // Controls Options
+    gPortConfig.buttonStyle = PORT_BUTTONS_DS;
+    gPortConfig.touchScreenOff = 0; // On
+    // Music Options (DS music only with Blue Rescue Team's ROM, though)
+    gPortConfig.musicStyle = PORT_MUSIC_DS;
+    gPortConfig.musicVolume = 19;
+    // Layout Options (in dungeons)
+    gPortConfig.layoutSubScreen = PORT_SUB_LAYOUT_BLUE;
+    gPortConfig.layoutInfo = 1; // Additional Info: On
+}
+
 void Port_LoadConfig(void)
 {
     // An older, shorter file loads too (the backend fills the rest with 0).
     struct PortConfig c;
-    // Dual Core until chosen: on where it is needed (an Old 3DS)
-    gPortConfig.dualCore = !Backend_IsNew3DS();
-    if (!Backend_LoadConfig((uint8_t *)&c, sizeof(c)))
+    SetDefaultConfig();
+    if (!Backend_LoadConfig((uint8_t *)&c, sizeof(c))) {
+        Port_UpdateScreenSize();
         return;
+    }
     if (c.version == 1) { // before Frame Skip: Auto
         c.version = 2;
         c.frameSkip = PORT_FRAMESKIP_AUTO;
     }
     if (c.version == 2) { // before Dual Core
         c.version = 3;
-        c.dualCore = gPortConfig.dualCore;
+        c.dualCore = !Backend_IsNew3DS(); // (as it was then: on an Old 3DS)
     }
     if (c.version == 3) { // before Controls Options (GBA buttons, touch screen on)
         c.version = 4;
