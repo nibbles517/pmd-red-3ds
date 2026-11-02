@@ -26,6 +26,10 @@ enum {
     KEY_BIT_R = 1 << 8, KEY_BIT_L = 1 << 9,
     KEY_BIT_Y = 1 << 10, // not a GBA key: the game asks with Port_YHeld()
     KEY_BIT_X = 1 << 11, // not a GBA key: A in menus, B in the field (UpdateKeys)
+    // Not GBA keys either: ZL/ZR (New 3DS), and the Circle Pad's up/down, which
+    // the backend reports apart from the D-pad's (UpdateKeys makes them Up and
+    // Down, except in Music Options' player, where they change the volume)
+    KEY_BIT_ZL = 1 << 12, KEY_BIT_ZR = 1 << 13, KEY_BIT_CPAD_UP = 1 << 14, KEY_BIT_CPAD_DOWN = 1 << 15,
 };
 bool Port_DsButtons(void);          // Controls Options > Button Style is DS or 3DS
 
@@ -109,7 +113,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version13_UpdateRepoIfMissing;
+extern const int Backend_Version14_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

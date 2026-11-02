@@ -36,7 +36,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 
 void AgbMain(void);
 
-const int Backend_Version13_UpdateRepoIfMissing = 13;
+const int Backend_Version14_UpdateRepoIfMissing = 14;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -612,8 +612,12 @@ uint16_t Backend_PollKeys(void)
     if (h & KEY_START) k |= KEY_BIT_START;
     if (h & KEY_RIGHT) k |= KEY_BIT_RIGHT; // KEY_RIGHT covers D-pad and Circle Pad
     if (h & KEY_LEFT) k |= KEY_BIT_LEFT;
-    if (h & KEY_UP) k |= KEY_BIT_UP;
-    if (h & KEY_DOWN) k |= KEY_BIT_DOWN;
+    if (h & KEY_DUP) k |= KEY_BIT_UP; // (the Circle Pad's up/down: apart, below)
+    if (h & KEY_DDOWN) k |= KEY_BIT_DOWN;
+    if (h & KEY_CPAD_UP) k |= KEY_BIT_CPAD_UP;
+    if (h & KEY_CPAD_DOWN) k |= KEY_BIT_CPAD_DOWN;
+    if (h & KEY_ZL) k |= KEY_BIT_ZL;
+    if (h & KEY_ZR) k |= KEY_BIT_ZR;
     if (h & KEY_R) k |= KEY_BIT_R;
     if (h & KEY_L) k |= KEY_BIT_L;
     if (h & KEY_Y) k |= KEY_BIT_Y;

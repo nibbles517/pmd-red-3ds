@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "datasource.h"
+#include "mixutil.h"
 #include "wave.h"
 
 #define NUM_CH 16
@@ -19,8 +20,6 @@
  * as in the Nitro sound driver. Each square-wave cycle is 8 duty steps. */
 #define PSG_BASE_RATE ((float)DS_TIMER_CLOCK / (float)(0x1000000 / (262 * 8)))
 #define MAX_CMDS_PER_TICK 4096
-/* Output above this level is softly compressed instead of hard-clipped. */
-#define SOFT_KNEE 24576
 
 /* One sequencer frame = 64 * 2728 ARM7 cycles (~5.2 ms, ~192 Hz), as in the DS SDK. */
 #define ARM7_CLOCK 33513982u
@@ -162,6 +161,7 @@ struct SseqPlayer {
     uint32_t rng;
     int loops;
 
+    int32_t gain; /* 8.8, applied before the soft clipper */
     uint32_t out_rate;
     uint64_t clk_acc, clk_per_frame; /* in ARM7 cycles * out_rate */
     int32_t *mix;
@@ -777,18 +777,6 @@ static void mix_chan(Chan *c, int32_t *mix, uint32_t n) {
     }
 }
 
-static inline int16_t soft_clip(int32_t s) {
-    const int32_t room = 32767 - SOFT_KNEE;
-    if (s > SOFT_KNEE) {
-        int32_t x = s - SOFT_KNEE;
-        s = SOFT_KNEE + (int32_t)((int64_t)room * x / (x + room));
-    } else if (s < -SOFT_KNEE) {
-        int32_t x = -s - SOFT_KNEE;
-        s = -SOFT_KNEE - (int32_t)((int64_t)room * x / (x + room));
-    }
-    return (int16_t)s;
-}
-
 void sseq_render(SseqPlayer *p, int16_t *out, uint32_t frames) {
     while (frames) {
         if (p->clk_acc >= p->clk_per_frame) {
@@ -805,7 +793,7 @@ void sseq_render(SseqPlayer *p, int16_t *out, uint32_t frames) {
         for (int i = 0; i < NUM_CH; i++)
             if (p->ch[i].active) mix_chan(&p->ch[i], p->mix, n);
         for (uint32_t i = 0; i < n * 2; i++) {
-            out[i] = soft_clip(p->mix[i]);
+            out[i] = soft_clip((int32_t)(((int64_t)p->mix[i] * p->gain) >> 8));
         }
         out += n * 2;
         frames -= n;
@@ -838,6 +826,7 @@ SseqPlayer *sseq_create(const SdatSeqBundle *b, uint32_t out_rate) {
         return NULL;
     }
 
+    p->gain = GAIN_UNITY;
     p->tempo = 120;
     p->master_vol = 127;
     p->seq_vol = b->info.vol;
@@ -875,3 +864,5 @@ uint16_t sseq_voice_mask(const SseqPlayer *p) {
         if (p->ch[i].active && p->ch[i].ampl > AMPL_MIN / 2) m |= (uint16_t)(1u << i);
     return m;
 }
+
+void sseq_set_gain(SseqPlayer *p, int32_t gain) { p->gain = gain < 0 ? 0 : gain > GAIN_MAX ? GAIN_MAX : gain; }

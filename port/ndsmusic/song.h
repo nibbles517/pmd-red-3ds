@@ -30,4 +30,7 @@ uint32_t song_pos_ms(const Song *g);
 int song_loops(const Song *g);
 uint16_t song_voices(const Song *g); /* active hardware channels (SSEQ only) */
 
+/* Output volume in percent (100 = as the DS would play it, up to 400). Loud peaks are soft-limited. */
+void song_set_volume(Song *g, int percent);
+
 #endif

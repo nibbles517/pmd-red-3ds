@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "mixutil.h"
 #include "wave.h"
 
 struct StrmPlayer {
@@ -24,6 +25,7 @@ struct StrmPlayer {
     int32_t s0[2], s1[2];
     uint64_t frac, step; /* 32.32 */
     int ended, loops;
+    int32_t gain;
 };
 
 static int decode_block(StrmPlayer *s, uint32_t b) {
@@ -123,6 +125,7 @@ StrmPlayer *strm_create(const DataSource *src, uint32_t out_rate) {
     if (!s->raw || !s->buf[0] || (s->nch > 1 && !s->buf[1])) goto fail;
     if (decode_block(s, 0) != 0) goto fail;
 
+    s->gain = GAIN_UNITY;
     s->step = (uint64_t)((double)s->rate / out_rate * 4294967296.0);
     next_frame(s, s->s0);
     next_frame(s, s->s1);
@@ -144,7 +147,10 @@ void strm_destroy(StrmPlayer *s) {
 void strm_render(StrmPlayer *s, int16_t *out, uint32_t frames) {
     for (uint32_t i = 0; i < frames; i++) {
         int32_t f = (int32_t)(s->frac >> 17); /* 15-bit so full-scale jumps can't overflow */
-        for (int c = 0; c < 2; c++) out[i * 2 + c] = (int16_t)(s->s0[c] + (((s->s1[c] - s->s0[c]) * f) >> 15));
+        for (int c = 0; c < 2; c++) {
+            int32_t v = s->s0[c] + (((s->s1[c] - s->s0[c]) * f) >> 15);
+            out[i * 2 + c] = soft_clip((v * s->gain) >> 8);
+        }
         s->frac += s->step;
         while (s->frac >= (1ull << 32)) {
             s->frac -= 1ull << 32;
@@ -157,3 +163,5 @@ void strm_render(StrmPlayer *s, int16_t *out, uint32_t frames) {
 
 int strm_finished(const StrmPlayer *s) { return s->ended && s->s0[0] == 0 && s->s0[1] == 0; }
 int strm_loops(const StrmPlayer *s) { return s->loops; }
+
+void strm_set_gain(StrmPlayer *s, int32_t gain) { s->gain = gain < 0 ? 0 : gain > GAIN_MAX ? GAIN_MAX : gain; }

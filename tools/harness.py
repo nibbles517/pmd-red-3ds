@@ -24,7 +24,7 @@ from unicorn import Uc, UcError, UC_ARCH_ARM, UC_MODE_ARM, UC_HOOK_MEM_WRITE, UC
 from unicorn.arm_const import UC_ARM_REG_PC, UC_ARM_REG_LR, UC_ARM_REG_SP, UC_CPU_ARM_1176
 
 IO_BASE = 0xF0000000
-KEYS = {'A': 0, 'B': 1, 'SELECT': 2, 'START': 3, 'RIGHT': 4, 'LEFT': 5, 'UP': 6, 'DOWN': 7, 'R': 8, 'L': 9, 'Y': 10, 'X': 11}
+KEYS = {'A': 0, 'B': 1, 'SELECT': 2, 'START': 3, 'RIGHT': 4, 'LEFT': 5, 'UP': 6, 'DOWN': 7, 'R': 8, 'L': 9, 'Y': 10, 'X': 11, 'ZL': 12, 'ZR': 13, 'CUP': 14, 'CDOWN': 15}
 
 
 def load_elf(uc, path):

@@ -88,7 +88,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version13_UpdateRepoIfMissing != 13)
+    if (Backend_Version14_UpdateRepoIfMissing != 14)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -122,6 +122,10 @@ static void UpdateKeys(void)
     if (gPortFieldControl)
         gPortFieldControl--;
     keys |= sXAs;
+    if (!gPortRawXY) { // (Music Options' player: the volume instead)
+        if (keys & KEY_BIT_CPAD_UP) keys |= KEY_BIT_UP;
+        if (keys & KEY_BIT_CPAD_DOWN) keys |= KEY_BIT_DOWN;
+    }
     sKeysHeld = keys;
     W16(REG_KEYINPUT, (uint16_t)(~keys & 0x3FF));
 }

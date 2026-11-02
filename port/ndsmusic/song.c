@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "mixutil.h"
 #include "sseq.h"
 #include "strm.h"
 
@@ -124,3 +125,9 @@ void song_render(Song *g, int16_t *out, uint32_t frames) {
 int song_done(const Song *g) { return g->done; }
 uint32_t song_pos_ms(const Song *g) { return (uint32_t)(g->pos * 1000 / g->rate); }
 uint16_t song_voices(const Song *g) { return g->seq ? sseq_voice_mask(g->seq) : 0; }
+
+void song_set_volume(Song *g, int percent) {
+    int32_t gain = percent * GAIN_UNITY / 100;
+    if (g->seq) sseq_set_gain(g->seq, gain);
+    if (g->strm) strm_set_gain(g->strm, gain);
+}

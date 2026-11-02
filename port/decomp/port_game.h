@@ -44,6 +44,7 @@ struct PortConfig
     u8 saveSlot;            // 0-2: Save Data 1-3
     // Game Options > Music Options (version 6)
     u8 musicStyle;          // PORT_MUSIC_GBA, PORT_MUSIC_DS
+    u8 musicVolume;         // the DS music's volume, in tens of percent (version 7)
 };
 
 extern struct PortConfig gPortConfig;
@@ -98,7 +99,7 @@ int Port_MusicCount(void);
 const char *Port_MusicLabel(int track);
 int Port_MusicIsStream(int track);
 const char *Port_MusicRomTitle(void);
-int Port_MusicIcon(u8 *tiles, u8 *colors); // the DS Menu icon, as a 40x40 portrait
+int Port_MusicIcon(u8 *tiles, u8 *colors); // the DS Menu icon, 64x64 (8x8 tiles)
 const char *Port_MusicGameCode(void); // e.g. "APHE" (Blue Rescue Team, North America)
 int Port_MusicPlay(int track); // 0 if it can't be played
 void Port_MusicStop(void);
@@ -116,6 +117,14 @@ unsigned Port_MusicVoices(void);
 unsigned Port_KeysHeld(void);
 #define PORT_KEY_Y (1 << 10)
 #define PORT_KEY_X (1 << 11)
+#define PORT_KEY_ZL (1 << 12)
+#define PORT_KEY_ZR (1 << 13)
+#define PORT_KEY_CPAD_UP (1 << 14)
+#define PORT_KEY_CPAD_DOWN (1 << 15)
+// A dialogue box portrait (MonPortraitMsg.unkE) of 8x8 tiles: Music Options'
+// ROM icon, at twice its size (string_format.c)
+#define PORT_PORTRAIT_ICON 0x80
+void Port_MusicSetVolume(int percent); // 10-400; 100: as the DS plays it
 extern u8 gPortRawXY;
 // Change Current Save Data: Save Data 1-3 (port/core/save.c)
 void Port_ChangeSaveSlot(int slot);

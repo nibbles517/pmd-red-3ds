@@ -19,5 +19,6 @@ void strm_destroy(StrmPlayer *s);
 void strm_render(StrmPlayer *s, int16_t *out, uint32_t frames);
 int strm_finished(const StrmPlayer *s);
 int strm_loops(const StrmPlayer *s);
+void strm_set_gain(StrmPlayer *s, int32_t gain); /* 8.8 fixed point, 256 = unity */
 
 #endif

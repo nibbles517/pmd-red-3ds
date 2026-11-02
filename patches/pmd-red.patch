@@ -3307,7 +3307,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..c0b1c612 100644
+index 86f582c2..2fc604d2 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3712,7 +3712,7 @@ index 86f582c2..c0b1c612 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +571,422 @@ static void sub_801E0FC(void)
+@@ -282,12 +571,444 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3781,10 +3781,10 @@ index 86f582c2..c0b1c612 100644
 +            break;
 +        case MENU_OPTION_DEFAULT:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
-+            break;
-+    }
-+}
-+
+             break;
+     }
+ }
+ 
 +static void HandleSaveDataLoaded(void)
 +{
 +    s32 menuAction;
@@ -3800,7 +3800,7 @@ index 86f582c2..c0b1c612 100644
 +// B goes back, L/R the previous/next track, Y pauses, X stops, SELECT
 +// repeats the track. A track that ends goes on to the next one.
 +
-+#define MUSIC_PER_PAGE 5
++#define MUSIC_PER_PAGE 4
 +#define MUSIC_LIST_WIN 0
 +#define MUSIC_INFO_WIN 1
 +
@@ -3818,10 +3818,10 @@ index 86f582c2..c0b1c612 100644
 +static const WindowTemplate sMusicInfoWindow = {
 +    .flags = WINTEMPLATE_FLAG_NONE,
 +    .type = WINDOW_TYPE_NORMAL,
-+    .pos = { 2, 13 },
++    .pos = { 2, 11 },
 +    .width = 26,
-+    .height = 6,
-+    .totalHeight = 6,
++    .height = 8,
++    .totalHeight = 8,
 +    .unk12 = 0,
 +    .header = NULL,
 +};
@@ -3834,6 +3834,9 @@ index 86f582c2..c0b1c612 100644
 +ALIGNED(4) static const u8 sMusicEnd[] = _("{COLOR YELLOW}End of list{RESET}");
 +ALIGNED(4) static const u8 sMusicRepeatOn[] = _("{COLOR GREEN}[Repeat]{RESET}");
 +ALIGNED(4) static const u8 sMusicControls[] = _("Y Pause  X Stop  L/R Skip  SELECT Repeat");
++ALIGNED(4) static const u8 sMusicVolumeControls[] = _("Circle Pad Up/Down or ZL/ZR  Volume");
++#define MUSIC_VOLUME_MIN 1 // (tens of percent, as gPortConfig.musicVolume)
++#define MUSIC_VOLUME_MAX 40
 +
 +static MenuInputStruct sMusicInput;
 +static s32 sMusicCursor; // kept while the title's menus are up
@@ -3842,6 +3845,7 @@ index 86f582c2..c0b1c612 100644
 +static bool8 sMusicStoppedBgm; // the title's music is stopped while a track plays
 +static u16 sMusicPrevKeys;
 +static s32 sMusicDrawnSecond, sMusicDrawnLoops, sMusicDrawnState;
++static u16 sMusicVolumeHeld; // frames the volume buttons were held (repeat)
 +static s32 sMusicListPlaying; // the track the list marks as playing
 +
 +static void SetMusicWindows(void)
@@ -3915,18 +3919,17 @@ index 86f582c2..c0b1c612 100644
 +    PrintStringOnWindow(4, 0, sMusicStatus != NULL ? sMusicStatus : states[state], MUSIC_INFO_WIN, 0);
 +    if (Port_MusicRepeat())
 +        PrintStringOnWindow(160, 0, sMusicRepeatOn, MUSIC_INFO_WIN, 0);
-+    if (sMusicTrack >= 0) {
-+        MusicLabel(text, 40, Port_MusicLabel(sMusicTrack));
-+        PrintStringOnWindow(4, 12, text, MUSIC_INFO_WIN, 0);
-+        snprintf((char *)text, sizeof(text), "Song %d / %d   Time %u:%02u   Loops %d", (int)sMusicTrack + 1,
-+                 Port_MusicCount(), ms / 60000, (ms / 1000) % 60, sMusicDrawnLoops);
-+        PrintStringOnWindow(4, 24, text, MUSIC_INFO_WIN, 0);
-+    }
-+    else {
-+        MusicLabel(text, 40, Port_MusicRomTitle());
-+        PrintStringOnWindow(4, 12, text, MUSIC_INFO_WIN, 0);
-+    }
++    MusicLabel(text, 40, sMusicTrack >= 0 ? Port_MusicLabel(sMusicTrack) : Port_MusicRomTitle());
++    PrintStringOnWindow(4, 12, text, MUSIC_INFO_WIN, 0);
++    if (sMusicTrack >= 0)
++        snprintf((char *)text, sizeof(text), "Time %u:%02u", ms / 60000, (ms / 1000) % 60);
++    else
++        text[0] = '\0';
++    PrintStringOnWindow(4, 24, text, MUSIC_INFO_WIN, 0);
++    snprintf((char *)text, sizeof(text), "Volume %d%%", gPortConfig.musicVolume * 10);
++    PrintStringOnWindow(120, 24, text, MUSIC_INFO_WIN, 0);
 +    PrintStringOnWindow(4, 36, sMusicControls, MUSIC_INFO_WIN, 0);
++    PrintStringOnWindow(4, 48, sMusicVolumeControls, MUSIC_INFO_WIN, 0);
 +    sub_80073E0(MUSIC_INFO_WIN);
 +}
 +
@@ -3934,6 +3937,8 @@ index 86f582c2..c0b1c612 100644
 +{
 +    gPortRawXY = TRUE; // X stops, Y pauses (not A, with DS or 3DS buttons)
 +    sMusicPrevKeys = Port_KeysHeld();
++    sMusicVolumeHeld = 0;
++    Port_MusicSetVolume(gPortConfig.musicVolume * 10);
 +    CreateMenuOnWindow(&sMusicInput, Port_MusicCount(), MUSIC_PER_PAGE, MUSIC_LIST_WIN);
 +    MoveMenuToEntryId(&sMusicInput, sMusicCursor);
 +    sMusicStatus = NULL;
@@ -3965,7 +3970,7 @@ index 86f582c2..c0b1c612 100644
 +    for (tries = 0; tries < 64; tries++) {
 +        s32 next = track + dir;
 +        if (next < 0 || next >= Port_MusicCount())
-             break;
++            break;
 +        if (PlayMusicTrack(next))
 +            return;
 +        track = next;
@@ -3973,9 +3978,9 @@ index 86f582c2..c0b1c612 100644
 +    if (automatic) {
 +        Port_MusicStop();
 +        sMusicStatus = sMusicEnd;
-     }
- }
- 
++    }
++}
++
 +// The player, left: back to Music Options, on Music Player
 +static void LeaveMusicMenu(void)
 +{
@@ -4015,6 +4020,22 @@ index 86f582c2..c0b1c612 100644
 +    bool8 info = FALSE;
 +
 +    sMusicPrevKeys = keys;
++    // The volume: Circle Pad up/down or ZL/ZR, in steps of 10% (repeating
++    // while held, as the player's lists do)
++    if (keys & (PORT_KEY_CPAD_UP | PORT_KEY_ZR | PORT_KEY_CPAD_DOWN | PORT_KEY_ZL)) {
++        s32 step = (keys & (PORT_KEY_CPAD_UP | PORT_KEY_ZR)) ? 1 : -1;
++        if (sMusicVolumeHeld == 0 || (sMusicVolumeHeld >= 20 && (sMusicVolumeHeld - 20) % 5 == 0)) {
++            s32 v = gPortConfig.musicVolume + step;
++            if (v >= MUSIC_VOLUME_MIN && v <= MUSIC_VOLUME_MAX) {
++                gPortConfig.musicVolume = v;
++                Port_MusicSetVolume(v * 10);
++                info = TRUE;
++            }
++        }
++        sMusicVolumeHeld++;
++    }
++    else
++        sMusicVolumeHeld = 0;
 +    if (gRealInputs.pressed & L_BUTTON) {
 +        AdvanceMusic(-1, FALSE);
 +        info = TRUE;
@@ -4064,11 +4085,12 @@ index 86f582c2..c0b1c612 100644
 +        DrawMusicInfo();
 +}
 +
-+// The loaded ROM's DS Menu icon, shown like a speaker's portrait: its 40x40
-+// picture as an uncompressed "AT3P" (DecompressAT's N mode), in BG palette 14.
++// The loaded ROM's DS Menu icon at twice its size, in a window like a
++// speaker's portrait, centred: its 64x64 picture as an uncompressed "AT3P"
++// (DecompressAT's N mode), in BG palette 14.
 +static MonPortraitMsg *MusicIconPortrait(void)
 +{
-+    static u8 sIcon[7 + 25 * 32];
++    static u8 sIcon[7 + 64 * 32];
 +    static RGB_Struct sIconColors[16];
 +    static PortraitGfx sIconGfx;
 +    static MonPortraitMsg sPortrait;
@@ -4078,8 +4100,8 @@ index 86f582c2..c0b1c612 100644
 +    if (!Port_MusicIcon(sIcon + 7, colors))
 +        return NULL;
 +    memcpy(sIcon, "AT3PN", 5);
-+    sIcon[5] = (25 * 32) & 0xFF;
-+    sIcon[6] = (25 * 32) >> 8;
++    sIcon[5] = (64 * 32) & 0xFF;
++    sIcon[6] = (64 * 32) >> 8;
 +    for (i = 0; i < 16; i++) {
 +        sIconColors[i].r = colors[i * 4];
 +        sIconColors[i].g = colors[i * 4 + 1];
@@ -4093,9 +4115,9 @@ index 86f582c2..c0b1c612 100644
 +    sPortrait.faceData = &sIconGfx;
 +    sPortrait.spriteId = 0;
 +    sPortrait.flip = FALSE;
-+    sPortrait.unkE = 0;
-+    sPortrait.pos.x = 2;
-+    sPortrait.pos.y = 8;
++    sPortrait.unkE = PORT_PORTRAIT_ICON; // 8x8 tiles: the border fits the icon
++    sPortrait.pos.x = (30 - 8) / 2; // in the middle, above the text box
++    sPortrait.pos.y = 4;
 +    return &sPortrait;
 +}
 +
@@ -4879,6 +4901,43 @@ index 812df38d..68c59fea 100644
          // Set x/matrixNum to 0
          // Set size to 1
          *oam++ = 0x4000;
+diff --git a/src/string_format.c b/src/string_format.c
+index be399eb4..60375839 100644
+--- a/src/string_format.c
++++ b/src/string_format.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/input.h"
+ #include "bg_palette_buffer.h"
+@@ -225,12 +228,23 @@ void CreateMenuDialogueBoxAndPortrait(const u8 *text, void *a1, u32 r9, const Me
+         sDialogueBoxWinTemplates.id[1].width = 5;
+         sDialogueBoxWinTemplates.id[1].height = 5;
+         sDialogueBoxWinTemplates.id[1].totalHeight = 5;
++#ifdef PLATFORM_3DS
++        if (monPortraitPtr->unkE == PORT_PORTRAIT_ICON) { // Music Options' ROM icon, 64x64
++            sDialogueBoxWinTemplates.id[1].width = 8;
++            sDialogueBoxWinTemplates.id[1].height = 8;
++            sDialogueBoxWinTemplates.id[1].totalHeight = 8;
++        }
++#endif
+ 
+         for (i = 0; i < 16; i++) {
+             SetBGPaletteBufferColorArray(224 + i, &monPortraitPtr->faceData->sprites[monPortraitPtr->spriteId].pal[i]);
+         }
+         portraitOn = TRUE;
+-        if (monPortraitPtr->unkE) {
++        if (monPortraitPtr->unkE
++#ifdef PLATFORM_3DS
++            && monPortraitPtr->unkE != PORT_PORTRAIT_ICON
++#endif
++            ) {
+             sDialogueBoxWinTemplates.id[1].type = WINDOW_TYPE_7;
+         }
+         else {
 diff --git a/src/text_1.c b/src/text_1.c
 index e6612f2c..6c39b33a 100644
 --- a/src/text_1.c

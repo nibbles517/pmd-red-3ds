@@ -32,6 +32,7 @@ static int sCount;
 static Song *sSong;
 static int sPlaying = -1; // the track playing (or stopped mid-way: -1 once stopped)
 static int sPaused, sRepeat;
+static int sVolume = 150; // percent (Music Options sets it)
 static uint32_t sMixRate = 2 * 18157; // twice the game's mixing rate (see Port_MusicMix)
 
 void Port_MusicClose(void);
@@ -129,21 +130,20 @@ const char *Port_MusicRomTitle(void)
     return title;
 }
 
-// The ROM's DS Menu icon (its first frame), in the middle of a 40x40
-// picture as the game's portraits are: 5x5 tiles of 4bpp, row by row (800
-// bytes), and its 16 colours as r, g, b, 0 (64 bytes). 0 if it has none.
+// The ROM's DS Menu icon (its first frame) at twice its size, 64x64: 8x8
+// tiles of 4bpp, row by row (2048 bytes), and its 16 colours as r, g, b, 0
+// (64 bytes). 0 if it has none.
 int Port_MusicIcon(uint8_t *tiles, uint8_t *colors)
 {
     const NdsBanner *b = &sRom.banner;
     if (!sOpen || !b->valid)
         return 0;
-    memset(tiles, 0, 25 * 32);
-    for (int y = 0; y < BANNER_ICON_W; y++)
-        for (int x = 0; x < BANNER_ICON_W; x++) {
-            int px = x + 4, py = y + 4; // (centred)
+    memset(tiles, 0, 64 * 32);
+    for (int py = 0; py < 64; py++)
+        for (int px = 0; px < 64; px++) {
             int bmp = b->frame[0].bitmap; // (an animated icon: its first frame)
-            int c = b->pixels[bmp][y * BANNER_ICON_W + x] & 15;
-            uint8_t *t = tiles + ((py / 8) * 5 + px / 8) * 32 + (py % 8) * 4 + (px % 8) / 2;
+            int c = b->pixels[bmp][(py / 2) * BANNER_ICON_W + px / 2] & 15;
+            uint8_t *t = tiles + ((py / 8) * 8 + px / 8) * 32 + (py % 8) * 4 + (px % 8) / 2;
             *t |= (px & 1) ? (uint8_t)(c << 4) : (uint8_t)c;
         }
     for (int i = 0; i < 16; i++) {
@@ -181,6 +181,7 @@ int Port_MusicPlay(int i)
     if (g == NULL)
         return 0;
     ApplyTiming(g);
+    song_set_volume(g, sVolume);
     sSong = g;
     return 1;
 }
@@ -198,6 +199,13 @@ void Port_MusicSetPaused(int paused)
 int Port_MusicPaused(void)
 {
     return sPaused;
+}
+
+void Port_MusicSetVolume(int percent)
+{
+    sVolume = percent;
+    if (sSong != NULL)
+        song_set_volume(sSong, percent);
 }
 
 void Port_MusicSetRepeat(int repeat)

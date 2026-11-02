@@ -27,5 +27,6 @@ void sseq_render(SseqPlayer *p, int16_t *out, uint32_t frames);
 int sseq_finished(const SseqPlayer *p);      /* all tracks ended and all voices silent */
 int sseq_loops(const SseqPlayer *p);         /* times the song has looped back */
 uint16_t sseq_voice_mask(const SseqPlayer *p); /* bit n = hardware channel n is sounding */
+void sseq_set_gain(SseqPlayer *p, int32_t gain); /* 8.8 fixed point, 256 = unity */
 
 #endif
