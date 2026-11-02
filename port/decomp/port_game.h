@@ -95,6 +95,7 @@ int Port_MusicCount(void);
 const char *Port_MusicLabel(int track);
 int Port_MusicIsStream(int track);
 const char *Port_MusicRomTitle(void);
+const char *Port_MusicGameCode(void); // e.g. "APHE" (Blue Rescue Team, North America)
 int Port_MusicPlay(int track); // 0 if it can't be played
 void Port_MusicStop(void);
 int Port_MusicPlaying(void); // the track playing, or -1

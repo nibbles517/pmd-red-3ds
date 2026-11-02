@@ -3306,7 +3306,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..10976029 100644
+index 86f582c2..58fee986 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3348,7 +3348,7 @@ index 86f582c2..10976029 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +50,13 @@ enum OptionsMenuStates
+@@ -31,6 +50,15 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -3359,10 +3359,12 @@ index 86f582c2..10976029 100644
 +    OPTIONS_MENU_MUSIC, // 3DS port: Music Options' track list
 +    OPTIONS_MENU_MUSIC_MISSING, // 3DS port: "pmd-blue.nds was not found."
 +    OPTIONS_MENU_MUSIC_MISSING2, // ... "Please make sure ..."
++    OPTIONS_MENU_MUSIC_OTHER, // 3DS port: "The file appears to not be ..."
++    OPTIONS_MENU_MUSIC_OTHER2, // ... "The music may only be played here. ..."
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +74,82 @@ static void sub_801DED0(void);
+@@ -48,6 +76,85 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3390,6 +3392,9 @@ index 86f582c2..10976029 100644
 +ALIGNED(4) static const u8 sChangeSaveData[] = _("Change Current Save Data");
 +ALIGNED(4) static const u8 sMusicOptions[] = _("Music Options");
 +ALIGNED(4) static const u8 sMusicMissing[] = _("pmd-blue.nds was not found.");
++ALIGNED(4) static const u8 sMusicOther[] = _("The file appears to not be a Pokémon\nMystery Dungeon: Blue Rescue Team file.");
++ALIGNED(4) static const u8 sMusicOther2[] = _("The music may only be played here. In\ndungeons, you will need a Music Box to be\nable to play one of the tracks.");
++#define MUSIC_GAME_CODE "APHE" // Pokémon Mystery Dungeon: Blue Rescue Team
 +ALIGNED(4) static const u8 sMusicMissing2[] = _("Please make sure pmd-blue.nds is in the\nsame directory, and then try again.");
 +static void CreateMusicMenu(void);
 +static void HandleMusicMenu(void);
@@ -3445,7 +3450,7 @@ index 86f582c2..10976029 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +178,31 @@ u32 sub_801DCE8(void)
+@@ -76,8 +183,33 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3471,13 +3476,15 @@ index 86f582c2..10976029 100644
              break;
 +        case OPTIONS_MENU_MUSIC_MISSING:
 +        case OPTIONS_MENU_MUSIC_MISSING2:
++        case OPTIONS_MENU_MUSIC_OTHER:
++        case OPTIONS_MENU_MUSIC_OTHER2:
 +            HandleMusicMissing();
 +            break;
 +#endif
          default:
              break;
      }
-@@ -120,9 +245,13 @@ static void sub_801DD84(void)
+@@ -120,9 +252,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3492,7 +3499,7 @@ index 86f582c2..10976029 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +259,31 @@ static void sub_801DD84(void)
+@@ -130,10 +266,31 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3504,7 +3511,7 @@ index 86f582c2..10976029 100644
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
 +#endif
-             break;
++            break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SAVE_DATA:
 +            CreateOthersMenu();
@@ -3520,12 +3527,12 @@ index 86f582c2..10976029 100644
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetMusicWindows();
-+            break;
+             break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +300,10 @@ static void sub_801DED0(void)
+@@ -150,6 +307,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3536,7 +3543,7 @@ index 86f582c2..10976029 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +318,57 @@ static void sub_801DED0(void)
+@@ -164,12 +325,63 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3577,6 +3584,12 @@ index 86f582c2..10976029 100644
 +        case OPTIONS_MENU_MUSIC_MISSING2:
 +            CreateDialogueBoxAndPortrait(sMusicMissing2, 0, NULL, 0x101);
 +            break;
++        case OPTIONS_MENU_MUSIC_OTHER:
++            CreateDialogueBoxAndPortrait(sMusicOther, 0, NULL, 0x101);
++            break;
++        case OPTIONS_MENU_MUSIC_OTHER2:
++            CreateDialogueBoxAndPortrait(sMusicOther2, 0, NULL, 0x101);
++            break;
 +        case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
 +            // write what changed, then say so (like "Save completed.")
 +            if (sSaveGameOptions)
@@ -3594,7 +3607,7 @@ index 86f582c2..10976029 100644
      }
  }
  
-@@ -180,12 +379,39 @@ static void CreateOthersMenu(void)
+@@ -180,12 +392,39 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3634,7 +3647,7 @@ index 86f582c2..10976029 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +455,24 @@ static void HandleOthersMenu(void)
+@@ -229,6 +468,29 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3650,8 +3663,13 @@ index 86f582c2..10976029 100644
 +            break;
 +        case MENU_OPTION_MUSIC:
 +            // the DS version's music, from pmd-blue.nds (if it is there and usable)
-+            if (Port_MusicOpen() > 0)
-+                SetOptionsMenuState(OPTIONS_MENU_MUSIC);
++            if (Port_MusicOpen() > 0) {
++                // another game's ROM: its music, but here only
++                if (strcmp(Port_MusicGameCode(), MUSIC_GAME_CODE) != 0)
++                    SetOptionsMenuState(OPTIONS_MENU_MUSIC_OTHER);
++                else
++                    SetOptionsMenuState(OPTIONS_MENU_MUSIC);
++            }
 +            else
 +                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
 +            break;
@@ -3659,7 +3677,7 @@ index 86f582c2..10976029 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +516,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +534,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3676,7 +3694,7 @@ index 86f582c2..10976029 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +536,357 @@ static void sub_801E0FC(void)
+@@ -282,12 +554,368 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3720,10 +3738,10 @@ index 86f582c2..10976029 100644
 +        case 3:
 +            PortScreenMenu_Destroy();
 +            LeaveSettings(PortScreenMenu_Changed());
-+            break;
-+    }
-+}
-+
+             break;
+     }
+ }
+ 
 +// Save Data 1-3: that save file is used from now on (and next time); the
 +// main menu then reads it as at power-on.
 +static void HandleSaveDataMenu(void)
@@ -3929,7 +3947,7 @@ index 86f582c2..10976029 100644
 +    for (tries = 0; tries < 64; tries++) {
 +        s32 next = track + dir;
 +        if (next < 0 || next >= Port_MusicCount())
-             break;
++            break;
 +        if (PlayMusicTrack(next))
 +            return;
 +        track = next;
@@ -3937,9 +3955,9 @@ index 86f582c2..10976029 100644
 +    if (automatic) {
 +        Port_MusicStop();
 +        sMusicStatus = sMusicEnd;
-     }
- }
- 
++    }
++}
++
 +static void LeaveMusicMenu(void)
 +{
 +    sMusicCursor = GET_CURRENT_MENU_ENTRY(sMusicInput);
@@ -4009,17 +4027,28 @@ index 86f582c2..10976029 100644
 +        DrawMusicInfo();
 +}
 +
-+// "pmd-blue.nds was not found.", then how to fix it
++// "pmd-blue.nds was not found.", then how to fix it; or, for another game's
++// ROM, that it isn't Blue Rescue Team's, then the player
 +static void HandleMusicMissing(void)
 +{
 +    s32 menuAction;
 +
 +    if (sub_80144A4(&menuAction) != 0)
 +        return;
-+    if (sUnknown_203B25C->state == OPTIONS_MENU_MUSIC_MISSING)
-+        SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING2);
-+    else
-+        SetOptionsMenuState(OPTIONS_MENU_MAIN);
++    switch (sUnknown_203B25C->state) {
++        case OPTIONS_MENU_MUSIC_MISSING:
++            SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING2);
++            break;
++        case OPTIONS_MENU_MUSIC_OTHER:
++            SetOptionsMenuState(OPTIONS_MENU_MUSIC_OTHER2);
++            break;
++        case OPTIONS_MENU_MUSIC_OTHER2:
++            SetOptionsMenuState(OPTIONS_MENU_MUSIC); // the player after all
++            break;
++        default:
++            SetOptionsMenuState(OPTIONS_MENU_MAIN);
++            break;
++    }
 +}
 +
 +static void HandleChangesSaved(void)

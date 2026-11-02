@@ -129,6 +129,11 @@ const char *Port_MusicRomTitle(void)
     return title;
 }
 
+const char *Port_MusicGameCode(void)
+{
+    return sOpen ? sRom.hdr.gamecode : "";
+}
+
 static void ApplyTiming(Song *g)
 {
     if (sRepeat)
