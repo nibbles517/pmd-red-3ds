@@ -343,10 +343,11 @@ static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int fram
 
 static void GpuDrawPicture(C3D_RenderTarget *target, const C3D_Mtx *proj, GpuPicture *p)
 {
-    // (the picture's first row is at v = 1 - srcH / TEX_H, its last at v = 1:
-    // so it is the right way up on the 3DS's screens)
+    // The picture's first row is at v = 0, its last at v = srcH / TEX_H (seen
+    // on a 3DS: drawing v from 1 at the top showed it upside down, its first
+    // 16 rows missing and 16 black ones at the top, the rest of the texture).
     float x0 = (float)p->x, y0 = (float)p->y, x1 = (float)(p->x + p->w), y1 = (float)(p->y + p->h);
-    float u1 = (float)p->srcW / TEX_W, v0 = 1.0f - (float)p->srcH / TEX_H, v1 = 1.0f;
+    float u1 = (float)p->srcW / TEX_W, v0 = 0.0f, v1 = (float)p->srcH / TEX_H;
 
     C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0x000000FF, 0); // black borders
     C3D_FrameDrawOn(target);
