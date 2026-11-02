@@ -29,10 +29,11 @@ clean:
 # Platform core and the test-harness build
 
 CORE_CFLAGS := $(ARCH_FLAGS) -O2 -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections
-CORE_SRCS   := port/core/frame.c port/core/ppu.c port/core/ppu_b.c port/core/dma.c port/core/save.c port/core/cgb.c port/core/music.c
+CORE_SRCS   := port/core/frame.c port/core/ppu.c port/core/ppu_b.c port/core/bgcache.c port/core/dma.c port/core/save.c port/core/cgb.c port/core/music.c
 CORE_OBJ    := $(BUILD)/core
 
 $(CORE_OBJ)/ppu_b.o: port/core/ppu.c
+$(CORE_OBJ)/ppu.o $(CORE_OBJ)/ppu_b.o $(CORE_OBJ)/frame.o $(CORE_OBJ)/bgcache.o: port/core/bgcache.h
 $(CORE_OBJ)/%.o: port/core/%.c port/core/port.h
 	@mkdir -p $(dir $@)
 	@$(GAME_CC) $(CORE_CFLAGS) -c $< -o $@

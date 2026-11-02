@@ -17,13 +17,16 @@
 // Speed matters here: this runs 160 times a frame on a 268 MHz CPU. Common
 // cases take fast paths (whole tile rows decoded at once, layers painted back
 // to front when no windows or alpha blending are active); everything else goes
-// through the general per-pixel path. port/test/ppu_ref.c is the original
+// through the general per-pixel path. Text backgrounds are copied out of
+// their maps kept decoded (bgcache.h) rather than decoded line by line.
+// port/test/ppu_ref.c is the original
 // straightforward version, and tools/test_ppu checks this file against it,
 // byte for byte, on frames captured from the game.
 
 #include <stdint.h>
 #include <string.h>
 #include "port.h"
+#include "bgcache.h"
 
 // Dual Core: ppu_b.c builds this file a second time, with its own state,
 // for the second CPU core to draw part of the lines with (Ppu* -> PpuB*).
@@ -300,6 +303,88 @@ static inline __attribute__((always_inline)) int DecodeTileRow(uint16_t e, unsig
     return any;
 }
 
+// A line of a background out of its cache (bgcache.h): y the map's row, x the
+// map's column at the line's first pixel. Tiles not decoded yet are decoded
+// first; a group is marked opaque-somewhere / opaque-all from the row bits of
+// the tile columns it covers.
+static inline uint64_t CacheRowBits(const uint32_t w[2], int tilesW, int tx0)
+{
+    // The tile columns from tx0 on, wrapping (a 32-column map: twice over)
+    uint64_t v = w[0] | ((uint64_t)(tilesW == 64 ? w[1] : w[0]) << 32);
+    return tx0 ? (v >> tx0) | (v << (64 - tx0)) : v;
+}
+
+// The even bits of v, packed (bit 2i to bit i).
+static inline uint32_t EvenBits(uint64_t v)
+{
+    v &= 0x5555555555555555ull;
+    v = (v | (v >> 1)) & 0x3333333333333333ull;
+    v = (v | (v >> 2)) & 0x0F0F0F0F0F0F0F0Full;
+    v = (v | (v >> 4)) & 0x00FF00FF00FF00FFull;
+    v = (v | (v >> 8)) & 0x0000FFFF0000FFFFull;
+    return (uint32_t)(v | (v >> 16));
+}
+
+static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
+{
+    const int wPx = c->tilesW * 8;
+    const int tx0 = x >> 3, skip = x & 7, ty = y >> 3;
+    const int k = (skip + sW + 7) >> 3; // tile columns the line covers (at most 42)
+    const uint64_t cols = (1ull << k) - 1;
+
+    uint64_t todo = CacheRowBits(c->todo[ty], c->tilesW, tx0) & cols;
+    while (todo) {
+        uint32_t lo32 = (uint32_t)todo; // (the lowest bit: 32-bit ctz, no library call)
+        int i = lo32 ? __builtin_ctz(lo32) : 32 + __builtin_ctz((uint32_t)(todo >> 32));
+        todo &= todo - 1;
+        BgCache_Decode(c, (tx0 + i) & (c->tilesW - 1), ty);
+    }
+    __sync_synchronize(); // (tiles the other core decoded: theirs before their todo bits)
+    uint64_t any = CacheRowBits(c->any[y], c->tilesW, tx0) & cols;
+    uint64_t full = CacheRowBits(c->full[y], c->tilesW, tx0) & cols;
+
+    const uint16_t *row = &c->px[y * BGC_STRIDE];
+    for (int sx = 0, cx = x; sx < sW;) {
+        int n = wPx - cx;
+        if (n > sW - sx) n = sW - sx;
+        memcpy(&out[sx], &row[cx], n * sizeof(uint16_t));
+        sx += n;
+        cx = 0;
+    }
+
+    uint32_t mask = 0, opaque = 0;
+    const int gs = sGs, groups = (sW + (1 << gs) - 1) >> gs;
+    if (any) {
+        if (gs == 3) { // 8-pixel groups: one or two tile columns each
+            uint64_t m = skip ? any | (any >> 1) : any;
+            uint64_t f = skip ? full & (full >> 1) : full;
+            uint32_t keep = groups >= 32 ? ALL_GROUPS : (1u << groups) - 1;
+            mask = (uint32_t)m & keep;
+            opaque = (uint32_t)f & keep;
+        }
+        else if (gs == 4) { // 16-pixel groups: two or three tile columns each
+            uint64_t m = skip ? any | (any >> 1) | (any >> 2) : any | (any >> 1);
+            uint64_t f = skip ? full & (full >> 1) & (full >> 2) : full & (full >> 1);
+            uint32_t keep = groups >= 32 ? ALL_GROUPS : (1u << groups) - 1;
+            mask = EvenBits(m) & keep;
+            opaque = EvenBits(f) & keep;
+        }
+        else {
+            for (int g = 0; g < groups; g++) {
+                int p0 = g << gs, p1 = p0 + (1 << gs);
+                if (p1 > sW) p1 = sW;
+                int lo = (p0 + skip) >> 3, hi = (p1 - 1 + skip) >> 3;
+                uint64_t cm = ((2ull << (hi - lo)) - 1) << lo;
+                if (any & cm) mask |= 1u << g;
+                if ((full & cm) == cm) opaque |= 1u << g;
+            }
+        }
+    }
+    sLastMask = mask;
+    sLastFull = opaque;
+    return any != 0;
+}
+
 // A background the game draws for the wide view: a 64x64-entry map in RAM,
 // scrolled by gPortWideBg (not by the BG registers). PORT_WIDE_BLACK entries
 // are opaque black (outside the map).
@@ -315,6 +400,9 @@ static int RenderWideBg(int bg, int line, uint16_t *out)
     int any = 0;
     uint32_t mask = 0, notFull = 0;
     int x = (wb->scrollX - sOx) & 511;
+    BgCache *c = &gBgCache[bg];
+    if (c->valid && c->wideMap == wb->map && c->charBase == charBase && c->color256 == color256)
+        return RenderCachedLine(c, y, x, out);
 
     for (int sx = 0; sx < sW;) {
         uint16_t e = row[x >> 3];
@@ -446,6 +534,7 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         sW = sOx + GBA_W;
         int any = RenderTextBgVram(bg, line, out, cnt);
         sW = sViewW;
+        uint32_t centerMask = sLastMask, centerFull = sLastFull;
         if (bg == 0) {
             for (int x = 0; x < sOx; x++) out[x] = TRANSPARENT;
             for (int x = sOx + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
@@ -460,9 +549,16 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         uint16_t e = *(const uint16_t *)&gPortVram[mapOff];
         uint16_t px[8];
         int fill = DecodeTileRow(e, ((cnt >> 2) & 3) * 0x4000, gy & 7, (cnt >> 7) & 1, px);
-        for (int x = 0; x < sOx; x++) out[x] = px[(x - sOx + hofs) & 7];
-        for (int x = sOx + GBA_W; x < sW; x++) out[x] = px[(x - sOx + hofs) & 7];
-        sLastMask = ALL_GROUPS; sLastFull = 0;
+        uint16_t pat[8]; // (screen x & 7 -> the tile's pixel there)
+        for (int i = 0; i < 8; i++) pat[i] = px[(i - sOx + hofs) & 7];
+        for (int x = 0; x < sOx; x++) out[x] = pat[x & 7];
+        for (int x = sOx + GBA_W; x < sW; x++) out[x] = pat[x & 7];
+        // The groups: the middle's as drawn (those wholly to the sides: the
+        // side tile's), those taking in the sides opaque only if it is.
+        uint32_t sides = Groups(0, sOx) | Groups(sOx + GBA_W, sW - sOx - GBA_W);
+        uint32_t middle = Groups(sOx, GBA_W);
+        sLastMask = fill ? (centerMask | sides) : centerMask;
+        sLastFull = (centerFull & ~sides) | (fill == 2 ? (sides & ~middle) | (centerFull & sides & middle) : 0);
         return any | fill;
     }
     return RenderTextBgVram(bg, line, out, cnt);
@@ -484,6 +580,10 @@ static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt)
     int hofs = R16(0x10 + bg * 4) & 0x1FF;
     int vofs = R16(0x12 + bg * 4) & 0x1FF;
     int y = (line + vofs) & (heightPx - 1);
+    BgCache *c = &gBgCache[bg];
+    if (c->valid && !c->wideMap && c->charBase == charBase && c->screenBase == screenBase
+        && c->color256 == color256 && c->size == size && c->edge == sWide)
+        return RenderCachedLine(c, y, (hofs - sOx) & (widthPx - 1), out);
     int inY = y & 7;
     unsigned rowBlock = (y >= 256) ? ((widthPx == 512) ? 2 : 1) : 0;
     unsigned rowOff = screenBase + rowBlock * 0x800 + ((y >> 3) & 31) * 64;
@@ -750,6 +850,23 @@ static inline uint16_t Blend(uint16_t a, uint16_t b, int eva, int evb)
     return (uint16_t)((x & 0x7C1Fu) | ((x >> 16) & 0x3E0u));
 }
 
+// ... with eva + evb <= 16, where no channel can pass 31: no clamping
+static inline uint16_t BlendNoClamp(uint32_t aTimesEva, uint16_t b, int evb)
+{
+    uint32_t x = (aTimesEva + Spread(b) * (uint32_t)evb) >> 4;
+    return (uint16_t)((x & 0x7C1Fu) | ((x >> 16) & 0x3E0u));
+}
+
+// n copies of v from p
+static inline void Fill16(uint16_t *p, uint16_t v, int n)
+{
+    if (n > 0 && ((uintptr_t)p & 2)) { *p++ = v; n--; }
+    uint32_t v2 = v | ((uint32_t)v << 16);
+    uint32_t *q = (uint32_t *)p;
+    for (; n >= 2; n -= 2) *q++ = v2;
+    if (n) *(uint16_t *)q = v;
+}
+
 static inline uint16_t Brighten(uint16_t c, int evy)
 {
     int r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;
@@ -821,7 +938,7 @@ static inline int WinBottom(int hi) { return (sWide && hi >= GBA_H) ? sViewH : h
 // per-pixel search for the top two visible layers, without the per-pixel work.
 static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio[4], uint16_t dispcnt)
 {
-    static uint8_t wm[W], topL[W], secL[W];
+    static uint8_t wm[W] __attribute__((aligned(4))), topL[W], secL[W];
     static uint16_t secC[W];
 
     uint16_t bldcnt = R16(0x50);
@@ -838,12 +955,14 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
     // the mask can hold), for which the per-pixel test can be skipped.
     int win0 = (dispcnt >> 13) & 1, win1 = (dispcnt >> 14) & 1, winObj = (dispcnt >> 15) & 1;
     unsigned wmAll = 0x3F;
+    uint8_t winout6 = 0x3F;
     if (!(win0 | win1 | winObj)) {
         memset(wm, 0x3F, sizeof(wm));
     }
     else {
         uint16_t winin = R16(0x48), winout = R16(0x4A);
         wmAll = winout & 0x3F;
+        winout6 = winout & 0x3F;
         if (winObj && sObjWinAny) wmAll &= (winout >> 8) & 0x3F;
         if (win1) wmAll &= (winin >> 8) & 0x3F;
         if (win0) wmAll &= winin & 0x3F;
@@ -870,13 +989,42 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
         }
     }
 
+    // Per group, the window bits set in all its pixels / in some (groups
+    // wholly inside or outside a window skip the per-pixel test below).
+    // Mostly a group is all winout's: only the others are looked at closely.
+    uint8_t gAll[32], gSome[32];
+    const int groups = (sW + (1 << sGs) - 1) >> sGs;
+    if (wmAll != 0x3F) {
+        const int gs = sGs;
+        const uint8_t out6 = winout6;
+        const uint32_t rep4 = out6 * 0x01010101u;
+        for (int g = 0; g < groups; g++) {
+            int x0 = g << gs, x1 = x0 + (1 << gs);
+            if (x1 > sW) x1 = sW;
+            uint32_t a = 0xFFFFFFFFu, o = 0;
+            int x = x0;
+            for (; x + 4 <= x1; x += 4) { // (wm is 4-byte aligned, groups too)
+                uint32_t w = *(const uint32_t *)&wm[x];
+                a &= w;
+                o |= w;
+            }
+            for (; x < x1; x++) { a &= wm[x] * 0x01010101u; o |= wm[x]; }
+            if (a == rep4 && o == rep4) {
+                gAll[g] = gSome[g] = out6;
+                continue;
+            }
+            gAll[g] = (uint8_t)(a & (a >> 8) & (a >> 16) & (a >> 24));
+            gSome[g] = (uint8_t)((o | (o >> 8) | (o >> 16) | (o >> 24)) & 0x3F);
+        }
+    }
+
     uint16_t backdrop = Pal(0);
-    for (int x = 0; x < sW; x++) dst[x] = backdrop;
+    Fill16(dst, backdrop, sW);
     memset(topL, L_BD, sizeof(topL));
     int needSec = (effect == 1) || sObjSemiAny;
     if (needSec) {
         memset(secL, L_BD, sizeof(secL));
-        for (int x = 0; x < sW; x++) secC[x] = backdrop;
+        Fill16(secC, backdrop, sW);
     }
 
     // Back to front: within a priority, BG3..BG0, then sprites (a sprite beats
@@ -887,7 +1035,15 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
                 continue;
             const uint16_t *src = sBg[b];
             uint8_t bit = (uint8_t)(1u << b);
-            uint32_t full = (wmAll & bit) ? sBgFull[b] : 0; // opaque and shown: copied whole
+            uint32_t inAll = ALL_GROUPS, inSome = ALL_GROUPS; // groups shown in all pixels / some
+            if (!(wmAll & bit)) {
+                inAll = inSome = 0;
+                for (int g = 0; g < groups; g++) {
+                    inAll |= (uint32_t)((gAll[g] >> b) & 1) << g;
+                    inSome |= (uint32_t)((gSome[g] >> b) & 1) << g;
+                }
+            }
+            uint32_t full = sBgFull[b] & inAll; // opaque and shown: copied whole
             uint32_t m = full;
             int x, x1;
             while (NextRun(&m, &x, &x1)) {
@@ -899,9 +1055,12 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
                 memcpy(&dst[x], &src[x], n * sizeof(uint16_t));
                 memset(&topL[x], b, n);
             }
-            m = sBgMask[b] & ~full;
-            while (NextRun(&m, &x, &x1)) {
-                if (wmAll & bit) { // shown everywhere: only transparency matters
+            uint32_t shown = sBgMask[b] & inAll & ~full; // shown: only transparency matters
+            uint32_t part = sBgMask[b] & inSome & ~inAll; // shown in some pixels
+            for (int pass = 0; pass < 2; pass++) {
+              m = pass ? part : shown;
+              while (NextRun(&m, &x, &x1)) {
+                if (!pass) {
                     if (needSec) {
                         for (; x < x1; x++) {
                             if (!(src[x] & TRANSPARENT)) {
@@ -933,6 +1092,7 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
                         }
                     }
                 }
+              }
             }
         }
         if (sObjAny && (sObjPrioMask & (1u << p))) {
@@ -959,12 +1119,39 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
     }
     if (effect == 1 && !sObjSemiAny) { // alpha blending only (the usual case)
         unsigned first = bldcnt & 0x3F, second = (bldcnt >> 8) & 0x3F;
-        int allIn = (wmAll & 0x20) != 0;
-        uint32_t m = targets;
+        uint32_t effAll = ALL_GROUPS, effSome = ALL_GROUPS;
+        if (!(wmAll & 0x20)) {
+            effAll = effSome = 0;
+            for (int g = 0; g < groups; g++) {
+                effAll |= (uint32_t)((gAll[g] >> 5) & 1) << g;
+                effSome |= (uint32_t)((gSome[g] >> 5) & 1) << g;
+            }
+        }
+        uint32_t m = targets & effAll; // (effects on in every pixel)
         int x0, x1;
+        if (eva + evb <= 16) { // (the top colour is mostly the same one: its product kept)
+            uint16_t lastTop = dst[0] ^ 0xFFFF;
+            uint32_t lastProd = 0;
+            while (NextRun(&m, &x0, &x1)) {
+                for (int x = x0; x < x1; x++) {
+                    if ((first >> topL[x]) & (second >> secL[x]) & 1) {
+                        uint16_t t = dst[x];
+                        if (t != lastTop) { lastTop = t; lastProd = Spread(t) * (uint32_t)eva; }
+                        dst[x] = BlendNoClamp(lastProd, secC[x], evb);
+                    }
+                }
+            }
+        }
         while (NextRun(&m, &x0, &x1)) {
             for (int x = x0; x < x1; x++) {
-                if (((first >> topL[x]) & (second >> secL[x]) & 1) && (allIn || (wm[x] & 0x20)))
+                if ((first >> topL[x]) & (second >> secL[x]) & 1)
+                    dst[x] = Blend(dst[x], secC[x], eva, evb);
+            }
+        }
+        m = targets & effSome & ~effAll; // (in some)
+        while (NextRun(&m, &x0, &x1)) {
+            for (int x = x0; x < x1; x++) {
+                if (((first >> topL[x]) & (second >> secL[x]) & 1) && (wm[x] & 0x20))
                     dst[x] = Blend(dst[x], secC[x], eva, evb);
             }
         }

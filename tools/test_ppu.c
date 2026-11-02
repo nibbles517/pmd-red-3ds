@@ -3,7 +3,7 @@
 // and the reference one (port/test/ppu_ref.c), and requires byte-identical
 // output. Also times both, natively.
 //
-// build: cc -O2 -o build/test_ppu tools/test_ppu.c port/core/ppu.c port/test/ppu_ref.c -Iport/core
+// build: cc -O2 -o build/test_ppu tools/test_ppu.c port/core/ppu.c port/core/bgcache.c port/test/ppu_ref.c -Iport/core
 // usage: build/test_ppu build/captures/capture_*.bin
 
 #include <stdio.h>
@@ -11,6 +11,7 @@
 #include <string.h>
 #include <time.h>
 #include "port.h"
+#include "bgcache.h"
 
 unsigned char gPortRegs[0x400] __attribute__((aligned(4)));
 unsigned char gPortVram[0x18000] __attribute__((aligned(4)));
@@ -36,7 +37,7 @@ static void Render(const Capture *c, uint16_t *out, int ref)
     memcpy(gPortPltt, c->pltt, sizeof(gPortPltt));
     memcpy(gPortOam, c->oam, sizeof(gPortOam));
     memcpy(gPortRegs, c->regs[0], sizeof(gPortRegs));
-    if (ref) Ref_BeginFrame(); else Ppu_BeginFrame();
+    if (ref) Ref_BeginFrame(); else { BgCache_Prepare(gPortRegs, 0); Ppu_BeginFrame(); }
     for (int line = 0; line < GBA_H; line++) {
         memcpy(gPortRegs, c->regs[line], sizeof(gPortRegs));
         if (ref) Ref_RenderLine(line, &out[line * GBA_W]);

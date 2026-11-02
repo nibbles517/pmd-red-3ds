@@ -8,6 +8,7 @@
 
 #include <string.h>
 #include "port.h"
+#include "bgcache.h"
 
 unsigned char gPortRegs[0x400] __attribute__((aligned(4)));
 unsigned char gPortVram[0x18000] __attribute__((aligned(4)));
@@ -313,6 +314,8 @@ static void RunFrame(void)
         memset(sFrame, 0, sizeof(sFrame)); // the framed view's border is black
     }
     int lines = wide ? SCREEN_H : GBA_H;
+    if (!skip)
+        BgCache_Prepare(gPortRegs, wide); // (before either renderer starts)
     if (!skip && dual)
         memcpy(sStartRegs, gPortRegs, REG_COPY);
     else if (!skip)
