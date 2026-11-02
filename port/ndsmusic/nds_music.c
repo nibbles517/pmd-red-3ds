@@ -22,6 +22,8 @@ NdsMusicResult nds_music_open(NdsMusic *m, const char *path) {
         return NDSM_ERR_HEADER;
     }
 
+    nds_read_banner(&m->rom, &m->banner); /* optional */
+
     int n = nds_find_sdats(&m->rom, &m->hdr, found, NDS_MUSIC_MAX_SDATS);
     if (n < 0) {
         nds_music_close(m);

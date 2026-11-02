@@ -9,6 +9,7 @@
 #ifndef NDSMUSIC_NDS_MUSIC_H
 #define NDSMUSIC_NDS_MUSIC_H
 
+#include "nds_banner.h"
 #include "nds_rom.h"
 #include "sdat.h"
 
@@ -26,6 +27,7 @@ typedef struct {
     void *fp; /* Backend_FileOpen */
     DataSource rom;
     NdsHeader hdr;
+    NdsBanner banner; /* banner.valid = 0 if the ROM has none */
     int num_sdats;
     NdsFile sdat_file[NDS_MUSIC_MAX_SDATS];
     Sdat sdat[NDS_MUSIC_MAX_SDATS];

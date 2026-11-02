@@ -129,6 +129,33 @@ const char *Port_MusicRomTitle(void)
     return title;
 }
 
+// The ROM's DS Menu icon (its first frame), in the middle of a 40x40
+// picture as the game's portraits are: 5x5 tiles of 4bpp, row by row (800
+// bytes), and its 16 colours as r, g, b, 0 (64 bytes). 0 if it has none.
+int Port_MusicIcon(uint8_t *tiles, uint8_t *colors)
+{
+    const NdsBanner *b = &sRom.banner;
+    if (!sOpen || !b->valid)
+        return 0;
+    memset(tiles, 0, 25 * 32);
+    for (int y = 0; y < BANNER_ICON_W; y++)
+        for (int x = 0; x < BANNER_ICON_W; x++) {
+            int px = x + 4, py = y + 4; // (centred)
+            int bmp = b->frame[0].bitmap; // (an animated icon: its first frame)
+            int c = b->pixels[bmp][y * BANNER_ICON_W + x] & 15;
+            uint8_t *t = tiles + ((py / 8) * 5 + px / 8) * 32 + (py % 8) * 4 + (px % 8) / 2;
+            *t |= (px & 1) ? (uint8_t)(c << 4) : (uint8_t)c;
+        }
+    for (int i = 0; i < 16; i++) {
+        uint16_t c = b->palette[b->frame[0].palette][i];
+        colors[i * 4] = (uint8_t)((c & 31) << 3);
+        colors[i * 4 + 1] = (uint8_t)(((c >> 5) & 31) << 3);
+        colors[i * 4 + 2] = (uint8_t)(((c >> 10) & 31) << 3);
+        colors[i * 4 + 3] = 0;
+    }
+    return 1;
+}
+
 const char *Port_MusicGameCode(void)
 {
     return sOpen ? sRom.hdr.gamecode : "";

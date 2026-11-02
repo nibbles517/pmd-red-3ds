@@ -98,6 +98,7 @@ int Port_MusicCount(void);
 const char *Port_MusicLabel(int track);
 int Port_MusicIsStream(int track);
 const char *Port_MusicRomTitle(void);
+int Port_MusicIcon(u8 *tiles, u8 *colors); // the DS Menu icon, as a 40x40 portrait
 const char *Port_MusicGameCode(void); // e.g. "APHE" (Blue Rescue Team, North America)
 int Port_MusicPlay(int track); // 0 if it can't be played
 void Port_MusicStop(void);

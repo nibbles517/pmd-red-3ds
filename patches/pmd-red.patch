@@ -3307,7 +3307,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..8cdba7c3 100644
+index 86f582c2..c0b1c612 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3315,12 +3315,13 @@ index 86f582c2..8cdba7c3 100644
  #include "global.h"
  #include "globaldata.h"
  #include "code_8099360.h"
-@@ -9,6 +10,17 @@
+@@ -9,6 +10,18 @@
  #include "menu_input.h"
  #include "options_menu1.h"
  #include "options_menu2.h"
 +#ifdef PLATFORM_3DS
 +#include "port_screen_menu.h"
++#include "structs/str_mon_portrait.h"
 +#include "graphics_memory.h"
 +#include "port_game.h"
 +#include "save.h"
@@ -3333,7 +3334,7 @@ index 86f582c2..8cdba7c3 100644
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +30,14 @@ enum
+@@ -18,7 +31,14 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -3349,7 +3350,7 @@ index 86f582c2..8cdba7c3 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +50,16 @@ enum OptionsMenuStates
+@@ -31,6 +51,16 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -3366,7 +3367,7 @@ index 86f582c2..8cdba7c3 100644
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +77,90 @@ static void sub_801DED0(void);
+@@ -48,6 +78,91 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3405,6 +3406,7 @@ index 86f582c2..8cdba7c3 100644
 +static void HandleMusicMissing(void);
 +static void SetMusicWindows(void);
 +static void HandleMusicSettings(void);
++static MonPortraitMsg *MusicIconPortrait(void);
 +static bool8 sMusicLocked; // pmd-blue.nds is another game's: GBA music only
 +static s32 sMusicSettingsEntry; // where the cursor goes in Music Options
 +ALIGNED(4) static const u8 sSaveData1[] = _("Save Data 1");
@@ -3457,7 +3459,7 @@ index 86f582c2..8cdba7c3 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +189,36 @@ u32 sub_801DCE8(void)
+@@ -76,8 +191,36 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3494,7 +3496,7 @@ index 86f582c2..8cdba7c3 100644
          default:
              break;
      }
-@@ -120,9 +261,13 @@ static void sub_801DD84(void)
+@@ -120,9 +263,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3509,7 +3511,7 @@ index 86f582c2..8cdba7c3 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +275,31 @@ static void sub_801DD84(void)
+@@ -130,10 +277,31 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3542,7 +3544,7 @@ index 86f582c2..8cdba7c3 100644
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +316,10 @@ static void sub_801DED0(void)
+@@ -150,6 +318,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3553,7 +3555,7 @@ index 86f582c2..8cdba7c3 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +334,67 @@ static void sub_801DED0(void)
+@@ -164,12 +336,67 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3594,11 +3596,11 @@ index 86f582c2..8cdba7c3 100644
 +        case OPTIONS_MENU_MUSIC_MISSING2:
 +            CreateDialogueBoxAndPortrait(sMusicMissing2, 0, NULL, 0x101);
 +            break;
-+        case OPTIONS_MENU_MUSIC_OTHER:
-+            CreateDialogueBoxAndPortrait(sMusicOther, 0, NULL, 0x101);
++        case OPTIONS_MENU_MUSIC_OTHER: // (with the ROM's icon, as a portrait)
++            CreateDialogueBoxAndPortrait(sMusicOther, 0, MusicIconPortrait(), 0x101);
 +            break;
 +        case OPTIONS_MENU_MUSIC_OTHER2:
-+            CreateDialogueBoxAndPortrait(sMusicOther2, 0, NULL, 0x101);
++            CreateDialogueBoxAndPortrait(sMusicOther2, 0, MusicIconPortrait(), 0x101);
 +            break;
 +        case OPTIONS_MENU_MUSIC_SETTINGS:
 +            sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3621,7 +3623,7 @@ index 86f582c2..8cdba7c3 100644
      }
  }
  
-@@ -180,12 +405,39 @@ static void CreateOthersMenu(void)
+@@ -180,12 +407,39 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3661,7 +3663,7 @@ index 86f582c2..8cdba7c3 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +481,31 @@ static void HandleOthersMenu(void)
+@@ -229,6 +483,31 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3693,7 +3695,7 @@ index 86f582c2..8cdba7c3 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +549,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +551,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3710,7 +3712,7 @@ index 86f582c2..8cdba7c3 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +569,387 @@ static void sub_801E0FC(void)
+@@ -282,12 +571,422 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3963,7 +3965,7 @@ index 86f582c2..8cdba7c3 100644
 +    for (tries = 0; tries < 64; tries++) {
 +        s32 next = track + dir;
 +        if (next < 0 || next >= Port_MusicCount())
-+            break;
+             break;
 +        if (PlayMusicTrack(next))
 +            return;
 +        track = next;
@@ -3971,9 +3973,9 @@ index 86f582c2..8cdba7c3 100644
 +    if (automatic) {
 +        Port_MusicStop();
 +        sMusicStatus = sMusicEnd;
-+    }
-+}
-+
+     }
+ }
+ 
 +// The player, left: back to Music Options, on Music Player
 +static void LeaveMusicMenu(void)
 +{
@@ -4062,6 +4064,41 @@ index 86f582c2..8cdba7c3 100644
 +        DrawMusicInfo();
 +}
 +
++// The loaded ROM's DS Menu icon, shown like a speaker's portrait: its 40x40
++// picture as an uncompressed "AT3P" (DecompressAT's N mode), in BG palette 14.
++static MonPortraitMsg *MusicIconPortrait(void)
++{
++    static u8 sIcon[7 + 25 * 32];
++    static RGB_Struct sIconColors[16];
++    static PortraitGfx sIconGfx;
++    static MonPortraitMsg sPortrait;
++    u8 colors[16 * 4];
++    s32 i;
++
++    if (!Port_MusicIcon(sIcon + 7, colors))
++        return NULL;
++    memcpy(sIcon, "AT3PN", 5);
++    sIcon[5] = (25 * 32) & 0xFF;
++    sIcon[6] = (25 * 32) >> 8;
++    for (i = 0; i < 16; i++) {
++        sIconColors[i].r = colors[i * 4];
++        sIconColors[i].g = colors[i * 4 + 1];
++        sIconColors[i].b = colors[i * 4 + 2];
++        sIconColors[i].unk4 = 0;
++    }
++    memset(&sIconGfx, 0, sizeof(sIconGfx));
++    sIconGfx.sprites[0].pal = sIconColors;
++    sIconGfx.sprites[0].gfx = sIcon;
++    sPortrait.faceFile = NULL;
++    sPortrait.faceData = &sIconGfx;
++    sPortrait.spriteId = 0;
++    sPortrait.flip = FALSE;
++    sPortrait.unkE = 0;
++    sPortrait.pos.x = 2;
++    sPortrait.pos.y = 8;
++    return &sPortrait;
++}
++
 +// "pmd-blue.nds was not found.", then how to fix it; or, for another game's
 +// ROM, that it isn't Blue Rescue Team's, then the player
 +static void HandleMusicMissing(void)
@@ -4082,10 +4119,10 @@ index 86f582c2..8cdba7c3 100644
 +            break;
 +        default:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
-             break;
-     }
- }
- 
++            break;
++    }
++}
++
 +static void HandleChangesSaved(void)
 +{
 +    s32 menuAction;
