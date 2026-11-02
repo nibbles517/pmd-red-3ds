@@ -36,7 +36,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 
 void AgbMain(void);
 
-const int Backend_Version14_UpdateRepoIfMissing = 14;
+const int Backend_Version15_UpdateRepoIfMissing = 15;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -778,6 +778,26 @@ void Backend_FileClose(void *file)
     fclose(d->f);
     free(d->buf);
     free(d);
+}
+
+bool Backend_FileWrite(const char *name, const void *data, uint32_t size)
+{
+    char path[256], tmp[260];
+    snprintf(path, sizeof(path), DATA_DIR "/%s", name);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    if (f == NULL)
+        return false;
+    bool ok = fwrite(data, 1, size, f) == size;
+    ok = fclose(f) == 0 && ok;
+    if (!ok) {
+        remove(tmp);
+        return false;
+    }
+    remove(path);
+    rename(tmp, path);
+    Backend_Log("data: wrote %s", path);
+    return true;
 }
 
 bool Backend_LoadConfig(uint8_t *data, uint32_t size)

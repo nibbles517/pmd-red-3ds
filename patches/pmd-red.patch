@@ -2851,10 +2851,20 @@ index 79fd9c0d..0a1feab2 100644
          return FALSE;
      }
 diff --git a/src/m4a.c b/src/m4a.c
-index 2bcf6f8a..af9a133b 100644
+index 2bcf6f8a..0bcc0375 100644
 --- a/src/m4a.c
 +++ b/src/m4a.c
-@@ -309,10 +309,17 @@ void MPlayExtender(struct CgbChannel *cgbChans)
+@@ -1,6 +1,9 @@
+ #include "global.h"
+ #include "m4a.h"
+ #include "gba/m4a_internal.h"
++#ifdef PLATFORM_3DS
++bool8 Port_MuteMPlay(struct MusicPlayerInfo *mplayInfo); // music.c
++#endif
+ 
+ extern const u8 gCgb3Vol[];
+ 
+@@ -309,10 +312,17 @@ void MPlayExtender(struct CgbChannel *cgbChans)
      soundInfo->ident = ident;
  }
  
@@ -2872,7 +2882,7 @@ index 2bcf6f8a..af9a133b 100644
  
  void ClearChain(void *x)
  {
-@@ -404,10 +411,10 @@ void SampleFreqSet(u32 freq)
+@@ -404,10 +414,10 @@ void SampleFreqSet(u32 freq)
  
      m4aSoundVSyncOn();
  
@@ -2885,6 +2895,18 @@ index 2bcf6f8a..af9a133b 100644
          ;
  
      REG_TM0CNT_H = TIMER_ENABLE | TIMER_1CLK;
+@@ -771,6 +781,11 @@ void TrkVolPitSet(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *tr
+ 
+         track->volMR = (u32)((y + 128) * x) >> 8;
+         track->volML = (u32)((127 - y) * x) >> 8;
++#ifdef PLATFORM_3DS
++        // Music Style: DS: a DS track plays instead of this player's song (music.c)
++        if (Port_MuteMPlay(mplayInfo))
++            track->volMR = track->volML = 0;
++#endif
+     }
+ 
+     if (track->flags & MPT_FLG_PITSET)
 diff --git a/src/m4a_1.s b/src/m4a_1.s
 index 8a40a25c..8c094343 100644
 --- a/src/m4a_1.s
@@ -3274,6 +3296,119 @@ index aeeb69ed..8d2fd375 100644
      SpriteSetY(&a0->unk28, DISPLAY_WIDTH);
  
      a0->unk26 = 0;
+diff --git a/src/music.c b/src/music.c
+index a5a58dec..ba77ccd6 100644
+--- a/src/music.c
++++ b/src/music.c
+@@ -3,6 +3,11 @@
+ #include "m4a.h"
+ #include "reg_control.h"
+ #include "music.h"
++#ifdef PLATFORM_3DS
++#include "gba/m4a_internal.h"
++#include "port_game.h"
++static void Port_DsMusicFrame(void);
++#endif
+ 
+ static EWRAM_DATA u16 sBGMusicPlayerstate = {0};
+ static EWRAM_DATA u16 sCurrentBGSong = {0};
+@@ -517,6 +522,9 @@ void UpdateSound(void)
+     s32 musicPlayerIndex;
+ 
+     m4aSoundMain();
++#ifdef PLATFORM_3DS
++    Port_DsMusicFrame();
++#endif
+ 
+     if (sFanfareMusicPlayerState != 0) {
+         switch (sFanfareMusicPlayerState) {
+@@ -651,6 +659,86 @@ void UpdateSound(void)
+     }
+ }
+ 
++#ifdef PLATFORM_3DS
++// --- 3DS port: Music Style: DS ----------------------------------------------------
++//
++// With Blue Rescue Team's ROM (pmd-blue.nds) and Music Style: DS, each GBA
++// song matched with a DS track (port/core/music.c) plays as that track: the
++// GBA player still plays the song, silently (its volume, 0: m4a.c,
++// TrkVolPitSet), so that the game goes on as it always does, and the DS
++// track follows it: it starts with it, pauses while it does (for a fanfare),
++// follows its fades and stops with it. Songs without a match play as ever.
++
++bool8 gPortDsMusicOff; // Music Matching: the game's own music only
++static s8 sDsReady = -1; // -1: not looked at yet
++static bool8 sMuteBgm, sMuteFanfare;
++
++bool8 Port_DsMusicOn(void)
++{
++    if (gPortConfig.musicStyle != PORT_MUSIC_DS || gPortDsMusicOff)
++        return FALSE;
++    if (sDsReady < 0) // (once: the ROM is looked through at the first song)
++        sDsReady = Port_MusicOpen() > 0 && Port_MusicRomIsBlue();
++    return sDsReady > 0;
++}
++
++void Port_DsMusicRecheck(void)
++{
++    sDsReady = -1;
++}
++
++bool8 Port_MuteMPlay(struct MusicPlayerInfo *mplayInfo)
++{
++    return (mplayInfo == &gMPlayInfo_BGM && sMuteBgm) || (mplayInfo == &gMPlayInfo_Fanfare && sMuteFanfare);
++}
++
++static void SetMute(struct MusicPlayerInfo *mplayInfo, bool8 *muted, bool8 mute)
++{
++    s32 i;
++
++    if (*muted == mute)
++        return;
++    *muted = mute;
++    for (i = 0; i < mplayInfo->trackCount; i++) // (their volumes again)
++        mplayInfo->tracks[i].flags |= MPT_FLG_VOLSET;
++}
++
++// The player's volume, 0-64: its fades and volume changes (m4aMPlayVolumeControl)
++static s32 PlayerVolume(struct MusicPlayerInfo *mplayInfo)
++{
++    s32 i;
++
++    for (i = 0; i < mplayInfo->trackCount; i++)
++        if (mplayInfo->tracks[i].flags & MPT_FLG_EXIST)
++            return mplayInfo->tracks[i].volX;
++    return 64;
++}
++
++static bool8 PlayerAudible(struct MusicPlayerInfo *mplayInfo)
++{
++    return (mplayInfo->status & MUSICPLAYER_STATUS_TRACK) != 0 && !(mplayInfo->status & MUSICPLAYER_STATUS_PAUSE);
++}
++
++static void Port_DsMusicFrame(void)
++{
++    s32 bgm = -1, fanfare = -1;
++
++    if (Port_DsMusicOn()) {
++        Port_MusicSetVolume(gPortConfig.musicVolume * 10); // (Music Options' volume)
++        if (sCurrentBGSong != STOP_BGM)
++            bgm = Port_MusicMapGet(sCurrentBGSong);
++        if (sFanfareMusicPlayerState != 0 && sCurrentFanfareSong != STOP_SOUND_EFFECT)
++            fanfare = Port_MusicMapGet(sCurrentFanfareSong);
++    }
++    SetMute(&gMPlayInfo_BGM, &sMuteBgm, bgm >= 0);
++    SetMute(&gMPlayInfo_Fanfare, &sMuteFanfare, fanfare >= 0);
++    Port_MusicSlot(0, bgm, TRUE, !PlayerAudible(&gMPlayInfo_BGM), PlayerVolume(&gMPlayInfo_BGM));
++    if (sFanfareMusicPlayerState != FANFARE_PLAYER_STATE_PLAYING)
++        fanfare = -1; // (once the GBA player plays it)
++    Port_MusicSlot(1, fanfare, FALSE, FALSE, PlayerVolume(&gMPlayInfo_Fanfare));
++}
++#endif
++
+ void StopBGMusicVSync(void)
+ {
+     bool8 interruptFlag;
 diff --git a/src/naming_screen.c b/src/naming_screen.c
 index d24034e1..79edce4b 100644
 --- a/src/naming_screen.c
@@ -3307,7 +3442,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..2fc604d2 100644
+index 86f582c2..4bfc8cc5 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3334,7 +3469,7 @@ index 86f582c2..2fc604d2 100644
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +31,14 @@ enum
+@@ -18,7 +31,15 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -3344,13 +3479,14 @@ index 86f582c2..2fc604d2 100644
 +    MENU_OPTION_CONTROLS, // 3DS port: Controls Options
 +    MENU_OPTION_SAVE_DATA, // 3DS port: Change Current Save Data (title only)
 +    MENU_OPTION_MUSIC, // 3DS port: Music Options (title only)
++    MENU_OPTION_MUSIC_MATCH, // 3DS port: Music Matching (development aid, title only)
 +    MENU_OPTION_SAVE_SLOT1, // ... Save Data 1, 2, 3
 +    MENU_OPTION_SAVE_SLOT2,
 +    MENU_OPTION_SAVE_SLOT3,
  };
  
  enum OptionsMenuStates
-@@ -31,6 +51,16 @@ enum OptionsMenuStates
+@@ -31,6 +52,18 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -3364,10 +3500,12 @@ index 86f582c2..2fc604d2 100644
 +    OPTIONS_MENU_MUSIC_OTHER, // 3DS port: "The file appears to not be ..."
 +    OPTIONS_MENU_MUSIC_OTHER2, // ... "The music may only be played here. ..."
 +    OPTIONS_MENU_MUSIC_SETTINGS, // 3DS port: Music Style, Music Player
++    OPTIONS_MENU_MUSIC_MATCH, // 3DS port: Music Matching
++    OPTIONS_MENU_MUSIC_MATCH_OTHER, // ... with another game's ROM: says so
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +78,91 @@ static void sub_801DED0(void);
+@@ -48,6 +81,94 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3394,6 +3532,9 @@ index 86f582c2..2fc604d2 100644
 +// Change Current Save Data (only there): Save Data 1-3 in a smaller window
 +ALIGNED(4) static const u8 sChangeSaveData[] = _("Change Current Save Data");
 +ALIGNED(4) static const u8 sMusicOptions[] = _("Music Options");
++ALIGNED(4) static const u8 sMusicMatching[] = _("Music Matching (Dev)");
++static void CreateMatchMenu(void);
++static void HandleMatchMenu(void);
 +ALIGNED(4) static const u8 sMusicMissing[] = _("pmd-blue.nds was not found.");
 +ALIGNED(4) static const u8 sMusicOther[] = _("The file appears to not be a Pokémon\nMystery Dungeon: Blue Rescue Team file.");
 +ALIGNED(4) static const u8 sMusicOther2[] = _("The music may only be played here. In\ndungeons, you will need a Music Box to be\nable to play one of the tracks.");
@@ -3459,7 +3600,7 @@ index 86f582c2..2fc604d2 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +191,36 @@ u32 sub_801DCE8(void)
+@@ -76,8 +197,42 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3468,7 +3609,7 @@ index 86f582c2..2fc604d2 100644
 +#else
              HandleChangeSettingsMenu();
 +#endif
-             break;
++            break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
@@ -3479,7 +3620,7 @@ index 86f582c2..2fc604d2 100644
 +            break;
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            HandleSaveDataLoaded();
-+            break;
+             break;
 +        case OPTIONS_MENU_MUSIC:
 +            HandleMusicMenu();
 +            break;
@@ -3492,11 +3633,17 @@ index 86f582c2..2fc604d2 100644
 +        case OPTIONS_MENU_MUSIC_SETTINGS:
 +            HandleMusicSettings();
 +            break;
++        case OPTIONS_MENU_MUSIC_MATCH:
++            HandleMatchMenu();
++            break;
++        case OPTIONS_MENU_MUSIC_MATCH_OTHER:
++            HandleMusicMissing();
++            break;
 +#endif
          default:
              break;
      }
-@@ -120,9 +263,13 @@ static void sub_801DD84(void)
+@@ -120,9 +275,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3511,7 +3658,7 @@ index 86f582c2..2fc604d2 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +277,31 @@ static void sub_801DD84(void)
+@@ -130,10 +289,32 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3523,7 +3670,7 @@ index 86f582c2..2fc604d2 100644
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
 +#endif
-+            break;
+             break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SAVE_DATA:
 +            CreateOthersMenu();
@@ -3536,15 +3683,16 @@ index 86f582c2..2fc604d2 100644
 +            sub_8012D08(&sUnknown_203B25C->unkBC.id[1], 3);
 +            break;
 +        case OPTIONS_MENU_MUSIC:
++        case OPTIONS_MENU_MUSIC_MATCH:
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetMusicWindows();
-             break;
++            break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +318,10 @@ static void sub_801DED0(void)
+@@ -150,6 +331,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3555,7 +3703,7 @@ index 86f582c2..2fc604d2 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +336,67 @@ static void sub_801DED0(void)
+@@ -164,12 +349,73 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3602,6 +3750,12 @@ index 86f582c2..2fc604d2 100644
 +        case OPTIONS_MENU_MUSIC_OTHER2:
 +            CreateDialogueBoxAndPortrait(sMusicOther2, 0, MusicIconPortrait(), 0x101);
 +            break;
++        case OPTIONS_MENU_MUSIC_MATCH:
++            CreateMatchMenu();
++            break;
++        case OPTIONS_MENU_MUSIC_MATCH_OTHER:
++            CreateDialogueBoxAndPortrait(sMusicOther, 0, MusicIconPortrait(), 0x101);
++            break;
 +        case OPTIONS_MENU_MUSIC_SETTINGS:
 +            sUnknown_203B25C->newOptions = *gGameOptionsRef;
 +            PortMusicMenu_Create(&sUnknown_203B25C->newOptions, sMusicLocked, sMusicSettingsEntry);
@@ -3623,7 +3777,7 @@ index 86f582c2..2fc604d2 100644
      }
  }
  
-@@ -180,12 +407,39 @@ static void CreateOthersMenu(void)
+@@ -180,12 +426,42 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3646,6 +3800,9 @@ index 86f582c2..2fc604d2 100644
 +        sUnknown_203B25C->menuItems[loopMax].text = sMusicOptions;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_MUSIC;
 +        loopMax++;
++        sUnknown_203B25C->menuItems[loopMax].text = sMusicMatching;
++        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_MUSIC_MATCH;
++        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sChangeSaveData;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SAVE_DATA;
 +    }
@@ -3663,7 +3820,7 @@ index 86f582c2..2fc604d2 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +483,31 @@ static void HandleOthersMenu(void)
+@@ -229,6 +505,39 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3684,18 +3841,26 @@ index 86f582c2..2fc604d2 100644
 +            sMusicSettingsEntry = 0;
 +            if (Port_MusicOpen() > 0) {
 +                // another game's ROM: its music, but here only (GBA music)
-+                const char *code = Port_MusicGameCode();
-+                sMusicLocked = strncmp(code, MUSIC_GAME_CODE, 3) != 0 || (code[3] != 'E' && code[3] != 'P' && code[3] != 'J');
++                sMusicLocked = !Port_MusicRomIsBlue();
 +                SetOptionsMenuState(sMusicLocked ? OPTIONS_MENU_MUSIC_OTHER : OPTIONS_MENU_MUSIC_SETTINGS);
 +            }
 +            else
 +                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
 +            break;
++        case MENU_OPTION_MUSIC_MATCH:
++            // Blue Rescue Team's tracks only
++            if (Port_MusicOpen() <= 0)
++                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
++            else if (!Port_MusicRomIsBlue())
++                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MATCH_OTHER);
++            else
++                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MATCH);
++            break;
 +#endif
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +551,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +581,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3712,7 +3877,7 @@ index 86f582c2..2fc604d2 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +571,444 @@ static void sub_801E0FC(void)
+@@ -282,11 +601,762 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3781,10 +3946,10 @@ index 86f582c2..2fc604d2 100644
 +            break;
 +        case MENU_OPTION_DEFAULT:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
-             break;
-     }
- }
- 
++            break;
++    }
++}
++
 +static void HandleSaveDataLoaded(void)
 +{
 +    s32 menuAction;
@@ -3852,7 +4017,7 @@ index 86f582c2..2fc604d2 100644
 +{
 +    sMusicHeader.count = 1;
 +    sMusicHeader.currId = 0;
-+    sMusicHeader.width = 13; // "Music Options" and the page
++    sMusicHeader.width = 15; // "Music Options" (or "Music Matching") and the page
 +    sMusicHeader.f3 = 0;
 +    sUnknown_203B25C->unkBC.id[MUSIC_LIST_WIN] = sMusicListWindow;
 +    sub_8012D08(&sUnknown_203B25C->unkBC.id[MUSIC_LIST_WIN], MUSIC_PER_PAGE);
@@ -3884,7 +4049,7 @@ index 86f582c2..2fc604d2 100644
 +    sub_80073B8(MUSIC_LIST_WIN);
 +    PrintStringOnWindow(10, 0, sMusicOptions, MUSIC_LIST_WIN, 0);
 +    snprintf((char *)text, sizeof(text), "%d/%d", in->currPage + 1, in->pagesCount > 0 ? in->pagesCount : 1);
-+    PrintStringOnWindow(80, 0, text, MUSIC_LIST_WIN, 0);
++    PrintStringOnWindow(90, 0, text, MUSIC_LIST_WIN, 0);
 +    sMusicListPlaying = Port_MusicPlaying();
 +    for (i = 0; i < in->currPageEntries; i++) {
 +        s32 track = in->currPage * in->entriesPerPage + i;
@@ -3970,11 +4135,11 @@ index 86f582c2..2fc604d2 100644
 +    for (tries = 0; tries < 64; tries++) {
 +        s32 next = track + dir;
 +        if (next < 0 || next >= Port_MusicCount())
-+            break;
+             break;
 +        if (PlayMusicTrack(next))
 +            return;
 +        track = next;
-+    }
+     }
 +    if (automatic) {
 +        Port_MusicStop();
 +        sMusicStatus = sMusicEnd;
@@ -4004,6 +4169,7 @@ index 86f582c2..2fc604d2 100644
 +        case 2: // B: back to Game Options
 +            PortScreenMenu_Destroy();
 +            Port_MusicClose();
++            Port_DsMusicRecheck(); // (Music Style: DS opens the ROM again)
 +            LeaveSettings(memcmp(&sOpenedConfig, &gPortConfig, sizeof(gPortConfig)) != 0);
 +            break;
 +        case 3: // A on Music Player
@@ -4121,6 +4287,319 @@ index 86f582c2..2fc604d2 100644
 +    return &sPortrait;
 +}
 +
++// --- Music Matching (a development aid) ---------------------------------------
++//
++// To match each GBA song with its DS track, once: the GBA songs, each with
++// the DS track it is matched with. A plays the GBA song, Y the DS track;
++// L/R (ZL/ZR) match the previous/next (tenth) DS track, and play it; X
++// clears the match. START, or leaving with B, writes music-map.txt in the
++// port's folder (port/core/music.c reads it, for Music Style: DS).
++
++static const struct { u16 id; const char *name; } sMatchSongs[] = {
++    { 1, "RESCUE_TEAM_BASE" },
++    { 2, "FRIEND_AREA_SWAMP" },
++    { 3, "FRIEND_AREA_CAVES" },
++    { 4, "DREAM" },
++    { 5, "BENEVOLENT_SPIRIT" },
++    { 6, "LEGEND_OF_NINETALES" },
++    { 7, "POKEMON_SQUARE" },
++    { 8, "FILE_SELECT" },
++    { 9, "RISING_FEAR" },
++    { 10, "THERES_TROUBLE" },
++    { 11, "BOSS_BATTLE" },
++    { 12, "WELCOME_TO_THE_WORLD_OF_POKEMON" },
++    { 13, "A_NEW_ADVENTURE" },
++    { 14, "THUNDERWAVE_CAVE" },
++    { 15, "SINISTER_WOODS" },
++    { 16, "FRIEND_AREA_POND" },
++    { 17, "KECLEON_SHOP" },
++    { 18, "STOP_THIEF" },
++    { 19, "WORLD_CALAMITY" },
++    { 20, "GREAT_CANYON" },
++    { 21, "STORMY_SEA" },
++    { 22, "SKY_TOWER" },
++    { 23, "SKY_TOWER_SUMMIT" },
++    { 24, "THE_ESCAPE" },
++    { 25, "MT_BLAZE" },
++    { 26, "RAYQUAZAS_DOMAIN" },
++    { 27, "FRIEND_AREA_STRATOS_LOOKOUT" },
++    { 28, "FRIEND_AREA_RAINBOW_PEAK" },
++    { 29, "DREAM_EATER" },
++    { 30, "FRIEND_AREA_DEEPSEA_CURRENT" },
++    { 31, "FRIEND_AREA_SEAFLOOR_CAVE" },
++    { 32, "BATTLE_WITH_RAYQUAZA" },
++    { 33, "MT_BLAZE_PEAK" },
++    { 34, "FRIEND_AREA_VOLCANIC_PIT" },
++    { 35, "FRIEND_AREA_CRYPTIC_CAVE" },
++    { 36, "ESCAPE_THROUGH_THE_SNOW" },
++    { 37, "THE_OTHER_SIDE" },
++    { 38, "THE_MOUNTAIN_OF_FIRE" },
++    { 39, "FROSTY_GROTTO" },
++    { 40, "INTRO" },
++    { 41, "AFTERMATH" },
++    { 42, "FAREWELL" },
++    { 43, "TITLE_SCREEN" },
++    { 44, "CREDITS" },
++    { 45, "TIME_OF_REUNION" },
++    { 46, "OPENING_TITLE" },
++    { 51, "DUNGEON_FAIL" },
++    { 52, "DUNGEON_COMPLETE" },
++    { 100, "FRIEND_AREA_UNUSED_1" },
++    { 101, "HEARTWARMING" },
++    { 102, "LAPIS_CAVE" },
++    { 103, "A_SUCCESSFUL_RESCUE" },
++    { 104, "FROSTY_FOREST" },
++    { 105, "FRIEND_AREA_STEPPE" },
++    { 106, "FRIEND_AREA_OCEANIC" },
++    { 107, "FRIEND_AREA_FIELD" },
++    { 108, "MAGMA_CAVERN" },
++    { 109, "FRIEND_AREA_UNUSED_2" },
++    { 110, "MAKUHITA_DOJO" },
++    { 111, "MT_THUNDER" },
++    { 112, "FRIEND_AREA_LAB" },
++    { 113, "SILENT_CHASM" },
++    { 114, "IN_THE_DEPTHS_OF_THE_PIT" },
++    { 115, "MT_FREEZE" },
++    { 116, "FRIEND_AREA_WILDS" },
++    { 117, "FRIEND_AREA_LEGENDARY_ISLAND" },
++    { 118, "FRIEND_AREA_SOUTHERN_ISLAND" },
++    { 119, "FRIEND_AREA_ENCLOSED_ISLAND" },
++    { 120, "MT_STEEL" },
++    { 121, "FRIEND_AREA_FOREST" },
++    { 122, "FRIEND_AREA_FINAL_ISLAND" },
++    { 123, "MT_FREEZE_PEAK" },
++    { 124, "MAGMA_CAVERN_PIT" },
++    { 125, "TINY_WOODS" },
++    { 126, "MT_THUNDER_PEAK" },
++    { 127, "FRIEND_AREA_HEALING_FOREST" },
++    { 128, "MONSTER_HOUSE" },
++    { 200, "FANFARE_200" },
++    { 201, "FANFARE_201" },
++    { 202, "FANFARE_202" },
++    { 203, "FANFARE_203" },
++    { 204, "FANFARE_204" },
++    { 205, "FANFARE_205" },
++    { 206, "FANFARE_206" },
++    { 207, "FANFARE_207" },
++    { 208, "FANFARE_208" },
++    { 209, "FANFARE_209" },
++    { 210, "FANFARE_210" },
++    { 211, "FANFARE_211" },
++    { 212, "FANFARE_212" },
++    { 213, "FANFARE_213" },
++    { 214, "FANFARE_214" },
++    { 215, "FANFARE_215" },
++    { 216, "FANFARE_216" },
++    { 217, "FANFARE_217" },
++    { 218, "FANFARE_218" },
++};
++#define MATCH_SONGS ((s32)(sizeof(sMatchSongs) / sizeof(sMatchSongs[0])))
++#define MATCH_PER_PAGE 5
++
++ALIGNED(4) static const u8 sMatchTitle[] = _("Music Matching");
++ALIGNED(4) static const u8 sMatchControls1[] = _("A GBA  Y DS  L/R DS -/+1  ZL/ZR -/+10");
++ALIGNED(4) static const u8 sMatchControls2[] = _("X Clear  START Save  B Save and leave");
++ALIGNED(4) static const u8 sMatchSaved[] = _("{COLOR GREEN}Saved music-map.txt.{RESET}");
++ALIGNED(4) static const u8 sMatchNotSaved[] = _("{COLOR RED}Couldn't save music-map.txt.{RESET}");
++ALIGNED(4) static const u8 sMatchPlayingGba[] = _("{COLOR CYAN}Playing the GBA song{RESET}");
++ALIGNED(4) static const u8 sMatchPlayingDs[] = _("{COLOR CYAN}Playing the DS track{RESET}");
++ALIGNED(4) static const u8 sMatchIdle[] = _("{COLOR CYAN}Nothing playing{RESET}");
++static MenuInputStruct sMatchInput;
++static s32 sMatchCursor;
++static s32 sMatchPlayingSong = -1; // the GBA song playing (sMatchSongs index)
++static const u8 *sMatchStatus;
++
++static void DrawMatchList(void)
++{
++    MenuInputStruct *in = &sMatchInput;
++    u8 text[48];
++    s32 i;
++
++    CallPrepareTextbox_8008C54(MUSIC_LIST_WIN);
++    sub_80073B8(MUSIC_LIST_WIN);
++    PrintStringOnWindow(10, 0, sMatchTitle, MUSIC_LIST_WIN, 0);
++    snprintf((char *)text, sizeof(text), "%d/%d", in->currPage + 1, in->pagesCount > 0 ? in->pagesCount : 1);
++    PrintStringOnWindow(90, 0, text, MUSIC_LIST_WIN, 0);
++    for (i = 0; i < in->currPageEntries; i++) {
++        s32 song = in->currPage * in->entriesPerPage + i;
++        s32 y = GetMenuEntryYCoord(in, i), track;
++        if (song == sMatchPlayingSong)
++            PrintStringOnWindow(8, y, sMusicStar, MUSIC_LIST_WIN, 0);
++        snprintf((char *)text, sizeof(text), "%03d %s", sMatchSongs[song].id, sMatchSongs[song].name);
++        MusicLabel(text, 32, (const char *)text);
++        PrintStringOnWindow(20, y, text, MUSIC_LIST_WIN, 0);
++        track = Port_MusicMapGet(sMatchSongs[song].id);
++        if (track >= 0) {
++            MusicLabel(text, 5, Port_MusicLabel(track)); // its number ("012", "S03")
++            PrintStringOnWindow(176, y, text, MUSIC_LIST_WIN, 0);
++        }
++        else
++            PrintStringOnWindow(176, y, (const u8 *)"-", MUSIC_LIST_WIN, 0);
++    }
++    sub_80073E0(MUSIC_LIST_WIN);
++}
++
++static void DrawMatchInfo(void)
++{
++    u8 text[64];
++    s32 song = GET_CURRENT_MENU_ENTRY(sMatchInput);
++    s32 track = Port_MusicMapGet(sMatchSongs[song].id);
++    const u8 *status = sMatchStatus;
++
++    if (status == NULL)
++        status = Port_MusicPlaying() >= 0 ? sMatchPlayingDs : sMatchPlayingSong >= 0 ? sMatchPlayingGba : sMatchIdle;
++    CallPrepareTextbox_8008C54(MUSIC_INFO_WIN);
++    sub_80073B8(MUSIC_INFO_WIN);
++    PrintStringOnWindow(4, 0, status, MUSIC_INFO_WIN, 0);
++    snprintf((char *)text, sizeof(text), "GBA %03d %s", sMatchSongs[song].id, sMatchSongs[song].name);
++    MusicLabel(text, 44, (const char *)text);
++    PrintStringOnWindow(4, 12, text, MUSIC_INFO_WIN, 0);
++    snprintf((char *)text, sizeof(text), "DS  %s", track >= 0 ? Port_MusicLabel(track) : "(none)");
++    MusicLabel(text, 44, (const char *)text);
++    PrintStringOnWindow(4, 24, text, MUSIC_INFO_WIN, 0);
++    PrintStringOnWindow(4, 36, sMatchControls1, MUSIC_INFO_WIN, 0);
++    PrintStringOnWindow(4, 48, sMatchControls2, MUSIC_INFO_WIN, 0);
++    sub_80073E0(MUSIC_INFO_WIN);
++}
++
++static void CreateMatchMenu(void)
++{
++    gPortDsMusicOff = TRUE; // (the GBA songs as they are)
++    gPortRawXY = TRUE;
++    sMusicPrevKeys = Port_KeysHeld();
++    Port_MusicSetVolume(gPortConfig.musicVolume * 10);
++    StopBGMusic(); // the title's music
++    sMatchPlayingSong = -1;
++    sMatchStatus = NULL;
++    CreateMenuOnWindow(&sMatchInput, MATCH_SONGS, MUSIC_PER_PAGE, MUSIC_LIST_WIN);
++    MoveMenuToEntryId(&sMatchInput, sMatchCursor);
++    DrawMatchList();
++    DrawMatchInfo();
++}
++
++static void PlayMatchGba(s32 song)
++{
++    u16 id = sMatchSongs[song].id;
++
++    Port_MusicStop();
++    StopBGM();
++    if (id >= FANFARE_START_INDEX)
++        PlayFanfareSE(id, MAX_VOLUME);
++    else
++        StartNewBGM(id);
++    sMatchPlayingSong = song;
++}
++
++static void PlayMatchDs(s32 song)
++{
++    s32 track = Port_MusicMapGet(sMatchSongs[song].id);
++
++    StopBGM();
++    StopFanfareSE(STOP_FANFARE);
++    sMatchPlayingSong = -1;
++    if (track >= 0)
++        Port_MusicPlay(track);
++    else
++        Port_MusicStop();
++}
++
++static bool8 SaveMatches(void)
++{
++    static int ids[MATCH_SONGS];
++    static const char *names[MATCH_SONGS];
++    s32 i;
++
++    for (i = 0; i < MATCH_SONGS; i++) {
++        ids[i] = sMatchSongs[i].id;
++        names[i] = sMatchSongs[i].name;
++    }
++    return Port_MusicMapSave(ids, names, MATCH_SONGS);
++}
++
++static void HandleMatchMenu(void)
++{
++    u16 keys = Port_KeysHeld();
++    u16 pressed = keys & ~sMusicPrevKeys;
++    s32 song = GET_CURRENT_MENU_ENTRY(sMatchInput);
++    s32 step = 0;
++    bool8 redraw = FALSE;
++
++    sMusicPrevKeys = keys;
++    if (gRealInputs.pressed & L_BUTTON)
++        step = -1;
++    else if (gRealInputs.pressed & R_BUTTON)
++        step = 1;
++    else if (pressed & PORT_KEY_ZL)
++        step = -10;
++    else if (pressed & PORT_KEY_ZR)
++        step = 10;
++
++    if (step != 0) { // another DS track for this song, played at once
++        s32 count = Port_MusicCount(), track = Port_MusicMapGet(sMatchSongs[song].id);
++        track = track < 0 ? (step > 0 ? step - 1 : count + step) : track + step;
++        if (track < 0)
++            track = 0;
++        if (track >= count)
++            track = count - 1;
++        Port_MusicMapSet(sMatchSongs[song].id, track);
++        PlayMatchDs(song);
++        sMatchStatus = NULL;
++        redraw = TRUE;
++    }
++    else if (gRealInputs.pressed & START_BUTTON) {
++        sMatchStatus = SaveMatches() ? sMatchSaved : sMatchNotSaved;
++        PlayMenuSoundEffect(MENU_SFX_ACCEPT);
++        redraw = TRUE;
++    }
++    else if (pressed & PORT_KEY_X) {
++        Port_MusicMapSet(sMatchSongs[song].id, -1);
++        Port_MusicStop();
++        sMatchStatus = NULL;
++        redraw = TRUE;
++    }
++    else if (pressed & PORT_KEY_Y) {
++        PlayMatchDs(song);
++        sMatchStatus = NULL;
++        redraw = TRUE;
++    }
++    else {
++        switch (GetKeyPress(&sMatchInput)) {
++            case INPUT_B_BUTTON:
++                PlayMenuSoundEffect(MENU_SFX_BACK);
++                SaveMatches();
++                sMatchCursor = song;
++                Port_MusicClose();
++                StopBGM();
++                StopFanfareSE(STOP_FANFARE);
++                gPortDsMusicOff = FALSE;
++                gPortRawXY = FALSE;
++                Port_DsMusicRecheck();
++                StartNewBGM(MUS_FILE_SELECT); // the title's music again
++                SetOptionsMenuState(OPTIONS_MENU_MAIN);
++                return;
++            case INPUT_A_BUTTON:
++                PlayMatchGba(song);
++                sMatchStatus = NULL;
++                redraw = TRUE;
++                break;
++            default: {
++                s32 before = GET_CURRENT_MENU_ENTRY(sMatchInput);
++                if (MenuCursorUpdate(&sMatchInput, TRUE))
++                    redraw = TRUE;
++                if (GET_CURRENT_MENU_ENTRY(sMatchInput) != before) {
++                    sMatchStatus = NULL;
++                    DrawMatchInfo();
++                }
++                break;
++            }
++        }
++    }
++    if (redraw) {
++        DrawMatchList();
++        DrawMatchInfo();
++    }
++}
++
 +// "pmd-blue.nds was not found.", then how to fix it; or, for another game's
 +// ROM, that it isn't Blue Rescue Team's, then the player
 +static void HandleMusicMissing(void)
@@ -4139,6 +4618,11 @@ index 86f582c2..2fc604d2 100644
 +        case OPTIONS_MENU_MUSIC_OTHER2:
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC_SETTINGS); // Music Options after all
 +            break;
++        case OPTIONS_MENU_MUSIC_MATCH_OTHER:
++            Port_MusicClose();
++            Port_DsMusicRecheck();
++            SetOptionsMenuState(OPTIONS_MENU_MAIN);
++            break;
 +        default:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
 +            break;
@@ -4151,12 +4635,11 @@ index 86f582c2..2fc604d2 100644
 +
 +    if (sub_80144A4(&menuAction) == 0)
 +        SetOptionsMenuState(OPTIONS_MENU_MAIN);
-+}
+ }
 +#endif
-+
+ 
  static void HandleChangeSettingsMenu(void)
  {
-     s32 menuAction;
 diff --git a/src/options_menu2.c b/src/options_menu2.c
 index 03531690..0d6913a0 100644
 --- a/src/options_menu2.c

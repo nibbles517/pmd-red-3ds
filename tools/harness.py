@@ -294,6 +294,11 @@ class Harness:
                 self.regs[8] = 1 if ok else 0
             elif value == 9:
                 getattr(self, 'files', {}).pop(self.regs[20], None)
+            elif value == 10:  # data file write (Music Matching)
+                name = bytes(uc.mem_read(self.regs[20], self.regs[19])).decode('latin-1')
+                folder = self.args.data or (os.path.dirname(self.args.save) if self.args.save else '.')
+                open(os.path.join(folder, name), 'wb').write(bytes(uc.mem_read(buf, length)))
+                self.regs[8] = 1
             elif value == 2:
                 ok = 0
                 if save and os.path.exists(save):

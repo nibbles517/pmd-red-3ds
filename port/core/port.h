@@ -113,7 +113,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version14_UpdateRepoIfMissing;
+extern const int Backend_Version15_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
@@ -135,6 +135,8 @@ void *Backend_FileOpen(const char *name);
 uint32_t Backend_FileSize(void *file);
 bool Backend_FileRead(void *file, uint32_t offset, void *dest, uint32_t size);
 void Backend_FileClose(void *file);
+// Writes a whole file of the data folder (Music Matching's music-map.txt).
+bool Backend_FileWrite(const char *name, const void *data, uint32_t size);
 // The port's own settings (options.c), a few bytes kept apart from the save.
 bool Backend_LoadConfig(uint8_t *data, uint32_t size);
 void Backend_StoreConfig(const uint8_t *data, uint32_t size);

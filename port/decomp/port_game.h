@@ -101,6 +101,17 @@ int Port_MusicIsStream(int track);
 const char *Port_MusicRomTitle(void);
 int Port_MusicIcon(u8 *tiles, u8 *colors); // the DS Menu icon, 64x64 (8x8 tiles)
 const char *Port_MusicGameCode(void); // e.g. "APHE" (Blue Rescue Team, North America)
+int Port_MusicRomIsBlue(void); // APHE, APHP or APHJ
+// GBA song -> DS track (track list index, -1: none); Music Matching saves them
+int Port_MusicMapGet(int gbaSong);
+void Port_MusicMapSet(int gbaSong, int track);
+int Port_MusicMapSave(const int *songs, const char *const *names, int count);
+// Music Style: DS (music.c): slot 0 the background music, 1 a fanfare
+void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64);
+int Port_MusicSlotDone(int slot);
+bool8 Port_DsMusicOn(void); // music.c: Music Style DS, with Blue Rescue Team's ROM
+void Port_DsMusicRecheck(void); // after Music Options: its settings, its ROM again
+extern bool8 gPortDsMusicOff; // Music Matching: the game's own music only
 int Port_MusicPlay(int track); // 0 if it can't be played
 void Port_MusicStop(void);
 int Port_MusicPlaying(void); // the track playing, or -1

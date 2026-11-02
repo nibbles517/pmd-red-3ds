@@ -6,6 +6,12 @@
 // playback through the calls below. The track plays together with the game's
 // own sound: Sound_EndFrame (sound.c) hands each frame's samples to
 // Port_MusicMix, which adds the track's.
+//
+// Music Style: DS (the game's music.c) plays, instead of the game's own music,
+// the DS track each GBA song is matched with: two "slots", the background
+// music and a fanfare, which follow the game's music players. The matches
+// (GBA song -> DS track) are built in (sDefaultMap), unless the data folder
+// has a music-map.txt, as Music Matching (a development aid) writes it.
 
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +40,30 @@ static int sPlaying = -1; // the track playing (or stopped mid-way: -1 once stop
 static int sPaused, sRepeat;
 static int sVolume = 150; // percent (Music Options sets it)
 static uint32_t sMixRate = 2 * 18157; // twice the game's mixing rate (see Port_MusicMix)
+
+// Music Style: DS: the game's background music and fanfare, as DS tracks
+typedef struct {
+    Song *song;
+    int track; // -1: none
+    int paused;
+} Slot;
+static Slot sSlots[2] = { { NULL, -1, 0 }, { NULL, -1, 0 } };
+
+// GBA song (1-127 background music, 200-218 fanfares) -> DS track
+#define MAP_SONGS 300
+#define MAP_FILE "music-map.txt"
+static int16_t sMap[MAP_SONGS]; // track list index, or -1
+static const struct {
+    uint16_t gba;
+    uint8_t stream; // a stream (STRM), else a sequence (SSEQ)
+    uint16_t index; // in the ROM's (first) sound archive
+} sDefaultMap[] = {
+    // Filled in from Music Matching's music-map.txt.
+    { 0, 0, 0xFFFF },
+};
+
+static void LoadMap(void);
+static void StopSlots(void);
 
 void Port_MusicClose(void);
 
@@ -83,6 +113,7 @@ int Port_MusicOpen(void)
         Port_MusicClose();
         return -1;
     }
+    LoadMap();
     return sCount;
 }
 
@@ -98,6 +129,7 @@ void Port_MusicStop(void)
 void Port_MusicClose(void)
 {
     Port_MusicStop();
+    StopSlots(); // (a stream reads the ROM file as it plays)
     if (sOpen)
         nds_music_close(&sRom);
     sOpen = 0;
@@ -159,6 +191,141 @@ int Port_MusicIcon(uint8_t *tiles, uint8_t *colors)
 const char *Port_MusicGameCode(void)
 {
     return sOpen ? sRom.hdr.gamecode : "";
+}
+
+// Blue Rescue Team's ROM: APHE (North America), APHP (Europe), APHJ (Japan)
+int Port_MusicRomIsBlue(void)
+{
+    const char *c = sRom.hdr.gamecode;
+    return sOpen && c[0] == 'A' && c[1] == 'P' && c[2] == 'H' && (c[3] == 'E' || c[3] == 'P' || c[3] == 'J');
+}
+
+// --- GBA song -> DS track ---------------------------------------------------
+
+static int FindTrack(int stream, int index)
+{
+    for (int i = 0; i < sCount; i++)
+        if (sTracks[i].sdat == 0 && sTracks[i].isStream == stream && sTracks[i].index == index)
+            return i;
+    return -1;
+}
+
+// The built-in matches, then music-map.txt's ("GBA <song> = SEQ <n>",
+// "= STRM <n>" or "= NONE"; anything after a '#' is a comment).
+static void LoadMap(void)
+{
+    for (int i = 0; i < MAP_SONGS; i++)
+        sMap[i] = -1;
+    for (size_t i = 0; i < sizeof(sDefaultMap) / sizeof(sDefaultMap[0]); i++)
+        if (sDefaultMap[i].gba > 0 && sDefaultMap[i].gba < MAP_SONGS)
+            sMap[sDefaultMap[i].gba] = (int16_t)FindTrack(sDefaultMap[i].stream, sDefaultMap[i].index);
+
+    void *f = Backend_FileOpen(MAP_FILE);
+    if (f == NULL)
+        return;
+    uint32_t size = Backend_FileSize(f);
+    char *text = malloc(size + 1);
+    if (text != NULL && Backend_FileRead(f, 0, text, size)) {
+        text[size] = '\0';
+        for (int i = 0; i < MAP_SONGS; i++)
+            sMap[i] = -1; // (the file has every match)
+        for (char *line = text; line != NULL && *line; ) {
+            char *next = strchr(line, '\n');
+            if (next != NULL)
+                *next++ = '\0';
+            int gba, n;
+            char kind[8];
+            if (sscanf(line, "GBA %d = %7s %d", &gba, kind, &n) >= 2 && gba > 0 && gba < MAP_SONGS) {
+                if (strcmp(kind, "SEQ") == 0)
+                    sMap[gba] = (int16_t)FindTrack(0, n);
+                else if (strcmp(kind, "STRM") == 0)
+                    sMap[gba] = (int16_t)FindTrack(1, n);
+            }
+            line = next;
+        }
+        Backend_Log("music: %s loaded", MAP_FILE);
+    }
+    free(text);
+    Backend_FileClose(f);
+}
+
+int Port_MusicMapGet(int gba)
+{
+    return gba > 0 && gba < MAP_SONGS ? sMap[gba] : -1;
+}
+
+void Port_MusicMapSet(int gba, int track)
+{
+    if (gba > 0 && gba < MAP_SONGS)
+        sMap[gba] = (int16_t)(track >= 0 && track < sCount ? track : -1);
+}
+
+// Writes every match (songs[i], named names[i]) to music-map.txt.
+int Port_MusicMapSave(const int *songs, const char *const *names, int count)
+{
+    size_t cap = (size_t)count * 96 + 256, len = 0;
+    char *text = malloc(cap);
+    if (text == NULL)
+        return 0;
+    len += (size_t)snprintf(text + len, cap - len,
+                            "# Music Matching: GBA song = DS track of %s\n", Port_MusicRomTitle());
+    for (int i = 0; i < count && len < cap; i++) {
+        int t = Port_MusicMapGet(songs[i]);
+        if (t < 0)
+            len += (size_t)snprintf(text + len, cap - len, "GBA %d = NONE  # %s\n", songs[i], names[i]);
+        else
+            len += (size_t)snprintf(text + len, cap - len, "GBA %d = %s %u  # %s = %s\n", songs[i],
+                                    sTracks[t].isStream ? "STRM" : "SEQ", (unsigned)sTracks[t].index,
+                                    names[i], sTracks[t].label);
+    }
+    if (len > cap)
+        len = cap;
+    int ok = Backend_FileWrite(MAP_FILE, text, (uint32_t)len);
+    free(text);
+    return ok;
+}
+
+// --- Music Style: DS -------------------------------------------------------------
+
+static void StopSlots(void)
+{
+    for (int i = 0; i < 2; i++) {
+        song_close(sSlots[i].song);
+        sSlots[i].song = NULL;
+        sSlots[i].track = -1;
+        sSlots[i].paused = 0;
+    }
+}
+
+// Slot 0 (background music) or 1 (fanfare): which track plays (-1: none),
+// whether it loops for ever, is paused, and its volume (0-64, the GBA
+// player's, which follows fades). A track that changes starts over.
+void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64)
+{
+    Slot *s = &sSlots[slot & 1];
+    if (!sOpen)
+        track = -1;
+    if (track != s->track) {
+        song_close(s->song);
+        s->song = NULL;
+        s->track = track;
+        if (track >= 0 && track < sCount) {
+            const Track *t = &sTracks[track];
+            const Sdat *sd = &sRom.sdat[t->sdat];
+            s->song = t->isStream ? song_open_strm(sd, t->index, sMixRate) : song_open_seq(sd, t->index, sMixRate);
+            if (s->song != NULL)
+                song_set_loops(s->song, loop ? 0 : 1, 0);
+        }
+    }
+    s->paused = paused;
+    if (s->song != NULL)
+        song_set_volume(s->song, sVolume * (volume64 < 0 ? 0 : volume64 > 64 ? 64 : volume64) / 64);
+}
+
+int Port_MusicSlotDone(int slot)
+{
+    const Slot *s = &sSlots[slot & 1];
+    return s->song == NULL || song_done(s->song);
 }
 
 static void ApplyTiming(Song *g)
@@ -251,7 +418,9 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
 
     if (rate > 0)
         sMixRate = 2 * (uint32_t)rate;
-    if (sSong == NULL || count <= 0 || count > 1024)
+    // (at twice the rate whenever the ROM is open, so that the rate doesn't
+    // change, nor the sound with it, between one track and the next)
+    if (!sOpen || count <= 0 || count > 1024)
         return 0;
     // The game's samples, at twice the rate (each one, then the average with the next)
     for (int i = 0; i < count; i++) {
@@ -263,8 +432,11 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     }
     last[0] = in[(count - 1) * 2];
     last[1] = in[(count - 1) * 2 + 1];
-    if (!sPaused) {
-        song_render(sSong, track, (uint32_t)count * 2);
+    for (int k = -1; k < 2; k++) { // the player's track, then the slots'
+        Song *g = k < 0 ? (sPaused ? NULL : sSong) : (sSlots[k].paused ? NULL : sSlots[k].song);
+        if (g == NULL)
+            continue;
+        song_render(g, track, (uint32_t)count * 2);
         for (int i = 0; i < count * 4; i++) {
             int v = out2[i] + track[i];
             out2[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);

@@ -22,9 +22,9 @@ enum {
     IO_ARG = 19, IO_HANDLE = 20, // data files: offset, handle
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4, CMD_SAVE_SLOT = 5,
-       CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9 };
+       CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9, CMD_FILE_WRITE = 10 };
 
-const int Backend_Version14_UpdateRepoIfMissing = 14;
+const int Backend_Version15_UpdateRepoIfMissing = 15;
 
 // Dual Core: one core here, so the second core's part is drawn at once.
 void Backend_RunAsync(void (*fn)(void *), void *arg) { fn(arg); }
@@ -155,6 +155,16 @@ void Backend_FileClose(void *file)
 {
     IO[IO_HANDLE] = (uint32_t)(uintptr_t)file;
     IO[IO_CMD] = CMD_FILE_CLOSE;
+}
+
+bool Backend_FileWrite(const char *name, const void *data, uint32_t size)
+{
+    IO[IO_HANDLE] = (uint32_t)(uintptr_t)name; // (the name, here)
+    IO[IO_ARG] = (uint32_t)strlen(name);
+    IO[IO_BUF] = (uint32_t)(uintptr_t)data;
+    IO[IO_LEN] = size;
+    IO[IO_CMD] = CMD_FILE_WRITE;
+    return IO[IO_RESULT] != 0;
 }
 
 // The port's settings: harness.py --config FILE.

@@ -51,6 +51,15 @@ Save Data 2 or 3 (`pmd-red-2.sav`, `pmd-red-3.sav` in the same folder).
 Game Options > Music Options on the title's main menu plays the DS version's
 music: put your own dump of Pokémon Mystery Dungeon: Blue Rescue Team, named
 `pmd-blue.nds`, in that same folder (`SD:/3ds/pmd-red-3ds/`).
+Its Music Style (GBA | DS) then picks which music the game plays: with DS,
+each GBA song plays as the DS track it is matched with.
+
+Game Options > Music Matching (Dev) is a temporary development aid for making
+those matches: it lists the GBA songs (A plays one), and L/R or ZL/ZR pick
+the DS track for it (Y plays it, X clears it). START, or leaving with B,
+writes `music-map.txt` to the same folder; while that file is there, the game
+uses its matches instead of the built-in ones (port/core/music.c,
+sDefaultMap, filled in from it).
 
 Controls are the GBA's (A, B, L, R, START, SELECT, D-pad or Circle Pad).
 **Y** switches the picture between 1:1 and 1.5x. Use **HOME** to quit, after
