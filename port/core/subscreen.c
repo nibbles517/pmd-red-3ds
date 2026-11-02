@@ -17,6 +17,7 @@
 #include "constants/monster.h"
 #include "decompress_at.h"
 #include "decompress_sir.h"
+#include "code_8004AA0.h"
 #include "def_filearchives.h"
 #include "event_flag.h"
 #include "friend_area.h"
@@ -844,10 +845,78 @@ static const void *FindFile(const FileArchive *arc, const char *name)
     }
 }
 
-static const char *sMapFiles[2][3] = {
-    { "wmapfont", "wmapmcc", "wmappal" }, // the friend areas map (the DS version's look)
-    { "wmp2font", "wmp2mcc", "wmp2pal" }, // the map shown on the way to a dungeon
+static const char *sMapFiles[2][4] = {
+    { "wmapfont", "wmapmcc", "wmappal", "wmapcani" }, // the friend areas map (the DS version's look)
+    { "wmp2font", "wmp2mcc", "wmp2pal", "wmp2cani" }, // the map shown on the way to a dungeon
 };
+
+// The water: BG colours 0xB0-0xBF cycle, from the map's "cani" file, as the
+// friend areas map scene animates them (friend_areas_map_util.c,
+// UpdateAnimatedColors).
+#define MAP_ANIM_FIRST 0xB0
+#define MAP_ANIM_COLORS 16
+static struct {
+    const RGB_Struct *start, *end, *cur;
+    s32 duration, timer;
+} sMapAnim[MAP_ANIM_COLORS];
+static uint64_t sMapAnimFrame;
+static bool8 sMapBlend; // the friend areas map (BLDALPHA 16/16 in its scene)
+
+static void LoadMapAnimation(const void *file)
+{
+    const AnimatedColorData *const *data = file;
+    for (int i = 0; i < MAP_ANIM_COLORS; i++) {
+        const AnimatedColorData *d = data != NULL ? data[i] : NULL;
+        sMapAnim[i].start = NULL;
+        if (d == NULL || d->colorCount == 0 || d->duration <= 0)
+            continue;
+        sMapAnim[i].start = d->colors;
+        sMapAnim[i].end = &d->colors[d->colorCount];
+        sMapAnim[i].cur = d->colors;
+        sMapAnim[i].duration = d->duration;
+        sMapAnim[i].timer = 1; // the first colour at once
+    }
+    sMapAnimFrame = Port_FrameCount();
+}
+
+// Advances the cycle by the frames since the last call; returns whether a
+// colour changed.
+static bool8 AnimateMapColors(void)
+{
+    uint64_t now = Port_FrameCount();
+    s32 frames = (s32)(now - sMapAnimFrame);
+    bool8 changed = FALSE;
+
+    if (frames <= 0)
+        return FALSE;
+    if (frames > 600)
+        frames = 600;
+    sMapAnimFrame = now;
+    for (int i = 0; i < MAP_ANIM_COLORS; i++) {
+        s32 n = frames;
+        if (sMapAnim[i].start == NULL)
+            continue;
+        while (n > 0) {
+            if (sMapAnim[i].timer > n) {
+                sMapAnim[i].timer -= n;
+                break;
+            }
+            n -= sMapAnim[i].timer;
+            sMapAnim[i].timer = sMapAnim[i].duration;
+            if (sMapAnim[i].cur >= sMapAnim[i].end)
+                sMapAnim[i].cur = sMapAnim[i].start;
+            {
+                const RGB_Struct *c = sMapAnim[i].cur++;
+                u16 rgb = Rgb(c->r, c->g, c->b);
+                if (sMapPal[MAP_ANIM_FIRST + i] != rgb) {
+                    sMapPal[MAP_ANIM_FIRST + i] = rgb;
+                    changed = TRUE;
+                }
+            }
+        }
+    }
+    return changed;
+}
 
 static bool8 LoadMapSet(int set)
 {
@@ -868,6 +937,9 @@ static bool8 LoadMapSet(int set)
     DecompressATFile(sMapTilemap, sizeof(sMapTilemap), &of);
     for (i = 0; i < 224; i++)
         sMapPal[i] = Rgb(pal[i].r, pal[i].g, pal[i].b);
+    LoadMapAnimation(FindFile(&gTitleMenuFileArchive, sMapFiles[set][3]));
+    sMapBlend = set == 0; // (friend_areas_map.c: gUnknown_2026E4E = 0x1010)
+    AnimateMapColors(); // (the first colours)
     return TRUE;
 }
 
@@ -970,6 +1042,23 @@ static s32 PlaceDungeon(s32 place)
 
 static int sViewLeft, sViewTop;
 
+// The colour number of each pixel DrawMapArea drew, for the water's
+// colours (0: not one of them)
+static u8 sMapIdx[CANVAS_PIXELS];
+static u16 sMapUnder[CANVAS_PIXELS]; // ... and the colour under it (BG3)
+
+// GBA colour effects, BLDALPHA 16/16: BG2 added to BG3
+static inline u16 AddColors(u16 a, u16 b)
+{
+    int r = (a & 31) + (b & 31), g = ((a >> 5) & 31) + ((b >> 5) & 31), bl = ((a >> 10) & 31) + ((b >> 10) & 31);
+    return (u16)((r > 31 ? 31 : r) | ((g > 31 ? 31 : g) << 5) | ((bl > 31 ? 31 : bl) << 10));
+}
+
+static inline u16 MapPixel(int i)
+{
+    return sMapBlend ? AddColors(sMapPal[sMapIdx[i]], sMapUnder[i]) : sMapPal[sMapIdx[i]];
+}
+
 static void DrawMapArea(int cx, int cy)
 {
     int left = cx - W / 2, top = cy - H / 2;
@@ -985,6 +1074,22 @@ static void DrawMapArea(int cx, int cy)
         for (int x = 0; x < W; x++) {
             int mx = left + x;
             int layer, c = 0, palBase = 0;
+            if (sMapBlend) { // the friend areas map: its details (BG2) add to the map (BG3)
+                int idx[2];
+                for (layer = 0; layer < 2; layer++) {
+                    u16 e = sMapTilemap[layer][my >> 3][mx >> 3];
+                    int tx = mx & 7, ty = my & 7;
+                    if (e & 0x400) tx = 7 - tx;
+                    if (e & 0x800) ty = 7 - ty;
+                    c = (sMapGfx[(e & 0x3FF) * 32 + ty * 4 + tx / 2] >> ((tx & 1) * 4)) & 0xF;
+                    idx[layer] = c ? ((e >> 12) * 16 + c) & 0xFF : 0;
+                }
+                u16 under = sMapPal[idx[0]]; // (0: the backdrop)
+                sMapUnder[y * W + x] = under;
+                sMapIdx[y * W + x] = idx[1];
+                sOut[y * W + x] = idx[1] ? AddColors(sMapPal[idx[1]], under) : under;
+                continue;
+            }
             for (layer = 1; layer >= 0; layer--) { // the top layer, unless transparent there
                 u16 e = sMapTilemap[layer][my >> 3][mx >> 3];
                 int tx = mx & 7, ty = my & 7;
@@ -996,6 +1101,7 @@ static void DrawMapArea(int cx, int cy)
                     break;
             }
             sOut[y * W + x] = c ? sMapPal[(palBase + c) & 0xFF] : sMapPal[0]; // else the backdrop
+            sMapIdx[y * W + x] = c ? (palBase + c) & 0xFF : 0;
         }
     }
 }
@@ -1526,10 +1632,21 @@ static bool8 DrawWorldMap(void)
         else
             FormatString(GetGroundPlaceName(place), name, name + sizeof(name) - 1, 0);
         DrawNameBox(name);
+        // the water's pixels that the name box didn't cover
+        for (int i = 0; i < W * H; i++)
+            if (sMapIdx[i] < MAP_ANIM_FIRST || sMapIdx[i] >= MAP_ANIM_FIRST + MAP_ANIM_COLORS
+                || sCache[i] != MapPixel(i))
+                sMapIdx[i] = 0;
         sCachedPlace = place;
         sCachedArea = area;
         sCachedW = W;
         sOut = sOutFrame;
+        sWorldMapChanged = TRUE;
+    }
+    if (AnimateMapColors()) { // the water
+        for (int i = 0; i < W * H; i++)
+            if (sMapIdx[i] != 0)
+                sCache[i] = MapPixel(i);
         sWorldMapChanged = TRUE;
     }
     if (sWorldMapChanged) { // (the marker does not move)
