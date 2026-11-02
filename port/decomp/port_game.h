@@ -44,7 +44,7 @@ struct PortConfig
     u8 saveSlot;            // 0-2: Save Data 1-3
     // Game Options > Music Options (version 6)
     u8 musicStyle;          // PORT_MUSIC_GBA, PORT_MUSIC_DS
-    u8 musicVolume;         // the DS music's volume, in tens of percent (version 7)
+    u8 musicVolume;         // the DS music's volume, in tens of percent (version 7; 19 at first)
 };
 
 extern struct PortConfig gPortConfig;

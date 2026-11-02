@@ -270,16 +270,17 @@ index 1ac7b0fe..9540874d 100644
  void ResetScheduledMemCopies(void);
  void ScheduleMemCopy(u32 *, const u32 *, u32);
 diff --git a/include/options_menu1.h b/include/options_menu1.h
-index d927bef9..9ce44cd9 100644
+index d927bef9..a098cfde 100644
 --- a/include/options_menu1.h
 +++ b/include/options_menu1.h
-@@ -20,5 +20,9 @@ struct unkStruct_203B25C
+@@ -20,5 +20,10 @@ struct unkStruct_203B25C
  bool8 sub_801DCC4(void);
  u32 sub_801DCE8(void);
  void sub_801DD50(void);
 +#ifdef PLATFORM_3DS
 +void Port_OptionsMenuFromTitle(bool8 fromTitle);
-+bool8 Port_OptionsMenuLoadedSave(void); // Change Current Save Data was used
++bool8 Port_OptionsMenuLoadedSave(void);
++bool8 Port_OthersReturnToTitle(void); // Others > Return to Main Menu: saved // Change Current Save Data was used
 +#endif
  
  #endif // GUARD_OPTIONS_MENU1_H
@@ -374,6 +375,27 @@ index 002fa3c7..406bee8e 100644
      u32 *spAsU32 = (u32 *)sp0;
  
      *spAsU32 = func();
+diff --git a/src/code_801D014.c b/src/code_801D014.c
+index 0b88b9a8..71e5ed43 100644
+--- a/src/code_801D014.c
++++ b/src/code_801D014.c
+@@ -565,6 +565,16 @@ static void sub_801D878(void)
+         case 2:
+         case 3:
+             sub_801DD50();
++#ifdef PLATFORM_3DS
++            if (Port_OthersReturnToTitle()) {
++                // Others > Return to Main Menu, saved: the menu closes and the
++                // field ends, as a script's game end request ends it (back
++                // to the title's main menu)
++                GroundMainGameEndRequest(30);
++                sub_801D208(2);
++                break;
++            }
++#endif
+             sub_801D208(1);
+             break;
+     }
 diff --git a/src/code_809D148.c b/src/code_809D148.c
 index cf978c03..c1f5de60 100644
 --- a/src/code_809D148.c
@@ -3442,7 +3464,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..4bfc8cc5 100644
+index 86f582c2..1b4342d4 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3450,7 +3472,7 @@ index 86f582c2..4bfc8cc5 100644
  #include "global.h"
  #include "globaldata.h"
  #include "code_8099360.h"
-@@ -9,6 +10,18 @@
+@@ -9,6 +10,20 @@
  #include "menu_input.h"
  #include "options_menu1.h"
  #include "options_menu2.h"
@@ -3459,6 +3481,8 @@ index 86f582c2..4bfc8cc5 100644
 +#include "structs/str_mon_portrait.h"
 +#include "graphics_memory.h"
 +#include "port_game.h"
++#include "event_flag.h"
++#include "save_write.h"
 +#include "save.h"
 +#include "music.h"
 +#include "music_util.h"
@@ -3469,7 +3493,7 @@ index 86f582c2..4bfc8cc5 100644
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +31,15 @@ enum
+@@ -18,7 +33,16 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -3480,13 +3504,14 @@ index 86f582c2..4bfc8cc5 100644
 +    MENU_OPTION_SAVE_DATA, // 3DS port: Change Current Save Data (title only)
 +    MENU_OPTION_MUSIC, // 3DS port: Music Options (title only)
 +    MENU_OPTION_MUSIC_MATCH, // 3DS port: Music Matching (development aid, title only)
++    MENU_OPTION_RETURN, // 3DS port: Return to Main Menu (outside dungeons)
 +    MENU_OPTION_SAVE_SLOT1, // ... Save Data 1, 2, 3
 +    MENU_OPTION_SAVE_SLOT2,
 +    MENU_OPTION_SAVE_SLOT3,
  };
  
  enum OptionsMenuStates
-@@ -31,6 +52,18 @@ enum OptionsMenuStates
+@@ -31,6 +55,20 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -3502,10 +3527,12 @@ index 86f582c2..4bfc8cc5 100644
 +    OPTIONS_MENU_MUSIC_SETTINGS, // 3DS port: Music Style, Music Player
 +    OPTIONS_MENU_MUSIC_MATCH, // 3DS port: Music Matching
 +    OPTIONS_MENU_MUSIC_MATCH_OTHER, // ... with another game's ROM: says so
++    OPTIONS_MENU_RETURN_ASK, // 3DS port: "Would you like to save ... main menu?"
++    OPTIONS_MENU_RETURN_SAVE, // 3DS port: saving, as at a save point
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +81,94 @@ static void sub_801DED0(void);
+@@ -48,6 +86,105 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3533,6 +3560,9 @@ index 86f582c2..4bfc8cc5 100644
 +ALIGNED(4) static const u8 sChangeSaveData[] = _("Change Current Save Data");
 +ALIGNED(4) static const u8 sMusicOptions[] = _("Music Options");
 +ALIGNED(4) static const u8 sMusicMatching[] = _("Music Matching (Dev)");
++ALIGNED(4) static const u8 sReturnToMainMenu[] = _("{COLOR YELLOW}Return to Main Menu{RESET}");
++ALIGNED(4) static const u8 sReturnPrompt[] = _("Would you like to save your adventure\nand return to the main menu?");
++static bool8 sReturnToTitle; // saved: the field ends, for the title's main menu
 +static void CreateMatchMenu(void);
 +static void HandleMatchMenu(void);
 +ALIGNED(4) static const u8 sMusicMissing[] = _("pmd-blue.nds was not found.");
@@ -3573,6 +3603,14 @@ index 86f582c2..4bfc8cc5 100644
 +static void HandleSaveDataMenu(void);
 +static void HandleSaveDataLoaded(void);
 +
++// Return to Main Menu: saved, the field should end.
++bool8 Port_OthersReturnToTitle(void)
++{
++    bool8 r = sReturnToTitle;
++    sReturnToTitle = FALSE;
++    return r;
++}
++
 +void Port_OptionsMenuFromTitle(bool8 fromTitle)
 +{
 +    sFromTitle = fromTitle;
@@ -3589,7 +3627,7 @@ index 86f582c2..4bfc8cc5 100644
 +{
 +    sUnknown_203B25C->unkBC.id[0] = sUnknown_80DBFCC;
 +    sub_8012CAC(&sUnknown_203B25C->unkBC.id[0], sUnknown_203B25C->menuItems);
-+    if (!sFromTitle || sUnknown_203B25C->unkBC.id[0].width < OTHERS_MENU_WIDTH)
++    if (sUnknown_203B25C->unkBC.id[0].width < OTHERS_MENU_WIDTH)
 +        sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
 +    if (sFromTitle)
 +        sUnknown_203B25C->unkBC.id[0].header = &sTitleHeader;
@@ -3600,7 +3638,7 @@ index 86f582c2..4bfc8cc5 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +197,42 @@ u32 sub_801DCE8(void)
+@@ -76,8 +213,55 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3614,13 +3652,13 @@ index 86f582c2..4bfc8cc5 100644
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
 +            HandleScreenMenu();
-+            break;
+             break;
 +        case OPTIONS_MENU_SAVE_DATA:
 +            HandleSaveDataMenu();
 +            break;
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            HandleSaveDataLoaded();
-             break;
++            break;
 +        case OPTIONS_MENU_MUSIC:
 +            HandleMusicMenu();
 +            break;
@@ -3636,6 +3674,19 @@ index 86f582c2..4bfc8cc5 100644
 +        case OPTIONS_MENU_MUSIC_MATCH:
 +            HandleMatchMenu();
 +            break;
++        case OPTIONS_MENU_RETURN_ASK: {
++            s32 menuAction;
++            if (sub_80144A4(&menuAction) == 0)
++                SetOptionsMenuState(menuAction == 1 ? OPTIONS_MENU_RETURN_SAVE : OPTIONS_MENU_MAIN);
++            break;
++        }
++        case OPTIONS_MENU_RETURN_SAVE:
++            if (!WriteSavePak()) {
++                FinishWriteSavePak();
++                sReturnToTitle = TRUE; // (code_801D014.c ends the field)
++                SetOptionsMenuState(OPTIONS_MENU_EXIT);
++            }
++            break;
 +        case OPTIONS_MENU_MUSIC_MATCH_OTHER:
 +            HandleMusicMissing();
 +            break;
@@ -3643,7 +3694,7 @@ index 86f582c2..4bfc8cc5 100644
          default:
              break;
      }
-@@ -120,9 +275,13 @@ static void sub_801DD84(void)
+@@ -120,9 +304,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3658,7 +3709,7 @@ index 86f582c2..4bfc8cc5 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +289,32 @@ static void sub_801DD84(void)
+@@ -130,10 +318,32 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3670,7 +3721,7 @@ index 86f582c2..4bfc8cc5 100644
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
 +#endif
-             break;
++            break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SAVE_DATA:
 +            CreateOthersMenu();
@@ -3687,12 +3738,12 @@ index 86f582c2..4bfc8cc5 100644
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetMusicWindows();
-+            break;
+             break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +331,10 @@ static void sub_801DED0(void)
+@@ -150,6 +360,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3703,7 +3754,7 @@ index 86f582c2..4bfc8cc5 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +349,73 @@ static void sub_801DED0(void)
+@@ -164,12 +378,81 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3753,6 +3804,14 @@ index 86f582c2..4bfc8cc5 100644
 +        case OPTIONS_MENU_MUSIC_MATCH:
 +            CreateMatchMenu();
 +            break;
++        case OPTIONS_MENU_RETURN_ASK: // as the save points ask (Yes, No: No first)
++            CreateYesNoDialogueBoxAndPortrait_DefaultNo(sReturnPrompt, NULL, 0);
++            break;
++        case OPTIONS_MENU_RETURN_SAVE: // as SPECIAL_TEXT_SAVE_1 saves (textbox.c)
++            SetScriptVarValue(NULL, 0x18, 1);
++            sub_8011C28(1);
++            PrepareSavePakWrite(0);
++            break;
 +        case OPTIONS_MENU_MUSIC_MATCH_OTHER:
 +            CreateDialogueBoxAndPortrait(sMusicOther, 0, MusicIconPortrait(), 0x101);
 +            break;
@@ -3777,24 +3836,27 @@ index 86f582c2..4bfc8cc5 100644
      }
  }
  
-@@ -180,12 +426,42 @@ static void CreateOthersMenu(void)
+@@ -180,12 +463,47 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
 +#ifdef PLATFORM_3DS
-+    // 3DS port: Graphics Options first
++    // 3DS port: Hints first (not on the title), then Graphics Options,
++    // Windows Options, Controls Options; on the title, the music and save
++    // options; elsewhere, Return to Main Menu last.
++    if (!sFromTitle) {
++        sUnknown_203B25C->menuItems[loopMax].text = sHints;
++        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_HINTS;
++        loopMax++;
++    }
 +    sUnknown_203B25C->menuItems[loopMax].text = sScreenLayoutOptions;
 +    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SCREEN;
 +    loopMax++;
-+#endif
-     sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
-     sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
-+#ifdef PLATFORM_3DS
-+    // 3DS port: Controls Options, after Windows Options
++    sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
++    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
 +    loopMax++;
 +    sUnknown_203B25C->menuItems[loopMax].text = sControlOptions;
 +    sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_CONTROLS;
-+    // ... and, on the title only, Change Current Save Data
 +    if (sFromTitle) {
 +        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sMusicOptions;
@@ -3806,21 +3868,23 @@ index 86f582c2..4bfc8cc5 100644
 +        sUnknown_203B25C->menuItems[loopMax].text = sChangeSaveData;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SAVE_DATA;
 +    }
-+#endif
++    else {
++        loopMax++;
++        sUnknown_203B25C->menuItems[loopMax].text = sReturnToMainMenu;
++        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_RETURN;
++    }
++#else
+     sUnknown_203B25C->menuItems[loopMax].text = sGameOptions;
+     sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_GAMEOPTIONS;
  
-+#ifdef PLATFORM_3DS
-+    if (!sFromTitle) {
-+#endif
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = sHints;
      sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_HINTS;
-+#ifdef PLATFORM_3DS
-+    }
 +#endif
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +505,39 @@ static void HandleOthersMenu(void)
+@@ -229,6 +547,42 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3847,6 +3911,9 @@ index 86f582c2..4bfc8cc5 100644
 +            else
 +                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
 +            break;
++        case MENU_OPTION_RETURN:
++            SetOptionsMenuState(OPTIONS_MENU_RETURN_ASK);
++            break;
 +        case MENU_OPTION_MUSIC_MATCH:
 +            // Blue Rescue Team's tracks only
 +            if (Port_MusicOpen() <= 0)
@@ -3860,7 +3927,7 @@ index 86f582c2..4bfc8cc5 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +581,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +626,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3877,7 +3944,7 @@ index 86f582c2..4bfc8cc5 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,11 +601,762 @@ static void sub_801E0FC(void)
+@@ -282,11 +646,762 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -4135,11 +4202,11 @@ index 86f582c2..4bfc8cc5 100644
 +    for (tries = 0; tries < 64; tries++) {
 +        s32 next = track + dir;
 +        if (next < 0 || next >= Port_MusicCount())
-             break;
++            break;
 +        if (PlayMusicTrack(next))
 +            return;
 +        track = next;
-     }
++    }
 +    if (automatic) {
 +        Port_MusicStop();
 +        sMusicStatus = sMusicEnd;
@@ -4171,7 +4238,7 @@ index 86f582c2..4bfc8cc5 100644
 +            Port_MusicClose();
 +            Port_DsMusicRecheck(); // (Music Style: DS opens the ROM again)
 +            LeaveSettings(memcmp(&sOpenedConfig, &gPortConfig, sizeof(gPortConfig)) != 0);
-+            break;
+             break;
 +        case 3: // A on Music Player
 +            PortScreenMenu_Destroy();
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC);
@@ -4214,7 +4281,7 @@ index 86f582c2..4bfc8cc5 100644
 +        Port_MusicSetRepeat(!Port_MusicRepeat());
 +        PlayMenuSoundEffect(MENU_SFX_TOGGLE);
 +        info = TRUE;
-+    }
+     }
 +    else if (pressed & PORT_KEY_X) {
 +        Port_MusicStop();
 +        sMusicStatus = NULL;

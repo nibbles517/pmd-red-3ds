@@ -38,7 +38,7 @@ static int sCount;
 static Song *sSong;
 static int sPlaying = -1; // the track playing (or stopped mid-way: -1 once stopped)
 static int sPaused, sRepeat;
-static int sVolume = 150; // percent (Music Options sets it)
+static int sVolume = 190; // percent (Music Options sets it)
 static uint32_t sMixRate = 2 * 18157; // twice the game's mixing rate (see Port_MusicMix)
 
 // Music Style: DS: the game's background music and fanfare, as DS tracks

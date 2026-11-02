@@ -7,8 +7,8 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 7
-struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 15 };
+#define PORT_CONFIG_VERSION 8
+struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19 };
 
 void Port_LoadConfig(void)
 {
@@ -43,12 +43,17 @@ void Port_LoadConfig(void)
         c.version = 7;
         c.musicVolume = 15;
     }
+    if (c.version == 7) { // the DS music's volume: 190% at first (was 150%)
+        c.version = 8;
+        if (c.musicVolume == 15)
+            c.musicVolume = 19;
+    }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
     if (gPortConfig.musicStyle > PORT_MUSIC_DS)
         gPortConfig.musicStyle = PORT_MUSIC_GBA;
     if (gPortConfig.musicVolume < 1 || gPortConfig.musicVolume > 40)
-        gPortConfig.musicVolume = 15;
+        gPortConfig.musicVolume = 19;
     if (gPortConfig.saveSlot > 2)
         gPortConfig.saveSlot = 0;
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));
