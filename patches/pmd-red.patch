@@ -4825,10 +4825,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..b170defd
+index 00000000..a2b510d3
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,392 @@
+@@ -0,0 +1,393 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -4839,9 +4839,10 @@ index 00000000..b170defd
 +//                          bit the DS version uses for its touch screen option:
 +//                          clear = bottom, set = top)
 +//   Main Screen Settings   a page of two toggles, Size (GBA/DS/3DS) and
-+//                          Scale (None/Full/Stretch), placeholders for now
++//                          Scale (None/Full/Stretch: 1:1, as large as fits,
++//                          the whole screen; port/3ds/main.c ScaleRect)
 +//   Sub-Screen Settings    Enabled? (Yes/No: turns the second screen on/off),
-+//                          then the same Size and Scale placeholders
++//                          then the same Size and Scale
 +// The page settings live in the port's own config file (gPortConfig). Every
 +// toggle takes effect as soon as it changes; the file is written when the
 +// menu is left (options_menu1.c, "Changes saved.").
@@ -4987,10 +4988,10 @@ index 00000000..b170defd
 +}
 +
 +// Settings (setting, or one of its choices) that do nothing yet are shown in
-+// red: Scale; the 3DS size.
++// red: Touch Screen; the 3DS size.
 +static bool8 IsPlaceholder(s32 setting, s32 choice)
 +{
-+    if (setting == SETTING_SCALE || setting == SETTING_TOUCH)
++    if (setting == SETTING_TOUCH)
 +        return TRUE;
 +    if (setting == SETTING_MUSIC_STYLE) // another game's ROM: not to be chosen
 +        return sMenu.musicLocked;

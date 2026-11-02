@@ -89,6 +89,12 @@ void Port_LoadConfig(void)
     Port_UpdateScreenSize();
 }
 
+int Port_ScreenScale(int screen)
+{
+    int s = gPortConfig.layout[screen ? 1 : 0][1];
+    return s <= PORT_SCALE_STRETCH ? s : PORT_SCALE_NONE;
+}
+
 int Port_ConfigSaveSlot(void)
 {
     return gPortConfig.saveSlot;

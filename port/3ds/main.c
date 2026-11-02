@@ -39,7 +39,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 
 void AgbMain(void);
 
-const int Backend_Version15_UpdateRepoIfMissing = 15;
+const int Backend_Version16_UpdateRepoIfMissing = 16;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -343,9 +343,10 @@ static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int fram
 
 static void GpuDrawPicture(C3D_RenderTarget *target, const C3D_Mtx *proj, GpuPicture *p)
 {
-    // (texture row 0 is its bottom: the transfer turned the picture upside down)
+    // (the picture's first row is at v = 1 - srcH / TEX_H, its last at v = 1:
+    // so it is the right way up on the 3DS's screens)
     float x0 = (float)p->x, y0 = (float)p->y, x1 = (float)(p->x + p->w), y1 = (float)(p->y + p->h);
-    float u1 = (float)p->srcW / TEX_W, v0 = 1.0f, v1 = 1.0f - (float)p->srcH / TEX_H;
+    float u1 = (float)p->srcW / TEX_W, v0 = 1.0f - (float)p->srcH / TEX_H, v1 = 1.0f;
 
     C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0x000000FF, 0); // black borders
     C3D_FrameDrawOn(target);
@@ -382,24 +383,39 @@ static void GpuDrawFrame(void)
     C3D_FrameEnd(GX_CMDLIST_FLUSH); // (only the command list: the pictures were flushed)
 }
 
-// The main screen's picture, placed as PresentGba/PresentDs place it.
+// Where a picture goes on a screen (screenW x 240), as its Scale setting says:
+// None 1:1, Full as large as fits (the same shape), Stretch the whole screen.
+static void ScaleRect(int frameW, int frameH, int screenW, int scale, int *x, int *y, int *w, int *h)
+{
+    if (scale == PORT_SCALE_STRETCH) {
+        *x = 0; *y = 0; *w = screenW; *h = 240;
+        return;
+    }
+    *w = frameW; *h = frameH;
+    if (scale == PORT_SCALE_FULL) {
+        if (screenW * frameH <= 240 * frameW) { // the width fills the screen
+            *w = screenW;
+            *h = frameH * screenW / frameW;
+        } else {                                 // the height
+            *h = 240;
+            *w = frameW * 240 / frameH;
+        }
+    }
+    *x = (screenW - *w) / 2;
+    *y = (240 - *h) / 2;
+}
+
+// The main screen's picture, placed as its Scale setting says.
 static void GpuPresentMain(const uint16_t *frame, int frameW, int frameH)
 {
-    const int width = sBottom ? 320 : 400;
-    int x, y, w = frameW, h = frameH;
-    if (frameW == GBA_W && sScaled) {
-        if (sBottom) { x = 0; y = (240 - 213) / 2; w = 320; h = 213; } // 4/3x
-        else { x = (400 - 360) / 2; y = 0; w = 360; h = 240; }          // 1.5x
-    } else if (frameW == 256 && sScaled) {
-        x = (width - 320) / 2; y = 0; w = 320; h = 240; // 1.25x
-    } else {
-        x = (width - frameW) / 2; y = (240 - frameH) / 2;
-    }
+    int x, y, w, h;
+    ScaleRect(frameW, frameH, sBottom ? 320 : 400, Port_ScreenScale(0), &x, &y, &w, &h);
     GpuUpload(&sGpuMain, frame, frameW, frameH, x, y, w, h);
 }
 
 static void PresentMain(const uint16_t *frame, int frameW, int frameH)
 {
+    sScaled = Port_ScreenScale(0) != PORT_SCALE_NONE; // (the CPU: Full and Stretch alike)
     if (sGpu) {
         GpuPresentMain(frame, frameW, frameH);
         return;
@@ -516,8 +532,13 @@ static void PresentSub(void)
     }
     memcpy(sPend, area, sizeof(sPend));
     if (sGpu) { // the whole picture again, when anything in it changed
-        if (area[0] < area[2] && area[1] < area[3])
-            GpuUpload(&sGpuSub, sSubFrame, subW, subH, (width - subW) / 2, (240 - subH) / 2, subW, subH);
+        if (area[0] < area[2] && area[1] < area[3]) {
+            int x, y, w, h;
+            ScaleRect(subW, subH, width, Port_ScreenScale(1), &x, &y, &w, &h);
+            GpuUpload(&sGpuSub, sSubFrame, subW, subH, x, y, w, h);
+        } else if (sGpuSub.shown) { // (the setting may have changed)
+            ScaleRect(subW, subH, width, Port_ScreenScale(1), &sGpuSub.x, &sGpuSub.y, &sGpuSub.w, &sGpuSub.h);
+        }
         Part(T_SUBOUT);
         return;
     }

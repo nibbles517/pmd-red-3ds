@@ -113,7 +113,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version15_UpdateRepoIfMissing;
+extern const int Backend_Version16_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
@@ -129,6 +129,10 @@ int Port_ConfigSaveSlot(void); // options.c
 // Music Options (music.c): Sound_EndFrame's frame, with the DS track playing
 // added; returns the samples in out2 (at *outRate), or 0 for none playing.
 int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *outRate);
+// Main Screen / Sub-Screen Settings > Scale (options.c): screen 0 the
+// game's picture, 1 the second screen's
+enum { PORT_SCALE_NONE, PORT_SCALE_FULL, PORT_SCALE_STRETCH };
+int Port_ScreenScale(int screen);
 // A file of the port's data folder, read only (Music Options: pmd-blue.nds).
 // NULL if it isn't there. Reads are buffered by the backend.
 void *Backend_FileOpen(const char *name);
