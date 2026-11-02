@@ -1652,6 +1652,35 @@ index 0680f301..3d640b15 100644
          PrintFormattedStringOnWindow(8, 16, gHintsDescriptions[dsControls][hintId], 0, '\0');
          sub_80073E0(0);
  
+diff --git a/src/dungeon_menu_team.c b/src/dungeon_menu_team.c
+index ba1fadca..cc502bb4 100644
+--- a/src/dungeon_menu_team.c
++++ b/src/dungeon_menu_team.c
+@@ -369,7 +369,13 @@ static void AddTeamSubMenuOptions(struct UnkFieldTeamMenuStruct *a0)
+     if (!monInfo->isTeamLeader) {
+         AddActionToDungeonSubMenu(ACTION_CHANGE_TACTICS, 0);
+     }
++#ifdef PLATFORM_3DS
++    // 3DS port: Make Leader (as on the DS) wherever the Switch Box works,
++    // not only in the dungeons that allowed it on the GBA
++    if (!monInfo->isTeamLeader && gDungeon->unk644.canChangeLeader) {
++#else
+     if (!monInfo->isTeamLeader && gDungeon->unk644.canChangeLeader && CanLeaderSwitch(gDungeon->unk644.dungeonLocation.id)) {
++#endif
+         bool32 r5;
+ 
+         AddActionToDungeonSubMenu(0x3B, 0);
+@@ -387,6 +393,10 @@ static void AddTeamSubMenuOptions(struct UnkFieldTeamMenuStruct *a0)
+         if (CheckVariousStatuses2(teamMon, FALSE)) {
+             r5 = FALSE;
+         }
++#ifdef PLATFORM_3DS
++        if (monInfo->monsterBehavior == BEHAVIOR_RESCUE_TARGET) // (as the Switch Box)
++            r5 = FALSE;
++#endif
+         if (!r5) {
+             SetActionUnusableInDungeonSubMenu(0x3B);
+         }
 diff --git a/src/dungeon_message_log.c b/src/dungeon_message_log.c
 index 18b83d51..acdbcdd2 100644
 --- a/src/dungeon_message_log.c
@@ -1926,10 +1955,22 @@ index ca1c1984..85b50559 100644
          SpriteSetX(&gUnknown_202ED28[0][index].sprite, x + gUnknown_202ED28[0][index].pos.x);
          SpriteSetY(&gUnknown_202ED28[0][index].sprite, y + gUnknown_202ED28[0][index].pos.y);
 diff --git a/src/dungeon_strings.c b/src/dungeon_strings.c
-index e5de5d56..72d27d9e 100644
+index e5de5d56..c5591c72 100644
 --- a/src/dungeon_strings.c
 +++ b/src/dungeon_strings.c
-@@ -922,8 +922,13 @@ const u8 *const gUnknown_80FE708 = _("Tile underfoot");
+@@ -82,7 +82,11 @@ const struct Struct_80F7C50 gUnknown_80F7C50[] = {
+     [56] = { _("Use"), 0x0000000A},
+     [57] = { _(""), 0x0000000A},
+     [58] = { _("Swap"), 0x0000000A},
++#ifdef PLATFORM_3DS
++    [59] = { _("Make Leader"), 0x0000000A}, // 3DS port: as on the DS
++#else
+     [59] = { _("Leader"), 0x0000000A},
++#endif
+     [60] = { _("Set"), 0x0000000A},
+     [61] = { _("Deselect"), 0x0000000A},
+     [62] = { _("Swap"), 0x0000000A},
+@@ -922,8 +926,13 @@ const u8 *const gUnknown_80FE708 = _("Tile underfoot");
  const u8 *const gUnknown_80FE70C = _("Stairs");
  const u8 *const gUnknown_80FE720 = _("Rescue Point");
  const u8 *const gUnknown_80FE724 = _("Warp Zone");
