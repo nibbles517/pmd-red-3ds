@@ -8,12 +8,14 @@
 // 320x240). Y toggles the scaling. The other screen shows the
 // DS-style second screen at 256x192 (team panel in dungeons, world map
 // elsewhere), or a short status text when there is none (title screen).
-// Sound goes through the DSP (needs sdmc:/3ds/dspfirm.cdc, which most custom
-// firmware setups already have).
+// The GPU (citro3d) puts both pictures on the screens, scaling them; see
+// "Video on the GPU". Sound goes through the DSP (needs sdmc:/3ds/dspfirm.cdc,
+// which most custom firmware setups already have).
 // The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save
 // (Save Data 1; Save Data 2 and 3 are pmd-red-2.sav and pmd-red-3.sav).
 
 #include <3ds.h>
+#include <citro3d.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +35,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 #define LOG_PATH DATA_DIR "/port.log"
 #define CONFIG_PATH DATA_DIR "/config.bin"
 #define DEBUG_FLAG DATA_DIR "/debug.txt"
+#define CPU_VIDEO_FLAG DATA_DIR "/cpu-video.txt" // the pictures copied by the CPU, as before the GPU did it
 
 void AgbMain(void);
 
@@ -219,8 +222,189 @@ static void PresentDs(const uint16_t *frame, int frameW, int frameH, uint16_t *f
     BlitMain(frame, frameW, fb, (width - 320) / 2, 0, 320, 240, sMapX, sMapY, lut);
 }
 
+// --- Video on the GPU -------------------------------------------------------
+//
+// The GPU puts the pictures on the screens: each picture is converted to the
+// 3DS's colours (RGB565) into a plain buffer, which the GPU's transfer engine
+// copies into a texture (in the GPU's tiled layout); a rectangle with that
+// texture is then drawn on each screen, scaled as the CPU path would scale it
+// (nearest pixel), and dimmed by the screen change fade. The CPU no longer
+// writes the framebuffers column by column, nor scales.
+//
+// Without citro3d (or with sdmc:/3ds/pmd-red-3ds/cpu-video.txt present), the
+// CPU copies the pictures as before (Blit).
+
+#include "present_shbin.h"
+
+#define TEX_W 512 // the textures: wide and high enough for 320x240
+#define TEX_H 256
+#define TEX_TRANSFER_FLAGS                                                                  \
+    (GX_TRANSFER_FLIP_VERT(1) | GX_TRANSFER_OUT_TILED(1) | GX_TRANSFER_RAW_COPY(0) |        \
+     GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB565) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) | \
+     GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
+#define SCREEN_TRANSFER_FLAGS                                                               \
+    (GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) |        \
+     GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) | \
+     GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
+
+typedef struct {
+    C3D_Tex tex;
+    uint16_t *stage; // the converted picture, TEX_W pixels a row (linear memory)
+    bool shown;      // drawn on its screen every frame
+    int x, y, w, h;  // where on the screen
+    int srcW, srcH;  // the picture's size in the texture
+} GpuPicture;
+
+static bool sGpu; // the GPU puts the pictures on the screens
+static C3D_RenderTarget *sTargetTop, *sTargetBottom;
+static C3D_Mtx sProjTop, sProjBottom;
+static DVLB_s *sShaderDvlb;
+static shaderProgram_s sShader;
+static int sProjLoc;
+static GpuPicture sGpuMain, sGpuSub;
+static bool sSubModeIsPicture(void);
+
+static bool GpuPictureInit(GpuPicture *p)
+{
+    p->stage = linearAlloc(TEX_W * TEX_H * 2);
+    if (p->stage == NULL || !C3D_TexInitVRAM(&p->tex, TEX_W, TEX_H, GPU_RGB565))
+        return false;
+    memset(p->stage, 0, TEX_W * TEX_H * 2);
+    C3D_TexSetFilter(&p->tex, GPU_NEAREST, GPU_NEAREST); // (as the CPU scaled: whole pixels)
+    C3D_TexSetWrap(&p->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    return true;
+}
+
+static void GpuInit(void)
+{
+    FILE *flag = fopen(CPU_VIDEO_FLAG, "r");
+    if (flag != NULL) {
+        fclose(flag);
+        Backend_Log("video: CPU (cpu-video.txt)");
+        return;
+    }
+    if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE)) {
+        Backend_Log("video: CPU (citro3d did not start)");
+        return;
+    }
+    sTargetTop = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, -1);
+    sTargetBottom = C3D_RenderTargetCreate(240, 320, GPU_RB_RGBA8, -1);
+    sShaderDvlb = DVLB_ParseFile(sPresentShader, PRESENT_SHADER_SIZE);
+    if (sTargetTop == NULL || sTargetBottom == NULL || sShaderDvlb == NULL
+        || !GpuPictureInit(&sGpuMain) || !GpuPictureInit(&sGpuSub)) {
+        Backend_Log("video: CPU (GPU setup failed)");
+        C3D_Fini();
+        return;
+    }
+    C3D_RenderTargetSetOutput(sTargetTop, GFX_TOP, GFX_LEFT, SCREEN_TRANSFER_FLAGS);
+    C3D_RenderTargetSetOutput(sTargetBottom, GFX_BOTTOM, GFX_LEFT, SCREEN_TRANSFER_FLAGS);
+
+    shaderProgramInit(&sShader);
+    shaderProgramSetVsh(&sShader, &sShaderDvlb->DVLE[0]);
+    C3D_BindProgram(&sShader);
+    sProjLoc = shaderInstanceGetUniformLocation(sShader.vertexShader, "projection");
+    C3D_AttrInfo *attr = C3D_GetAttrInfo();
+    AttrInfo_Init(attr);
+    AttrInfo_AddLoader(attr, 0, GPU_FLOAT, 3); // v0: position
+    AttrInfo_AddLoader(attr, 1, GPU_FLOAT, 2); // v1: texture coordinates
+    C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
+    C3D_CullFace(GPU_CULL_NONE);
+    // Screen pixels, y downwards (the 3DS's screens are turned sideways)
+    Mtx_OrthoTilt(&sProjTop, 0.0f, 400.0f, 240.0f, 0.0f, 1.0f, -1.0f, true);
+    Mtx_OrthoTilt(&sProjBottom, 0.0f, 320.0f, 240.0f, 0.0f, 1.0f, -1.0f, true);
+    sGpu = true;
+    Backend_Log("video: GPU");
+}
+
+// GBA BGR555 to RGB565, two pixels at a time (as ToRgb565)
+static void GpuConvert(uint16_t *dst, const uint16_t *src, int w, int h)
+{
+    for (int y = 0; y < h; y++) {
+        const uint32_t *s = (const uint32_t *)(src + y * w);
+        uint32_t *d = (uint32_t *)(dst + y * TEX_W);
+        for (int x = 0; x < w / 2; x++) {
+            uint32_t c = s[x];
+            d[x] = ((c & 0x001F001F) << 11) | ((c & 0x03E003E0) << 1) | ((c >> 4) & 0x00200020) | ((c >> 10) & 0x001F001F);
+        }
+    }
+}
+
+// A picture into its texture, to be shown at (x, y), w x h on its screen.
+static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int frameH, int x, int y, int w, int h)
+{
+    GpuConvert(p->stage, frame, frameW, frameH);
+    GSPGPU_FlushDataCache(p->stage, TEX_W * frameH * 2);
+    C3D_SyncDisplayTransfer((u32 *)p->stage, GX_BUFFER_DIM(TEX_W, TEX_H), (u32 *)p->tex.data,
+                            GX_BUFFER_DIM(TEX_W, TEX_H), TEX_TRANSFER_FLAGS);
+    p->shown = true;
+    p->x = x; p->y = y; p->w = w; p->h = h;
+    p->srcW = frameW; p->srcH = frameH;
+}
+
+static void GpuDrawPicture(C3D_RenderTarget *target, const C3D_Mtx *proj, GpuPicture *p)
+{
+    // (texture row 0 is its bottom: the transfer turned the picture upside down)
+    float x0 = (float)p->x, y0 = (float)p->y, x1 = (float)(p->x + p->w), y1 = (float)(p->y + p->h);
+    float u1 = (float)p->srcW / TEX_W, v0 = 1.0f, v1 = 1.0f - (float)p->srcH / TEX_H;
+
+    C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0x000000FF, 0); // black borders
+    C3D_FrameDrawOn(target);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, sProjLoc, proj);
+    C3D_TexBind(0, &p->tex);
+    C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
+    C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, v0, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(u1, v0, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, v1, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x1, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(u1, v1, 0.0f, 0.0f);
+    C3D_ImmDrawEnd();
+}
+
+// The frame's pictures on the screens (every frame: the screens are double
+// buffered); citro3d copies them to the framebuffers and swaps those.
+static void GpuDrawFrame(void)
+{
+    bool mainShown = sGpuMain.shown, subShown = sGpuSub.shown && sSubModeIsPicture();
+    if (!mainShown && !subShown)
+        return;
+    C3D_FrameBegin(0);
+    // The screen change fade: the texture's colours times a grey
+    unsigned level = (unsigned)(sFadeLevel * 255 / FADE_FRAMES);
+    C3D_TexEnv *env = C3D_GetTexEnv(0);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_CONSTANT, GPU_PRIMARY_COLOR);
+    C3D_TexEnvFunc(env, C3D_RGB, GPU_MODULATE);
+    C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
+    C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
+    if (mainShown)
+        GpuDrawPicture(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, &sGpuMain);
+    if (subShown)
+        GpuDrawPicture(sBottom ? sTargetTop : sTargetBottom, sBottom ? &sProjTop : &sProjBottom, &sGpuSub);
+    C3D_FrameEnd(GX_CMDLIST_FLUSH); // (only the command list: the pictures were flushed)
+}
+
+// The main screen's picture, placed as PresentGba/PresentDs place it.
+static void GpuPresentMain(const uint16_t *frame, int frameW, int frameH)
+{
+    const int width = sBottom ? 320 : 400;
+    int x, y, w = frameW, h = frameH;
+    if (frameW == GBA_W && sScaled) {
+        if (sBottom) { x = 0; y = (240 - 213) / 2; w = 320; h = 213; } // 4/3x
+        else { x = (400 - 360) / 2; y = 0; w = 360; h = 240; }          // 1.5x
+    } else if (frameW == 256 && sScaled) {
+        x = (width - 320) / 2; y = 0; w = 320; h = 240; // 1.25x
+    } else {
+        x = (width - frameW) / 2; y = (240 - frameH) / 2;
+    }
+    GpuUpload(&sGpuMain, frame, frameW, frameH, x, y, w, h);
+}
+
 static void PresentMain(const uint16_t *frame, int frameW, int frameH)
 {
+    if (sGpu) {
+        GpuPresentMain(frame, frameW, frameH);
+        return;
+    }
+
     // Framebuffers are 240 pixels per column, columns left to right, each
     // column stored bottom to top. Top: 400 columns; bottom: 320.
     static int sLastW;
@@ -273,6 +457,8 @@ static uint16_t sSubFrame[SUBSCREEN_W_MAX * SUBSCREEN_H_MAX];
 
 static void PrintStatus(void);
 
+static bool sSubModeIsPicture(void) { return sSubMode == SUB_PICTURE; }
+
 static void PresentSub(void)
 {
     gfxScreen_t screen = sBottom ? GFX_TOP : GFX_BOTTOM;
@@ -303,7 +489,9 @@ static void PresentSub(void)
         full = 1;
         gfxSetScreenFormat(screen, GSP_RGB565_OES);
         gfxSetDoubleBuffering(screen, true);
-        for (int i = 0; i < 2; i++) { // both buffers, so the border stays black
+        // both buffers, so the border stays black (the GPU clears its own:
+        // and CPU writes left in the cache could later land over its picture)
+        for (int i = 0; i < 2 && !sGpu; i++) {
             memset(gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL), 0, width * 240 * 2);
             gfxScreenSwapBuffers(screen, false);
         }
@@ -327,6 +515,12 @@ static void PresentSub(void)
         }
     }
     memcpy(sPend, area, sizeof(sPend));
+    if (sGpu) { // the whole picture again, when anything in it changed
+        if (area[0] < area[2] && area[1] < area[3])
+            GpuUpload(&sGpuSub, sSubFrame, subW, subH, (width - subW) / 2, (240 - subH) / 2, subW, subH);
+        Part(T_SUBOUT);
+        return;
+    }
     if (draw[0] >= draw[2] || draw[1] >= draw[3])
         return;
 
@@ -566,6 +760,8 @@ static void WaitForFrame(void)
 
 static void ClearGameScreen(void)
 {
+    if (sGpu) // (the GPU clears the screens it draws on, every frame)
+        return;
     gfxScreen_t screen = sBottom ? GFX_BOTTOM : GFX_TOP;
     size_t size = (sBottom ? 320 : 400) * 240 * 2;
     for (int i = 0; i < 2; i++) {
@@ -856,6 +1052,7 @@ static void Shutdown(void)
     FlushSave();
     if (sAudioOn) { ndspExit(); linearFree(sWaveData); }
     if (sLog) fclose(sLog);
+    if (sGpu) C3D_Fini();
     gfxExit();
 }
 
@@ -878,11 +1075,19 @@ void Backend_EndFrame(void)
         StopWorker(); // Dual Core turned off: give the system core back
     sMarkTick = svcGetSystemTick();
     FlushSave();
-    gfxFlushBuffers();
-    // A skipped frame leaves the main screen's buffers as they are.
-    if (sMainPresented)
-        gfxScreenSwapBuffers(sBottom ? GFX_BOTTOM : GFX_TOP, false);
-    gfxScreenSwapBuffers(sBottom ? GFX_TOP : GFX_BOTTOM, false);
+    if (sGpu) {
+        // The GPU draws both pictures and swaps those screens; the CPU only
+        // writes the status text (the second screen, when it has no picture).
+        if (sSubMode == SUB_TEXT)
+            gfxFlushBuffers();
+        GpuDrawFrame();
+    } else {
+        gfxFlushBuffers();
+        // A skipped frame leaves the main screen's buffers as they are.
+        if (sMainPresented)
+            gfxScreenSwapBuffers(sBottom ? GFX_BOTTOM : GFX_TOP, false);
+        gfxScreenSwapBuffers(sBottom ? GFX_TOP : GFX_BOTTOM, false);
+    }
     Part(T_FLUSH);
     WaitForFrame();
     Part(T_WAIT);
@@ -935,6 +1140,7 @@ int main(void)
 
     BuildLut();
     BuildMaps();
+    GpuInit();
     AudioInit();
     SetGameScreen(Port_WantsBottomScreen());
 

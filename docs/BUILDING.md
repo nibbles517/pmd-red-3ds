@@ -19,6 +19,8 @@ The build has two halves:
    pacman -S --needed 3ds-dev git make
    ```
 
+   (`3ds-dev` includes citro3d, which puts the pictures on the screens.)
+
 2. Get this repository (anywhere without spaces in the path):
 
    ```sh
@@ -36,6 +38,10 @@ The build has two halves:
    The result is `build/pmd-red-3ds.3dsx`.
 
 ## Running it
+
+The GPU puts the pictures on the screens. If they look wrong (upside down,
+misplaced, garbled), put an empty `cpu-video.txt` in `SD:/3ds/pmd-red-3ds/`:
+the CPU then copies them, as earlier builds did.
 
 - **Azahar:** File → Load File → `pmd-red-3ds.3dsx`.
 - **3DS:** copy it to `SD:/3ds/pmd-red-3ds/pmd-red-3ds.3dsx` and start it from the

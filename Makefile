@@ -145,7 +145,7 @@ $(3DS_SPECS): Makefile
 $(3DS_ELF): $(3DS_OBJ)/main.o $(GAME_PRELINK) port/3ds/game_sections.ld $(3DS_SPECS)
 	@$(CC_3DS) -specs=$(3DS_SPECS) -g -marm -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft \
 		-Wl,-Map,$(BUILD)/pmd-red-3ds.map -Wl,--no-warn-rwx-segments \
-		-o $@ $(3DS_OBJ)/main.o $(GAME_PRELINK) -L$(CTRU)/lib -lctru -lm
+		-o $@ $(3DS_OBJ)/main.o $(GAME_PRELINK) -L$(CTRU)/lib -lcitro3d -lctru -lm
 	@echo "  LD   $@"
 
 $(BUILD)/pmd-red-3ds.smdh: port/3ds/icon.png
