@@ -250,7 +250,9 @@ static void PresentDs(const uint16_t *frame, int frameW, int frameH, uint16_t *f
 typedef struct {
     C3D_Tex tex;
     uint16_t *stage; // the converted picture, TEX_W pixels a row (linear memory)
-    bool shown;      // drawn on its screen every frame
+    bool shown;      // on its screen
+    bool dirty;      // changed since it was last drawn (new picture, place or setting)
+    unsigned level;  // the fade level it was last drawn with
     int x, y, w, h;  // where on the screen
     int srcW, srcH;  // the picture's size in the texture
 } GpuPicture;
@@ -337,6 +339,7 @@ static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int fram
     C3D_SyncDisplayTransfer((u32 *)p->stage, GX_BUFFER_DIM(TEX_W, TEX_H), (u32 *)p->tex.data,
                             GX_BUFFER_DIM(TEX_W, TEX_H), TEX_TRANSFER_FLAGS);
     p->shown = true;
+    p->dirty = true;
     p->x = x; p->y = y; p->w = w; p->h = h;
     p->srcW = frameW; p->srcH = frameH;
 }
@@ -361,26 +364,61 @@ static void GpuDrawPicture(C3D_RenderTarget *target, const C3D_Mtx *proj, GpuPic
     C3D_ImmDrawEnd();
 }
 
-// The frame's pictures on the screens (every frame: the screens are double
-// buffered); citro3d copies them to the framebuffers and swaps those.
+// A screen's swap (asked for when the GPU finished copying its picture to
+// the framebuffer) happens at its next VBlank; until then the screen still
+// shows the other buffer, the one the next copy goes into. Copying over the
+// picture being shown is what tore the screen (one side a frame ahead: seen
+// in screen fades, where every frame changes). So before the next copy, wait
+// for that swap: asked for (the back buffer changed) and done (none pending).
+static void *sGpuCopiedTo[2]; // each screen's buffer the last copy went into
+
+static void GpuWaitForSwap(gfxScreen_t screen)
+{
+    if (sGpuCopiedTo[screen] == NULL)
+        return;
+    u64 giveUp = svcGetSystemTick() + SYSCLOCK_ARM11 / 15; // (4 frames: not double buffered after all)
+    while ((gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL) == sGpuCopiedTo[screen]
+            || gspIsPresentPending(screen))
+           && svcGetSystemTick() < giveUp)
+        gspWaitForAnyEvent();
+    sGpuCopiedTo[screen] = NULL;
+}
+
+// The pictures on the screens, those that changed since they were last drawn
+// (a new picture, place, Scale setting or fade level). A screen with nothing
+// new keeps showing what it shows: no GPU work, no swap.
 static void GpuDrawFrame(void)
 {
-    bool mainShown = sGpuMain.shown, subShown = sGpuSub.shown && sSubModeIsPicture();
-    if (!mainShown && !subShown)
-        return;
-    C3D_FrameBegin(0);
-    // The screen change fade: the texture's colours times a grey
     unsigned level = (unsigned)(sFadeLevel * 255 / FADE_FRAMES);
+    gfxScreen_t mainScreen = sBottom ? GFX_BOTTOM : GFX_TOP, subScreen = sBottom ? GFX_TOP : GFX_BOTTOM;
+    bool drawMain = sGpuMain.shown && (sGpuMain.dirty || sGpuMain.level != level);
+    bool drawSub = sGpuSub.shown && sSubModeIsPicture() && (sGpuSub.dirty || sGpuSub.level != level);
+    if (!drawMain && !drawSub)
+        return;
+    C3D_FrameBegin(0); // (waits for the last frame's copies)
+    if (drawMain)
+        GpuWaitForSwap(mainScreen);
+    if (drawSub)
+        GpuWaitForSwap(subScreen);
+    // The screen change fade: the texture's colours times a grey
     C3D_TexEnv *env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
     C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_CONSTANT, GPU_PRIMARY_COLOR);
     C3D_TexEnvFunc(env, C3D_RGB, GPU_MODULATE);
     C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
     C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
-    if (mainShown)
+    if (drawMain) {
         GpuDrawPicture(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, &sGpuMain);
-    if (subShown)
+        sGpuMain.dirty = false;
+        sGpuMain.level = level;
+        sGpuCopiedTo[mainScreen] = gfxGetFramebuffer(mainScreen, GFX_LEFT, NULL, NULL);
+    }
+    if (drawSub) {
         GpuDrawPicture(sBottom ? sTargetTop : sTargetBottom, sBottom ? &sProjTop : &sProjBottom, &sGpuSub);
+        sGpuSub.dirty = false;
+        sGpuSub.level = level;
+        sGpuCopiedTo[subScreen] = gfxGetFramebuffer(subScreen, GFX_LEFT, NULL, NULL);
+    }
     C3D_FrameEnd(GX_CMDLIST_FLUSH); // (only the command list: the pictures were flushed)
 }
 
@@ -490,6 +528,7 @@ static void PresentSub(void)
             consoleInit(screen, &sConsole);
             PrintStatus();
             sSubMode = SUB_TEXT;
+            sGpuCopiedTo[screen] = NULL; // (the text: one buffer, no swaps)
         }
         return;
     }
@@ -538,7 +577,12 @@ static void PresentSub(void)
             ScaleRect(subW, subH, width, Port_ScreenScale(1), &x, &y, &w, &h);
             GpuUpload(&sGpuSub, sSubFrame, subW, subH, x, y, w, h);
         } else if (sGpuSub.shown) { // (the setting may have changed)
-            ScaleRect(subW, subH, width, Port_ScreenScale(1), &sGpuSub.x, &sGpuSub.y, &sGpuSub.w, &sGpuSub.h);
+            int x, y, w, h;
+            ScaleRect(subW, subH, width, Port_ScreenScale(1), &x, &y, &w, &h);
+            if (x != sGpuSub.x || y != sGpuSub.y || w != sGpuSub.w || h != sGpuSub.h) {
+                sGpuSub.x = x; sGpuSub.y = y; sGpuSub.w = w; sGpuSub.h = h;
+                sGpuSub.dirty = true;
+            }
         }
         Part(T_SUBOUT);
         return;
@@ -815,6 +859,8 @@ static void SetGameScreen(int bottom)
     gfxSetDoubleBuffering(game, true);
     ClearGameScreen();
     sSubMode = SUB_UNSET; // the other screen is set up again on the next frame
+    sGpuMain.dirty = sGpuSub.dirty = true; // (both drawn again, on their new screens)
+    sGpuCopiedTo[0] = sGpuCopiedTo[1] = NULL;
 }
 
 // --- Input -------------------------------------------------------------------
