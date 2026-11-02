@@ -3306,7 +3306,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..58fee986 100644
+index 86f582c2..7a61f3e4 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3364,7 +3364,7 @@ index 86f582c2..58fee986 100644
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +76,85 @@ static void sub_801DED0(void);
+@@ -48,6 +76,87 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3394,7 +3394,9 @@ index 86f582c2..58fee986 100644
 +ALIGNED(4) static const u8 sMusicMissing[] = _("pmd-blue.nds was not found.");
 +ALIGNED(4) static const u8 sMusicOther[] = _("The file appears to not be a Pokémon\nMystery Dungeon: Blue Rescue Team file.");
 +ALIGNED(4) static const u8 sMusicOther2[] = _("The music may only be played here. In\ndungeons, you will need a Music Box to be\nable to play one of the tracks.");
-+#define MUSIC_GAME_CODE "APHE" // Pokémon Mystery Dungeon: Blue Rescue Team
++// Pokémon Mystery Dungeon: Blue Rescue Team: APHE (North America), APHP
++// (Europe), APHJ (Japan)
++#define MUSIC_GAME_CODE "APH"
 +ALIGNED(4) static const u8 sMusicMissing2[] = _("Please make sure pmd-blue.nds is in the\nsame directory, and then try again.");
 +static void CreateMusicMenu(void);
 +static void HandleMusicMenu(void);
@@ -3450,7 +3452,7 @@ index 86f582c2..58fee986 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +183,33 @@ u32 sub_801DCE8(void)
+@@ -76,8 +185,33 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3484,7 +3486,7 @@ index 86f582c2..58fee986 100644
          default:
              break;
      }
-@@ -120,9 +252,13 @@ static void sub_801DD84(void)
+@@ -120,9 +254,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3499,7 +3501,7 @@ index 86f582c2..58fee986 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +266,31 @@ static void sub_801DD84(void)
+@@ -130,10 +268,31 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3532,7 +3534,7 @@ index 86f582c2..58fee986 100644
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +307,10 @@ static void sub_801DED0(void)
+@@ -150,6 +309,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3543,7 +3545,7 @@ index 86f582c2..58fee986 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +325,63 @@ static void sub_801DED0(void)
+@@ -164,12 +327,63 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3607,7 +3609,7 @@ index 86f582c2..58fee986 100644
      }
  }
  
-@@ -180,12 +392,39 @@ static void CreateOthersMenu(void)
+@@ -180,12 +394,39 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3647,7 +3649,7 @@ index 86f582c2..58fee986 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +468,29 @@ static void HandleOthersMenu(void)
+@@ -229,6 +470,30 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3665,7 +3667,8 @@ index 86f582c2..58fee986 100644
 +            // the DS version's music, from pmd-blue.nds (if it is there and usable)
 +            if (Port_MusicOpen() > 0) {
 +                // another game's ROM: its music, but here only
-+                if (strcmp(Port_MusicGameCode(), MUSIC_GAME_CODE) != 0)
++                const char *code = Port_MusicGameCode();
++                if (strncmp(code, MUSIC_GAME_CODE, 3) != 0 || (code[3] != 'E' && code[3] != 'P' && code[3] != 'J'))
 +                    SetOptionsMenuState(OPTIONS_MENU_MUSIC_OTHER);
 +                else
 +                    SetOptionsMenuState(OPTIONS_MENU_MUSIC);
@@ -3677,7 +3680,7 @@ index 86f582c2..58fee986 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +534,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +537,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3694,7 +3697,7 @@ index 86f582c2..58fee986 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +554,368 @@ static void sub_801E0FC(void)
+@@ -282,12 +557,368 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
