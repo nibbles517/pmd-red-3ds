@@ -88,7 +88,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version12_UpdateRepoIfMissing != 12)
+    if (Backend_Version13_UpdateRepoIfMissing != 13)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -106,6 +106,7 @@ uint64_t Port_FrameCount(void) { return sFrames; }
 const uint16_t *Port_Framebuffer(void);
 
 static uint16_t sKeysHeld;
+extern uint8_t gPortRawXY;
 uint8_t gPortFieldControl; // set by the game each frame the player walks freely (no menu)
 
 // DS and 3DS buttons: X is A in menus, and B where the player walks freely
@@ -114,7 +115,7 @@ static void UpdateKeys(void)
 {
     static uint16_t sXAs;
     uint16_t keys = Backend_PollKeys();
-    if (!(keys & KEY_BIT_X) || !Port_DsButtons())
+    if (!(keys & KEY_BIT_X) || !Port_DsButtons() || gPortRawXY)
         sXAs = 0;
     else if (sXAs == 0)
         sXAs = gPortFieldControl ? KEY_BIT_B : KEY_BIT_A;
@@ -126,6 +127,13 @@ static void UpdateKeys(void)
 }
 
 // Y (DS and 3DS controls: held for Rotate Mode), as of the last frame
+uint8_t gPortRawXY; // Music Options: X and Y are its own (stop, pause)
+
+unsigned Port_KeysHeld(void)
+{
+    return sKeysHeld;
+}
+
 uint8_t Port_YHeld(void)
 {
     return (sKeysHeld & KEY_BIT_Y) != 0;

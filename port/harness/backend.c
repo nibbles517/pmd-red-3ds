@@ -19,10 +19,12 @@ enum {
     IO_LATE = 16,      // read: nonzero = report the last frame as late (Frame Skip: Auto)
     IO_PRESENT_SIZE = 17, // write: the next IO_PRESENT's width << 16 | height
     IO_SUB_SIZE = 18,     // write: the next IO_SUBSCREEN picture's width << 16 | height
+    IO_ARG = 19, IO_HANDLE = 20, // data files: offset, handle
 };
-enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4, CMD_SAVE_SLOT = 5 };
+enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4, CMD_SAVE_SLOT = 5,
+       CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9 };
 
-const int Backend_Version12_UpdateRepoIfMissing = 12;
+const int Backend_Version13_UpdateRepoIfMissing = 13;
 
 // Dual Core: one core here, so the second core's part is drawn at once.
 void Backend_RunAsync(void (*fn)(void *), void *arg) { fn(arg); }
@@ -121,6 +123,38 @@ void Backend_SetSaveSlot(int slot)
 {
     IO[IO_LEN] = (uint32_t)slot;
     IO[IO_CMD] = CMD_SAVE_SLOT;
+}
+
+// Data files: harness.py --data DIR (default: the --save file's folder).
+void *Backend_FileOpen(const char *name)
+{
+    IO[IO_BUF] = (uint32_t)(uintptr_t)name;
+    IO[IO_LEN] = (uint32_t)strlen(name);
+    IO[IO_CMD] = CMD_FILE_OPEN;
+    return (void *)(uintptr_t)IO[IO_RESULT]; // a handle number, 0 = none
+}
+
+uint32_t Backend_FileSize(void *file)
+{
+    IO[IO_HANDLE] = (uint32_t)(uintptr_t)file;
+    IO[IO_CMD] = CMD_FILE_SIZE;
+    return IO[IO_RESULT];
+}
+
+bool Backend_FileRead(void *file, uint32_t offset, void *dest, uint32_t size)
+{
+    IO[IO_HANDLE] = (uint32_t)(uintptr_t)file;
+    IO[IO_ARG] = offset;
+    IO[IO_BUF] = (uint32_t)(uintptr_t)dest;
+    IO[IO_LEN] = size;
+    IO[IO_CMD] = CMD_FILE_READ;
+    return IO[IO_RESULT] != 0;
+}
+
+void Backend_FileClose(void *file)
+{
+    IO[IO_HANDLE] = (uint32_t)(uintptr_t)file;
+    IO[IO_CMD] = CMD_FILE_CLOSE;
 }
 
 // The port's settings: harness.py --config FILE.

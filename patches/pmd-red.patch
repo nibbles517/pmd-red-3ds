@@ -3306,7 +3306,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..d589a1cb 100644
+index 86f582c2..10976029 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3314,7 +3314,7 @@ index 86f582c2..d589a1cb 100644
  #include "global.h"
  #include "globaldata.h"
  #include "code_8099360.h"
-@@ -9,6 +10,12 @@
+@@ -9,6 +10,17 @@
  #include "menu_input.h"
  #include "options_menu1.h"
  #include "options_menu2.h"
@@ -3323,11 +3323,16 @@ index 86f582c2..d589a1cb 100644
 +#include "graphics_memory.h"
 +#include "port_game.h"
 +#include "save.h"
++#include "music.h"
++#include "music_util.h"
++#include "text_2.h"
++#include "text_3.h"
++#include "constants/bg_music.h"
 +#endif
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +25,13 @@ enum
+@@ -18,7 +30,14 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -3336,13 +3341,14 @@ index 86f582c2..d589a1cb 100644
 +    MENU_OPTION_SCREEN, // 3DS port: Graphics Options
 +    MENU_OPTION_CONTROLS, // 3DS port: Controls Options
 +    MENU_OPTION_SAVE_DATA, // 3DS port: Change Current Save Data (title only)
++    MENU_OPTION_MUSIC, // 3DS port: Music Options (title only)
 +    MENU_OPTION_SAVE_SLOT1, // ... Save Data 1, 2, 3
 +    MENU_OPTION_SAVE_SLOT2,
 +    MENU_OPTION_SAVE_SLOT3,
  };
  
  enum OptionsMenuStates
-@@ -31,6 +44,10 @@ enum OptionsMenuStates
+@@ -31,6 +50,13 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -3350,10 +3356,13 @@ index 86f582c2..d589a1cb 100644
 +    OPTIONS_MENU_CONTROLS, // 3DS port
 +    OPTIONS_MENU_SAVE_DATA, // 3DS port: picking Save Data 1-3
 +    OPTIONS_MENU_SAVE_LOADED, // 3DS port: "Loaded a new save data."
++    OPTIONS_MENU_MUSIC, // 3DS port: Music Options' track list
++    OPTIONS_MENU_MUSIC_MISSING, // 3DS port: "pmd-blue.nds was not found."
++    OPTIONS_MENU_MUSIC_MISSING2, // ... "Please make sure ..."
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +65,75 @@ static void sub_801DED0(void);
+@@ -48,6 +74,82 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3379,6 +3388,13 @@ index 86f582c2..d589a1cb 100644
 +
 +// Change Current Save Data (only there): Save Data 1-3 in a smaller window
 +ALIGNED(4) static const u8 sChangeSaveData[] = _("Change Current Save Data");
++ALIGNED(4) static const u8 sMusicOptions[] = _("Music Options");
++ALIGNED(4) static const u8 sMusicMissing[] = _("pmd-blue.nds was not found.");
++ALIGNED(4) static const u8 sMusicMissing2[] = _("Please make sure pmd-blue.nds is in the\nsame directory, and then try again.");
++static void CreateMusicMenu(void);
++static void HandleMusicMenu(void);
++static void HandleMusicMissing(void);
++static void SetMusicWindows(void);
 +ALIGNED(4) static const u8 sSaveData1[] = _("Save Data 1");
 +ALIGNED(4) static const u8 sSaveData2[] = _("Save Data 2");
 +ALIGNED(4) static const u8 sSaveData3[] = _("Save Data 3");
@@ -3429,7 +3445,7 @@ index 86f582c2..d589a1cb 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +162,24 @@ u32 sub_801DCE8(void)
+@@ -76,8 +178,31 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3446,15 +3462,22 @@ index 86f582c2..d589a1cb 100644
 +            break;
 +        case OPTIONS_MENU_SAVE_DATA:
 +            HandleSaveDataMenu();
-             break;
++            break;
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            HandleSaveDataLoaded();
++            break;
++        case OPTIONS_MENU_MUSIC:
++            HandleMusicMenu();
+             break;
++        case OPTIONS_MENU_MUSIC_MISSING:
++        case OPTIONS_MENU_MUSIC_MISSING2:
++            HandleMusicMissing();
 +            break;
 +#endif
          default:
              break;
      }
-@@ -120,9 +222,13 @@ static void sub_801DD84(void)
+@@ -120,9 +245,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3469,7 +3492,7 @@ index 86f582c2..d589a1cb 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +236,26 @@ static void sub_801DD84(void)
+@@ -130,10 +259,31 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3481,7 +3504,7 @@ index 86f582c2..d589a1cb 100644
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
 +#endif
-+            break;
+             break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SAVE_DATA:
 +            CreateOthersMenu();
@@ -3492,12 +3515,17 @@ index 86f582c2..d589a1cb 100644
 +            SetGameOptionsWindow();
 +            sUnknown_203B25C->unkBC.id[1] = sSaveDataWindow;
 +            sub_8012D08(&sUnknown_203B25C->unkBC.id[1], 3);
-             break;
++            break;
++        case OPTIONS_MENU_MUSIC:
++            for (i = 0; i < 4; i++)
++                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
++            SetMusicWindows();
++            break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +272,10 @@ static void sub_801DED0(void)
+@@ -150,6 +300,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3508,7 +3536,7 @@ index 86f582c2..d589a1cb 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +290,48 @@ static void sub_801DED0(void)
+@@ -164,12 +318,57 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3540,6 +3568,15 @@ index 86f582c2..d589a1cb 100644
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            CreateDialogueBoxAndPortrait(sSaveDataLoaded, 0, NULL, 0x101);
 +            break;
++        case OPTIONS_MENU_MUSIC:
++            CreateMusicMenu();
++            break;
++        case OPTIONS_MENU_MUSIC_MISSING:
++            CreateDialogueBoxAndPortrait(sMusicMissing, 0, NULL, 0x101);
++            break;
++        case OPTIONS_MENU_MUSIC_MISSING2:
++            CreateDialogueBoxAndPortrait(sMusicMissing2, 0, NULL, 0x101);
++            break;
 +        case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
 +            // write what changed, then say so (like "Save completed.")
 +            if (sSaveGameOptions)
@@ -3557,7 +3594,7 @@ index 86f582c2..d589a1cb 100644
      }
  }
  
-@@ -180,12 +342,36 @@ static void CreateOthersMenu(void)
+@@ -180,12 +379,39 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3577,6 +3614,9 @@ index 86f582c2..d589a1cb 100644
 +    // ... and, on the title only, Change Current Save Data
 +    if (sFromTitle) {
 +        loopMax++;
++        sUnknown_203B25C->menuItems[loopMax].text = sMusicOptions;
++        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_MUSIC;
++        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sChangeSaveData;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SAVE_DATA;
 +    }
@@ -3594,7 +3634,7 @@ index 86f582c2..d589a1cb 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +415,17 @@ static void HandleOthersMenu(void)
+@@ -229,6 +455,24 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3608,11 +3648,18 @@ index 86f582c2..d589a1cb 100644
 +        case MENU_OPTION_SAVE_DATA:
 +            SetOptionsMenuState(OPTIONS_MENU_SAVE_DATA);
 +            break;
++        case MENU_OPTION_MUSIC:
++            // the DS version's music, from pmd-blue.nds (if it is there and usable)
++            if (Port_MusicOpen() > 0)
++                SetOptionsMenuState(OPTIONS_MENU_MUSIC);
++            else
++                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
++            break;
 +#endif
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +469,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +516,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3629,7 +3676,7 @@ index 86f582c2..d589a1cb 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +489,92 @@ static void sub_801E0FC(void)
+@@ -282,12 +536,357 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -3673,10 +3720,10 @@ index 86f582c2..d589a1cb 100644
 +        case 3:
 +            PortScreenMenu_Destroy();
 +            LeaveSettings(PortScreenMenu_Changed());
-             break;
-     }
- }
- 
++            break;
++    }
++}
++
 +// Save Data 1-3: that save file is used from now on (and next time); the
 +// main menu then reads it as at power-on.
 +static void HandleSaveDataMenu(void)
@@ -3708,6 +3755,271 @@ index 86f582c2..d589a1cb 100644
 +
 +    if (sub_80144A4(&menuAction) == 0)
 +        SetOptionsMenuState(OPTIONS_MENU_EXIT);
++}
++
++// --- Music Options ------------------------------------------------------------
++//
++// The tracks of pmd-blue.nds (the DS version), as the NDS Music Player lists
++// them, in a paged list; below it, what is playing. Its controls: A plays,
++// B goes back, L/R the previous/next track, Y pauses, X stops, SELECT
++// repeats the track. A track that ends goes on to the next one.
++
++#define MUSIC_PER_PAGE 5
++#define MUSIC_LIST_WIN 0
++#define MUSIC_INFO_WIN 1
++
++static WindowHeader sMusicHeader;
++static const WindowTemplate sMusicListWindow = {
++    .flags = WINTEMPLATE_FLAG_NONE,
++    .type = WINDOW_TYPE_WITH_HEADER,
++    .pos = { 2, 1 },
++    .width = 26,
++    .height = 10,
++    .totalHeight = 10,
++    .unk12 = 0,
++    .header = &sMusicHeader,
++};
++static const WindowTemplate sMusicInfoWindow = {
++    .flags = WINTEMPLATE_FLAG_NONE,
++    .type = WINDOW_TYPE_NORMAL,
++    .pos = { 2, 13 },
++    .width = 26,
++    .height = 6,
++    .totalHeight = 6,
++    .unk12 = 0,
++    .header = NULL,
++};
++ALIGNED(4) static const u8 sMusicStar[] = _("{STAR_BULLET}");
++ALIGNED(4) static const u8 sMusicNowPlaying[] = _("{COLOR CYAN}Now playing{RESET}");
++ALIGNED(4) static const u8 sMusicPausedText[] = _("{COLOR CYAN}Paused{RESET}");
++ALIGNED(4) static const u8 sMusicStopped[] = _("{COLOR CYAN}Stopped{RESET}");
++ALIGNED(4) static const u8 sMusicNothing[] = _("{COLOR CYAN}Nothing playing{RESET}");
++ALIGNED(4) static const u8 sMusicCantLoad[] = _("{COLOR RED}Couldn't load this track.{RESET}");
++ALIGNED(4) static const u8 sMusicEnd[] = _("{COLOR YELLOW}End of list{RESET}");
++ALIGNED(4) static const u8 sMusicRepeatOn[] = _("{COLOR GREEN}[Repeat]{RESET}");
++ALIGNED(4) static const u8 sMusicControls[] = _("Y Pause  X Stop  L/R Skip  SELECT Repeat");
++
++static MenuInputStruct sMusicInput;
++static s32 sMusicCursor; // kept while the title's menus are up
++static s32 sMusicTrack = -1; // the track shown below the list (the last one played)
++static const u8 *sMusicStatus; // a message instead of "Now playing" etc.
++static bool8 sMusicStoppedBgm; // the title's music is stopped while a track plays
++static u16 sMusicPrevKeys;
++static s32 sMusicDrawnSecond, sMusicDrawnLoops, sMusicDrawnState;
++static s32 sMusicListPlaying; // the track the list marks as playing
++
++static void SetMusicWindows(void)
++{
++    sMusicHeader.count = 1;
++    sMusicHeader.currId = 0;
++    sMusicHeader.width = 13; // "Music Options" and the page
++    sMusicHeader.f3 = 0;
++    sUnknown_203B25C->unkBC.id[MUSIC_LIST_WIN] = sMusicListWindow;
++    sub_8012D08(&sUnknown_203B25C->unkBC.id[MUSIC_LIST_WIN], MUSIC_PER_PAGE);
++    sUnknown_203B25C->unkBC.id[MUSIC_INFO_WIN] = sMusicInfoWindow;
++}
++
++// A label in the game's characters: letters, digits and a few signs (the
++// game's text has commands of its own, as "#C").
++static void MusicLabel(u8 *out, s32 size, const char *in)
++{
++    s32 n = 0;
++    while (*in != '\0' && n < size - 1) {
++        char c = *in++;
++        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
++              || c == ' ' || c == '_' || c == '-' || c == '.' || c == ':' || c == '(' || c == ')' || c == '/'))
++            c = '?';
++        out[n++] = c;
++    }
++    out[n] = '\0';
++}
++
++static void DrawMusicList(void)
++{
++    MenuInputStruct *in = &sMusicInput;
++    u8 text[48];
++    s32 i;
++
++    CallPrepareTextbox_8008C54(MUSIC_LIST_WIN);
++    sub_80073B8(MUSIC_LIST_WIN);
++    PrintStringOnWindow(10, 0, sMusicOptions, MUSIC_LIST_WIN, 0);
++    snprintf((char *)text, sizeof(text), "%d/%d", in->currPage + 1, in->pagesCount > 0 ? in->pagesCount : 1);
++    PrintStringOnWindow(80, 0, text, MUSIC_LIST_WIN, 0);
++    sMusicListPlaying = Port_MusicPlaying();
++    for (i = 0; i < in->currPageEntries; i++) {
++        s32 track = in->currPage * in->entriesPerPage + i;
++        s32 y = GetMenuEntryYCoord(in, i);
++        if (track == sMusicListPlaying)
++            PrintStringOnWindow(8, y, sMusicStar, MUSIC_LIST_WIN, 0);
++        MusicLabel(text, 34, Port_MusicLabel(track));
++        PrintStringOnWindow(20, y, text, MUSIC_LIST_WIN, 0);
++    }
++    sub_80073E0(MUSIC_LIST_WIN);
++}
++
++static s32 MusicState(void)
++{
++    if (Port_MusicPlaying() >= 0)
++        return Port_MusicPaused() ? 2 : 1;
++    return sMusicTrack >= 0 ? 3 : 0;
++}
++
++static void DrawMusicInfo(void)
++{
++    u8 text[64];
++    unsigned ms = Port_MusicPosMs();
++    s32 state = MusicState();
++    static const u8 *const states[] = { sMusicNothing, sMusicNowPlaying, sMusicPausedText, sMusicStopped };
++
++    sMusicDrawnSecond = ms / 1000;
++    sMusicDrawnLoops = Port_MusicLoops();
++    sMusicDrawnState = state;
++    CallPrepareTextbox_8008C54(MUSIC_INFO_WIN);
++    sub_80073B8(MUSIC_INFO_WIN);
++    PrintStringOnWindow(4, 0, sMusicStatus != NULL ? sMusicStatus : states[state], MUSIC_INFO_WIN, 0);
++    if (Port_MusicRepeat())
++        PrintStringOnWindow(160, 0, sMusicRepeatOn, MUSIC_INFO_WIN, 0);
++    if (sMusicTrack >= 0) {
++        MusicLabel(text, 40, Port_MusicLabel(sMusicTrack));
++        PrintStringOnWindow(4, 12, text, MUSIC_INFO_WIN, 0);
++        snprintf((char *)text, sizeof(text), "Song %d / %d   Time %u:%02u   Loops %d", (int)sMusicTrack + 1,
++                 Port_MusicCount(), ms / 60000, (ms / 1000) % 60, sMusicDrawnLoops);
++        PrintStringOnWindow(4, 24, text, MUSIC_INFO_WIN, 0);
++    }
++    else {
++        MusicLabel(text, 40, Port_MusicRomTitle());
++        PrintStringOnWindow(4, 12, text, MUSIC_INFO_WIN, 0);
++    }
++    PrintStringOnWindow(4, 36, sMusicControls, MUSIC_INFO_WIN, 0);
++    sub_80073E0(MUSIC_INFO_WIN);
++}
++
++static void CreateMusicMenu(void)
++{
++    gPortRawXY = TRUE; // X stops, Y pauses (not A, with DS or 3DS buttons)
++    sMusicPrevKeys = Port_KeysHeld();
++    CreateMenuOnWindow(&sMusicInput, Port_MusicCount(), MUSIC_PER_PAGE, MUSIC_LIST_WIN);
++    MoveMenuToEntryId(&sMusicInput, sMusicCursor);
++    sMusicStatus = NULL;
++    DrawMusicList();
++    DrawMusicInfo();
++}
++
++static bool8 PlayMusicTrack(s32 track)
++{
++    sMusicTrack = track;
++    sMusicStatus = NULL;
++    if (!sMusicStoppedBgm) {
++        StopBGMusic(); // the title's music
++        sMusicStoppedBgm = TRUE;
++    }
++    if (!Port_MusicPlay(track)) {
++        sMusicStatus = sMusicCantLoad;
++        return FALSE;
++    }
++    return TRUE;
++}
++
++// The previous/next track (dir -1/+1), skipping those that don't load. At the
++// end of the list, a track that ended stops; a button press does nothing.
++static void AdvanceMusic(s32 dir, bool8 automatic)
++{
++    s32 track = sMusicTrack, tries;
++
++    for (tries = 0; tries < 64; tries++) {
++        s32 next = track + dir;
++        if (next < 0 || next >= Port_MusicCount())
+             break;
++        if (PlayMusicTrack(next))
++            return;
++        track = next;
++    }
++    if (automatic) {
++        Port_MusicStop();
++        sMusicStatus = sMusicEnd;
+     }
+ }
+ 
++static void LeaveMusicMenu(void)
++{
++    sMusicCursor = GET_CURRENT_MENU_ENTRY(sMusicInput);
++    Port_MusicClose();
++    sMusicTrack = -1;
++    gPortRawXY = FALSE;
++    if (sMusicStoppedBgm) {
++        StartNewBGM(MUS_FILE_SELECT); // the title's music again
++        sMusicStoppedBgm = FALSE;
++    }
++    SetOptionsMenuState(OPTIONS_MENU_MAIN);
++}
++
++static void HandleMusicMenu(void)
++{
++    u16 keys = Port_KeysHeld();
++    u16 pressed = keys & ~sMusicPrevKeys;
++    bool8 info = FALSE;
++
++    sMusicPrevKeys = keys;
++    if (gRealInputs.pressed & L_BUTTON) {
++        AdvanceMusic(-1, FALSE);
++        info = TRUE;
++    }
++    else if (gRealInputs.pressed & R_BUTTON) {
++        AdvanceMusic(1, FALSE);
++        info = TRUE;
++    }
++    else if (gRealInputs.pressed & SELECT_BUTTON) {
++        Port_MusicSetRepeat(!Port_MusicRepeat());
++        PlayMenuSoundEffect(MENU_SFX_TOGGLE);
++        info = TRUE;
++    }
++    else if (pressed & PORT_KEY_X) {
++        Port_MusicStop();
++        sMusicStatus = NULL;
++        info = TRUE;
++    }
++    else if (pressed & PORT_KEY_Y) {
++        Port_MusicSetPaused(!Port_MusicPaused());
++        info = TRUE;
++    }
++    else {
++        switch (GetKeyPress(&sMusicInput)) {
++            case INPUT_B_BUTTON:
++                PlayMenuSoundEffect(MENU_SFX_BACK);
++                LeaveMusicMenu();
++                return;
++            case INPUT_A_BUTTON:
++                PlayMusicTrack(GET_CURRENT_MENU_ENTRY(sMusicInput));
++                info = TRUE;
++                break;
++            default:
++                if (MenuCursorUpdate(&sMusicInput, TRUE))
++                    DrawMusicList();
++                break;
++        }
++    }
++    if (Port_MusicDone()) {
++        AdvanceMusic(1, TRUE);
++        info = TRUE;
++    }
++    if (Port_MusicPlaying() != sMusicListPlaying)
++        DrawMusicList();
++    if (info || MusicState() != sMusicDrawnState || (s32)(Port_MusicPosMs() / 1000) != sMusicDrawnSecond
++        || Port_MusicLoops() != sMusicDrawnLoops)
++        DrawMusicInfo();
++}
++
++// "pmd-blue.nds was not found.", then how to fix it
++static void HandleMusicMissing(void)
++{
++    s32 menuAction;
++
++    if (sub_80144A4(&menuAction) != 0)
++        return;
++    if (sUnknown_203B25C->state == OPTIONS_MENU_MUSIC_MISSING)
++        SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING2);
++    else
++        SetOptionsMenuState(OPTIONS_MENU_MAIN);
 +}
 +
 +static void HandleChangesSaved(void)

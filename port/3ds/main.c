@@ -36,7 +36,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 
 void AgbMain(void);
 
-const int Backend_Version12_UpdateRepoIfMissing = 12;
+const int Backend_Version13_UpdateRepoIfMissing = 13;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -697,6 +697,83 @@ void Backend_StoreSave(const uint8_t *data, uint32_t size)
     sSaveData = data;
     sSaveSize = size;
     sSaveDirty = 1;
+}
+
+// --- Data files (Music Options: pmd-blue.nds) ---------------------------------
+//
+// Read in 64 KiB pieces: SD card reads are much faster in big chunks.
+
+#define DATA_FILE_BUF (64 * 1024)
+typedef struct {
+    FILE *f;
+    uint32_t size;
+    uint8_t *buf;
+    uint32_t bufOff, bufLen;
+} DataFile;
+
+void *Backend_FileOpen(const char *name)
+{
+    char path[256];
+    snprintf(path, sizeof(path), DATA_DIR "/%s", name);
+    FILE *f = fopen(path, "rb");
+    if (f == NULL)
+        return NULL;
+    DataFile *d = calloc(1, sizeof(*d));
+    if (d == NULL || (d->buf = malloc(DATA_FILE_BUF)) == NULL || fseek(f, 0, SEEK_END) != 0) {
+        if (d) free(d->buf);
+        free(d);
+        fclose(f);
+        return NULL;
+    }
+    long end = ftell(f);
+    d->f = f;
+    d->size = end > 0 ? (uint32_t)end : 0;
+    Backend_Log("data: %s, %u bytes", path, (unsigned)d->size);
+    return d;
+}
+
+uint32_t Backend_FileSize(void *file)
+{
+    return file ? ((DataFile *)file)->size : 0;
+}
+
+bool Backend_FileRead(void *file, uint32_t offset, void *dest, uint32_t size)
+{
+    DataFile *d = file;
+    uint8_t *out = dest;
+    if (d == NULL || offset > d->size || size > d->size - offset)
+        return false;
+    while (size > 0) {
+        if (offset >= d->bufOff && offset < d->bufOff + d->bufLen) {
+            uint32_t n = d->bufOff + d->bufLen - offset;
+            if (n > size) n = size;
+            memcpy(out, d->buf + (offset - d->bufOff), n);
+            out += n; offset += n; size -= n;
+            continue;
+        }
+        if (size >= DATA_FILE_BUF) { // a big read: straight into place
+            if (fseek(d->f, (long)offset, SEEK_SET) != 0 || fread(out, 1, size, d->f) != size)
+                return false;
+            return true;
+        }
+        d->bufOff = offset;
+        d->bufLen = 0;
+        uint32_t n = d->size - offset < DATA_FILE_BUF ? d->size - offset : DATA_FILE_BUF;
+        if (fseek(d->f, (long)offset, SEEK_SET) != 0 || fread(d->buf, 1, n, d->f) != n)
+            return false;
+        d->bufLen = n;
+    }
+    return true;
+}
+
+void Backend_FileClose(void *file)
+{
+    DataFile *d = file;
+    if (d == NULL)
+        return;
+    fclose(d->f);
+    free(d->buf);
+    free(d);
 }
 
 bool Backend_LoadConfig(uint8_t *data, uint32_t size)

@@ -82,5 +82,14 @@ void Sound_EndFrame(void)
         out[i * 2] = (s16)(l * 64);
         out[i * 2 + 1] = (s16)(r * 64);
     }
+    {
+        // Music Options: a DS track playing, added (at twice the rate)
+        static s16 out2[2048 * 2];
+        int rate2, n = Port_MusicMix(out, spv, info->pcmFreq, out2, &rate2);
+        if (n > 0) {
+            Backend_QueueAudio(out2, n, rate2);
+            return;
+        }
+    }
     Backend_QueueAudio(out, spv, info->pcmFreq);
 }

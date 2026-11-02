@@ -109,7 +109,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version12_UpdateRepoIfMissing;
+extern const int Backend_Version13_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
@@ -122,6 +122,15 @@ void Backend_SetSaveSlot(int slot);
 // another save file from now on (port/core/save.c).
 void Port_ChangeSaveSlot(int slot);
 int Port_ConfigSaveSlot(void); // options.c
+// Music Options (music.c): Sound_EndFrame's frame, with the DS track playing
+// added; returns the samples in out2 (at *outRate), or 0 for none playing.
+int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *outRate);
+// A file of the port's data folder, read only (Music Options: pmd-blue.nds).
+// NULL if it isn't there. Reads are buffered by the backend.
+void *Backend_FileOpen(const char *name);
+uint32_t Backend_FileSize(void *file);
+bool Backend_FileRead(void *file, uint32_t offset, void *dest, uint32_t size);
+void Backend_FileClose(void *file);
 // The port's own settings (options.c), a few bytes kept apart from the save.
 bool Backend_LoadConfig(uint8_t *data, uint32_t size);
 void Backend_StoreConfig(const uint8_t *data, uint32_t size);

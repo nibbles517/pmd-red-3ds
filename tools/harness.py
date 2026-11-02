@@ -272,6 +272,28 @@ class Harness:
                 open(save, 'wb').write(bytes(uc.mem_read(buf, length)))
             elif value == 5:  # Change Current Save Data: FILE, FILE-2, FILE-3
                 self.save_slot = length
+            elif value == 6:  # data file open (Music Options)
+                name = bytes(uc.mem_read(buf, length)).decode('latin-1')
+                folder = self.args.data or (os.path.dirname(self.args.save) if self.args.save else '.')
+                path = os.path.join(folder, name)
+                self.regs[8] = 0
+                if os.path.isfile(path):
+                    self.files = getattr(self, 'files', {})
+                    h = len(self.files) + 1
+                    self.files[h] = open(path, 'rb').read()
+                    self.regs[8] = h
+            elif value == 7:
+                d = getattr(self, 'files', {}).get(self.regs[20])
+                self.regs[8] = len(d) if d is not None else 0
+            elif value == 8:
+                d = getattr(self, 'files', {}).get(self.regs[20])
+                off = self.regs[19]
+                ok = d is not None and off + length <= len(d)
+                if ok:
+                    uc.mem_write(buf, d[off:off + length])
+                self.regs[8] = 1 if ok else 0
+            elif value == 9:
+                getattr(self, 'files', {}).pop(self.regs[20], None)
             elif value == 2:
                 ok = 0
                 if save and os.path.exists(save):
@@ -412,6 +434,7 @@ def main():
     ap.add_argument('--press', action='append', default=[])
     ap.add_argument('--out', default='build/shots')
     ap.add_argument('--save')
+    ap.add_argument('--data', help='folder of the data files (pmd-blue.nds); default: the --save folder')
     ap.add_argument('--config', help='the port settings file (config.bin)')
     ap.add_argument('--wav')
     ap.add_argument('--save-state')

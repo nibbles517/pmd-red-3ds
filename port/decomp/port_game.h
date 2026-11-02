@@ -88,6 +88,30 @@ void Port_DrawWideMapArrays(const u16 (*bg2)[64], const u16 (*bg3)[64], s32 bgX,
 void Port_ShowWideMapArrays(s32 bgX, s32 bgY);
 void Port_WideMapFollow(struct DungeonPos *bgPos, const struct DungeonPos *mon, s32 maxX, s32 maxY);
 void Port_SaveConfig(void);
+// Music Options (port/core/music.c): the DS version's music, from pmd-blue.nds
+int Port_MusicOpen(void); // the number of tracks, or -1 (no file, or not usable)
+void Port_MusicClose(void);
+int Port_MusicCount(void);
+const char *Port_MusicLabel(int track);
+int Port_MusicIsStream(int track);
+const char *Port_MusicRomTitle(void);
+int Port_MusicPlay(int track); // 0 if it can't be played
+void Port_MusicStop(void);
+int Port_MusicPlaying(void); // the track playing, or -1
+void Port_MusicSetPaused(int paused);
+int Port_MusicPaused(void);
+void Port_MusicSetRepeat(int repeat);
+int Port_MusicRepeat(void);
+int Port_MusicDone(void);
+unsigned Port_MusicPosMs(void);
+int Port_MusicLoops(void);
+unsigned Port_MusicVoices(void);
+// The buttons held (port/core/port.h KEY_BIT_*, with X and Y); with
+// gPortRawXY set, X is X instead of A or B (DS and 3DS buttons).
+unsigned Port_KeysHeld(void);
+#define PORT_KEY_Y (1 << 10)
+#define PORT_KEY_X (1 << 11)
+extern u8 gPortRawXY;
 // Change Current Save Data: Save Data 1-3 (port/core/save.c)
 void Port_ChangeSaveSlot(int slot);
 
