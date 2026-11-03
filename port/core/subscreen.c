@@ -1976,6 +1976,12 @@ static int EnableBrightness(void)
 // The picture is drawn into sCanvas, and copied out (darkened during
 // transitions) only when it or the brightness changed.
 static u16 sCanvas[CANVAS_PIXELS];
+static bool8 sFadeByBackend;
+static int sShownBrightness = 0x100;
+
+void Port_SetSubScreenFadeByBackend(bool on) { sFadeByBackend = on; }
+int Port_SubScreenBrightness(void) { return sFadeByBackend ? sShownBrightness : 0x100; }
+
 static int sOutBrightness = -2; // what `out` holds: -2 unknown, else the brightness it was made at
 static bool8 sChanged;
 
@@ -2030,6 +2036,13 @@ bool Port_RenderSubScreen(u16 *out)
         brightness = (brightness < 0 ? 0x100 : brightness) * enabled >> 8;
     if (brightness < 0 || brightness > 0x100)
         brightness = 0x100;
+    if (sFadeByBackend) { // dimmed by the backend: drawn at full brightness (not at all while black)
+        sShownBrightness = brightness;
+        if (brightness == 0 && sOutBrightness == 0x100)
+            return TRUE; // (out keeps its picture, shown black)
+        if (brightness > 0)
+            brightness = 0x100;
+    }
     if (brightness == 0) {
         if (sOutBrightness != 0) {
             memset(out, 0, W * H * sizeof(u16));

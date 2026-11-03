@@ -33,13 +33,18 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
 {
     int e = MapEntry(c, tx, ty);
     uint16_t *dst = &c->px[ty * 8 * BGC_STRIDE + tx * 8];
+    uint8_t *dsti = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
+    const uint16_t *table = c->table;
     unsigned rows = 0; // 2 bits per row: 0 clear, 1 some, 2 opaque
 
     if (e < 0 || (c->wideMap && e == PORT_WIDE_BLACK)) {
         uint16_t v = e < 0 ? TRANSPARENT : 0; // (the wide map's black: opaque)
+        uint8_t n = e < 0 ? 0 : 0x10;
         for (int r = 0; r < 8; r++)
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < 8; i++) {
                 dst[r * BGC_STRIDE + i] = v;
+                dsti[r * BGC_STRIDE + i] = n;
+            }
         rows = e < 0 ? 0 : 0xAAAA;
     }
     else {
@@ -50,6 +55,7 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
         int hflip = (me & 0x400) != 0;
         for (int r = 0; r < 8; r++) {
             uint16_t *px = &dst[r * BGC_STRIDE];
+            uint8_t *pi = &dsti[r * BGC_STRIDE];
             int ty8 = (me & 0x800) ? 7 - r : r;
             unsigned st = 0;
             if (c->color256) {
@@ -59,31 +65,28 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
                     lo = *(const uint32_t *)&gPortVram[a];
                     hi = *(const uint32_t *)&gPortVram[a + 4];
                 }
-                if ((lo | hi) == 0) {
-                    for (int i = 0; i < 8; i++) px[i] = TRANSPARENT;
+                for (int i = 0; i < 8; i++) {
+                    unsigned n = (i < 4) ? (lo >> (8 * i)) & 0xFF : (hi >> (8 * (i - 4))) & 0xFF;
+                    int at = hflip ? 7 - i : i;
+                    pi[at] = (uint8_t)n;
+                    px[at] = table[n];
                 }
-                else {
-                    for (int i = 0; i < 8; i++) {
-                        unsigned idx = (i < 4) ? (lo >> (8 * i)) & 0xFF : (hi >> (8 * (i - 4))) & 0xFF;
-                        px[hflip ? 7 - i : i] = idx ? (PAL16[idx] & 0x7FFF) : TRANSPARENT;
-                    }
+                if (lo | hi)
                     st = (HAS_ZERO_BYTE(lo) || HAS_ZERO_BYTE(hi)) ? 1 : 2;
-                }
             }
             else {
                 unsigned a = c->charBase + tile * 32 + ty8 * 4;
                 uint32_t row = (a < 0x10000) ? *(const uint32_t *)&gPortVram[a] : 0;
-                if (row == 0) {
-                    for (int i = 0; i < 8; i++) px[i] = TRANSPARENT;
+                unsigned bank = (me >> 12) << 4;
+                for (int i = 0; i < 8; i++) {
+                    unsigned n = (row >> (4 * i)) & 0xF;
+                    unsigned v = n ? bank | n : 0;
+                    int at = hflip ? 7 - i : i;
+                    pi[at] = (uint8_t)v;
+                    px[at] = table[v];
                 }
-                else {
-                    const uint16_t *pal = &PAL16[(me >> 12) * 16];
-                    for (int i = 0; i < 8; i++) {
-                        unsigned idx = (row >> (4 * i)) & 0xF;
-                        px[hflip ? 7 - i : i] = idx ? (pal[idx] & 0x7FFF) : TRANSPARENT;
-                    }
+                if (row)
                     st = HAS_ZERO_NIBBLE(row) ? 1 : 2;
-                }
             }
             rows |= st << (r * 2);
         }
@@ -101,7 +104,35 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
     }
     c->entry[ty * 64 + tx] = (uint16_t)e;
     __sync_synchronize(); // all of it before the todo bit (the other core may read it)
+    __atomic_fetch_and(&c->recolor[ty][w], ~bit, __ATOMIC_RELAXED);
     __atomic_fetch_and(&c->todo[ty][w], ~bit, __ATOMIC_RELAXED);
+}
+
+void BgCache_Recolor(BgCache *c, int tx, int ty)
+{
+    uint16_t *dst = &c->px[ty * 8 * BGC_STRIDE + tx * 8];
+    const uint8_t *src = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
+    const uint16_t *table = c->table;
+    for (int r = 0; r < 8; r++, dst += BGC_STRIDE, src += BGC_STRIDE)
+        for (int i = 0; i < 8; i++)
+            dst[i] = table[src[i]];
+    __sync_synchronize(); // (as in Decode)
+    __atomic_fetch_and(&c->recolor[ty][tx >> 5], ~(1u << (tx & 31)), __ATOMIC_RELAXED);
+}
+
+// The colour of each colour number, from the palettes as they are now
+static void BuildTable(BgCache *c)
+{
+    for (int n = 0; n < 256; n++)
+        c->table[n] = PAL16[n] & 0x7FFF;
+    if (c->color256) {
+        c->table[0] = TRANSPARENT;
+    }
+    else {
+        for (int n = 0; n < 256; n += 16)
+            c->table[n] = TRANSPARENT;
+        c->table[0x10] = 0; // (the wide map's black)
+    }
 }
 
 // Tile data or palette of entry e changed since the last Prepare.
@@ -112,6 +143,8 @@ static inline int EntryChanged(const BgCache *c, unsigned e, unsigned palChanged
     if (c->edge && e == EDGE_TILE)
         e = 0;
     unsigned tile = e & 0x3FF;
+    if (c->indexOk)
+        palChanged = 0; // (only the tile data matters: the colours are looked up again)
     if (c->color256) {
         unsigned a = c->charBase + tile * 64;
         return palChanged != 0 || (a < 0x10000 && (sCharChanged[a >> 5] | sCharChanged[(a >> 5) + 1]));
@@ -185,7 +218,10 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
                 c->edge = want.edge;
                 c->tilesW = (want.size & 1) ? 64 : 32;
                 c->tilesH = (want.size & 2) ? 64 : 32;
+                c->indexOk = !(want.color256 && want.wideMap);
+                BuildTable(c);
                 memset(c->todo, 0xFF, sizeof(c->todo));
+                memset(c->recolor, 0, sizeof(c->recolor));
                 continue;
             }
         }
@@ -196,10 +232,20 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
         // not seen again later.) Unless some of its tile data or palettes
         // changed, only the entries need comparing, two at a time.
         int lastBlock = (int)((c->charBase + (c->color256 ? 0x10000 : 0x8000)) >> 5) - 1;
-        int slow = (c->color256 ? palChanged != 0 : (palChanged & 0xFFFF) != 0)
+        // The palettes changed: the colours of the tiles using them are made
+        // again from their numbers (4bpp: the tiles of the banks that changed;
+        // 256 colours: all), not decoded again.
+        int palette = palChanged != 0;
+        int byBank = palette && c->indexOk && !c->color256; // (per tile: its bank)
+        if (palette) {
+            BuildTable(c);
+            if (c->indexOk && c->color256)
+                memset(c->recolor, 0xFF, sizeof(c->recolor));
+        }
+        int slow = (palette && !c->indexOk)
                    || (sCharFirst <= lastBlock && sCharLast >= (int)(c->charBase >> 5));
         for (int ty = 0; ty < c->tilesH; ty++) {
-            uint32_t *todo = c->todo[ty];
+            uint32_t *todo = c->todo[ty], *recolor = c->recolor[ty];
             const uint16_t *entry = &c->entry[ty * 64];
             for (int tx = 0; tx < c->tilesW; tx += 2) {
                 int e0, e1;
@@ -213,12 +259,12 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
                     if (off >= 0x10000)
                         continue; // (outside VRAM: stays clear)
                     uint32_t two = *(const uint32_t *)&gPortVram[off];
-                    if (!slow && two == *(const uint32_t *)&entry[tx])
+                    if (!slow && !byBank && two == *(const uint32_t *)&entry[tx])
                         continue;
                     e0 = two & 0xFFFF;
                     e1 = two >> 16;
                 }
-                if (!slow && e0 == entry[tx] && e1 == entry[tx + 1])
+                if (!slow && !byBank && e0 == entry[tx] && e1 == entry[tx + 1])
                     continue;
                 uint32_t bit = 1u << (tx & 31);
                 uint32_t *w = &todo[tx >> 5];
@@ -226,6 +272,12 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
                     *w |= bit;
                 if (!(*w & (bit << 1)) && (e1 != entry[tx + 1] || (slow && EntryChanged(c, (unsigned)e1, palChanged))))
                     *w |= bit << 1;
+                if (byBank) {
+                    if (!(*w & bit) && ((palChanged >> (entry[tx] >> 12)) & 1))
+                        recolor[tx >> 5] |= bit;
+                    if (!(*w & (bit << 1)) && ((palChanged >> (entry[tx + 1] >> 12)) & 1))
+                        recolor[tx >> 5] |= bit << 1;
+                }
             }
         }
     }

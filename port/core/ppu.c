@@ -343,13 +343,22 @@ static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
     uint64_t any = CacheRowBits(c->any[y], c->tilesW, tx0) & cols;
     uint64_t full = CacheRowBits(c->full[y], c->tilesW, tx0) & cols;
 
-    const uint16_t *row = &c->px[y * BGC_STRIDE];
-    for (int sx = 0, cx = x; sx < sW;) {
-        int n = wPx - cx;
-        if (n > sW - sx) n = sW - sx;
-        memcpy(&out[sx], &row[cx], n * sizeof(uint16_t));
-        sx += n;
-        cx = 0;
+    {
+        uint64_t stale = CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols;
+        while (stale) { // (colours not made since the palettes last changed)
+            uint32_t lo32 = (uint32_t)stale;
+            int i = lo32 ? __builtin_ctz(lo32) : 32 + __builtin_ctz((uint32_t)(stale >> 32));
+            stale &= stale - 1;
+            BgCache_Recolor(c, (tx0 + i) & (c->tilesW - 1), ty);
+        }
+        const uint16_t *row = &c->px[y * BGC_STRIDE];
+        for (int sx = 0, cx = x; sx < sW;) {
+            int n = wPx - cx;
+            if (n > sW - sx) n = sW - sx;
+            memcpy(&out[sx], &row[cx], n * sizeof(uint16_t));
+            sx += n;
+            cx = 0;
+        }
     }
 
     uint32_t mask = 0, opaque = 0;

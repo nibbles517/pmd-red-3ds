@@ -88,6 +88,11 @@ void Port_SubScreenChangedArea(int *x0, int *y0, int *x1, int *y1); // what chan
 // The performance meter (debug.txt): what the second screen did since the
 // last call, e.g. "rows=2 spr=40 ..." (then counted again from 0).
 const char *Port_SubScreenStats(void);
+// The backend dims the second screen itself (the 3DS's GPU): the picture is
+// left at full brightness, and Port_SubScreenBrightness() (0-0x100) says how
+// bright to show it.
+void Port_SetSubScreenFadeByBackend(bool on);
+int Port_SubScreenBrightness(void);
 
 // Backend: implemented once per platform.
 // BGR555: 240x160 (GBA size), 256x192 (DS size) or 320x240 (Fit). frame is NULL

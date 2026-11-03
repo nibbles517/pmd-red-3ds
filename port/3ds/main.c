@@ -315,6 +315,7 @@ static void GpuInit(void)
     Mtx_OrthoTilt(&sProjTop, 0.0f, 400.0f, 240.0f, 0.0f, 1.0f, -1.0f, true);
     Mtx_OrthoTilt(&sProjBottom, 0.0f, 320.0f, 240.0f, 0.0f, 1.0f, -1.0f, true);
     sGpu = true;
+    Port_SetSubScreenFadeByBackend(true); // (its fades: the texture's colours times a grey, as the main screen's)
     Backend_Log("video: GPU");
 }
 
@@ -395,9 +396,10 @@ static void GpuWaitForSwap(gfxScreen_t screen)
 static void GpuDrawFrame(void)
 {
     unsigned level = (unsigned)(sFadeLevel * 255 / FADE_FRAMES);
+    unsigned subLevel = level * (unsigned)Port_SubScreenBrightness() >> 8; // (its own fades too)
     gfxScreen_t mainScreen = sBottom ? GFX_BOTTOM : GFX_TOP, subScreen = sBottom ? GFX_TOP : GFX_BOTTOM;
     bool drawMain = sGpuMain.shown && (sGpuMain.dirty || sGpuMain.level != level);
-    bool drawSub = sGpuSub.shown && sSubModeIsPicture() && (sGpuSub.dirty || sGpuSub.level != level);
+    bool drawSub = sGpuSub.shown && sSubModeIsPicture() && (sGpuSub.dirty || sGpuSub.level != subLevel);
     if (!drawMain && !drawSub)
         return;
     C3D_FrameBegin(0); // (waits for the last frame's copies)
@@ -413,15 +415,17 @@ static void GpuDrawFrame(void)
     C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
     C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
     if (drawMain) {
+        C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
         GpuDrawPicture(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, &sGpuMain);
         sGpuMain.dirty = false;
         sGpuMain.level = level;
         sGpuCopiedTo[mainScreen] = gfxGetFramebuffer(mainScreen, GFX_LEFT, NULL, NULL);
     }
     if (drawSub) {
+        C3D_TexEnvColor(env, 0xFF000000 | (subLevel << 16) | (subLevel << 8) | subLevel);
         GpuDrawPicture(sBottom ? sTargetTop : sTargetBottom, sBottom ? &sProjTop : &sProjBottom, &sGpuSub);
         sGpuSub.dirty = false;
-        sGpuSub.level = level;
+        sGpuSub.level = subLevel;
         sGpuCopiedTo[subScreen] = gfxGetFramebuffer(subScreen, GFX_LEFT, NULL, NULL);
     }
     C3D_FrameEnd(GX_CMDLIST_FLUSH); // (only the command list: the pictures were flushed)
@@ -543,7 +547,7 @@ static void PresentSub(void)
     static int sSubFade = -1, sSubShownW;
     static int sPend[4]; // the area the other buffer still lacks (x0, y0, x1, y1)
     int area[4] = { 0, 0, 0, 0 };
-    int full = sFadeLevel != sSubFade;
+    int full = !sGpu && sFadeLevel != sSubFade; // (the GPU fades it itself)
     sSubFade = sFadeLevel;
     if (sSubMode != SUB_PICTURE || subW != sSubShownW) { // (a new size: the old border cleared)
         sSubShownW = subW;
