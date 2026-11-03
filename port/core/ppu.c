@@ -91,6 +91,11 @@ typedef struct {
 } ObjLine;
 
 static uint16_t sBg[4][W];
+// Where each layer's line is read from: sBg, or (a text background out of
+// its cache, unwrapped) straight from the cache, not copied (RenderCachedLine).
+static const uint16_t *sBgSrc[4];
+static const uint16_t *sLastSrc; // ... as the renderer left it
+static int sWantPtr;             // the caller takes the line from sLastSrc (and does not change it)
 static int sBgAny[4];               // layer has an opaque pixel on this line
 // Which 8-pixel groups of the line (bit g: x 8g..8g+7) may hold an opaque
 // pixel, per layer: compositing skips the others. Set by the renderers in
@@ -373,6 +378,10 @@ static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
             BgCache_Recolor(c, (tx0 + i) & (c->tilesW - 1), ty);
         }
         const uint16_t *row = &c->px[y * BGC_STRIDE];
+        if (sWantPtr && x + sW <= wPx) { // (one piece: read where it is)
+            sLastSrc = &row[x];
+            goto copied;
+        }
         for (int sx = 0, cx = x; sx < sW;) {
             int n = wPx - cx;
             if (n > sW - sx) n = sW - sx;
@@ -381,6 +390,7 @@ static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
             cx = 0;
         }
     }
+copied:;
 
     uint32_t mask = 0, opaque = 0;
     const int gs = sGs, groups = (sW + (1 << gs) - 1) >> gs;
@@ -542,9 +552,12 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
     sLastMask = ALL_GROUPS; sLastFull = 0;
     if (sWide && gPortWideBg[bg].map)
         return RenderWideBg(bg, line, out); // (sets sLastMask)
-    if (sWide && gPortTileBg[bg] && R16(0x10 + bg * 4) == 0 && R16(0x12 + bg * 4) == 0)
+    if (sWide && gPortTileBg[bg] && R16(0x10 + bg * 4) == 0 && R16(0x12 + bg * 4) == 0) {
+        sWantPtr = 0; // (these change the line after: in sBg)
         return RenderTiledBg(bg, line, out);
+    }
     if (sWide && bg < 2) {
+        sWantPtr = 0;
         // BG0/BG1 hold the text windows: in the wide view they reach the
         // screen's bottom (the game moves them down, text_1.c), but stay
         // within the GBA screen's width; what the maps hold to the sides is
@@ -1063,7 +1076,7 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
         for (int b = 3; b >= 0; b--) {
             if (!bgOn[b] || bgPrio[b] != p || !sBgAny[b])
                 continue;
-            const uint16_t *src = sBg[b];
+            const uint16_t *src = sBgSrc[b];
             uint8_t bit = (uint8_t)(1u << b);
             uint32_t inAll = ALL_GROUPS, inSome = ALL_GROUPS; // groups shown in all pixels / some
             if (!(wmAll & bit)) {
@@ -1240,19 +1253,37 @@ void Ppu_RenderLine(int line, uint16_t *dst)
     switch (mode) {
     case 0:
         for (int b = 0; b < 4; b++)
-            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); sBgMask[b] = sBgAny[b] ? sLastMask : 0; sBgFull[b] = sBgAny[b] ? sLastFull : 0; }
+            if (dispcnt & (0x100 << b)) {
+                bgOn[b] = 1;
+                sLastSrc = sBg[b];
+                sWantPtr = 1;
+                sBgAny[b] = RenderTextBg(b, line, sBg[b]);
+                sWantPtr = 0;
+                sBgSrc[b] = sLastSrc;
+                sBgMask[b] = sBgAny[b] ? sLastMask : 0;
+                sBgFull[b] = sBgAny[b] ? sLastFull : 0;
+            }
         break;
     case 1:
         for (int b = 0; b < 2; b++)
-            if (dispcnt & (0x100 << b)) { bgOn[b] = 1; sBgAny[b] = RenderTextBg(b, line, sBg[b]); sBgMask[b] = sBgAny[b] ? sLastMask : 0; sBgFull[b] = sBgAny[b] ? sLastFull : 0; }
-        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderAffineBg(2, sBg[2]); }
+            if (dispcnt & (0x100 << b)) {
+                bgOn[b] = 1;
+                sLastSrc = sBg[b];
+                sWantPtr = 1;
+                sBgAny[b] = RenderTextBg(b, line, sBg[b]);
+                sWantPtr = 0;
+                sBgSrc[b] = sLastSrc;
+                sBgMask[b] = sBgAny[b] ? sLastMask : 0;
+                sBgFull[b] = sBgAny[b] ? sLastFull : 0;
+            }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderAffineBg(2, sBg[2]); sBgSrc[2] = sBg[2]; }
         break;
     case 2:
-        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderAffineBg(2, sBg[2]); }
-        if (dispcnt & 0x800) { bgOn[3] = 1; sBgAny[3] = 1; sBgMask[3] = ALL_GROUPS; sBgFull[3] = 0; RenderAffineBg(3, sBg[3]); }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderAffineBg(2, sBg[2]); sBgSrc[2] = sBg[2]; }
+        if (dispcnt & 0x800) { bgOn[3] = 1; sBgAny[3] = 1; sBgMask[3] = ALL_GROUPS; sBgFull[3] = 0; RenderAffineBg(3, sBg[3]); sBgSrc[3] = sBg[3]; }
         break;
     case 3:
-        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderMode3(line, sBg[2]); }
+        if (dispcnt & 0x400) { bgOn[2] = 1; sBgAny[2] = 1; sBgMask[2] = ALL_GROUPS; sBgFull[2] = 0; RenderMode3(line, sBg[2]); sBgSrc[2] = sBg[2]; }
         break;
     default:
         break; // modes 4/5 are not used by pmd-red

@@ -37,8 +37,10 @@ enum {
 // frames for renderer regression tests). NULL in normal builds.
 void (*gPortLineHook)(int line);
 
-static uint16_t sFrame[SCREEN_W_MAX * SCREEN_H_MAX];
-static uint16_t sShown[SCREEN_W_MAX * SCREEN_H_MAX];
+// Two pictures: the one being drawn, and the last one finished (shown);
+// they change places when a frame is drawn (rather than copying it).
+static uint16_t sPictures[2][SCREEN_W_MAX * SCREEN_H_MAX];
+static uint16_t *sFrame = sPictures[0], *sShown = sPictures[1];
 static uint16_t sLine[SCREEN_W_MAX];
 enum { VIEW_GBA, VIEW_FRAMED, VIEW_WIDE };
 static int sViewMode = -1; // view of the last frame
@@ -311,7 +313,7 @@ static void RunFrame(void)
         sViewMode = mode;
         sViewW = SCREEN_W;
         Ppu_SetView(wide);
-        memset(sFrame, 0, sizeof(sFrame)); // the framed view's border is black
+        memset(sPictures, 0, sizeof(sPictures)); // the framed view's border is black (both pictures)
     }
     int lines = wide ? SCREEN_H : GBA_H;
     if (!skip)
@@ -355,7 +357,11 @@ static void RunFrame(void)
     sLatchValid = 1;
 
     if (!skip)
-        memcpy(sShown, sFrame, (mode == VIEW_GBA ? GBA_W * GBA_H : SCREEN_W * SCREEN_H) * sizeof(uint16_t));
+    {
+        uint16_t *t = sShown; // (the new picture is the shown one; the old one is drawn over next)
+        sShown = sFrame;
+        sFrame = t;
+    }
     if (mode == VIEW_GBA)
         Backend_Present(skip ? NULL : sShown, GBA_W, GBA_H);
     else
