@@ -4803,6 +4803,27 @@ index 03531690..0d6913a0 100644
 +
      sub_80073E0(sUnknown_203B260->unk44);
  }
+diff --git a/src/palette_fade_util.c b/src/palette_fade_util.c
+index a1a9bcb2..04ddcdde 100644
+--- a/src/palette_fade_util.c
++++ b/src/palette_fade_util.c
+@@ -176,6 +176,16 @@ void SetPaletteFade_Modulate(u16 idx, s32 fadeAmount, RGB_Array param_3)
+     sUpdatePaletteFade = TRUE;
+ }
+ 
++#ifdef PLATFORM_3DS
++// Port: a colour as the game set it, before the fades (the second screen's
++// item sprites, port/core/subscreen.c)
++u16 Port_PaletteColor(u16 index)
++{
++    RGB_Array *rgb = &sRGBPaletteBuffer[index & 0x1FF].asArr;
++    return RGB_TO_GBA2(rgb->c[RGB_R], rgb->c[RGB_G], rgb->c[RGB_B]);
++}
++#endif
++
+ void sub_8003810(u16 idx, RGB_Array param_2)
+ {
+     PaletteFadeEntry *a = &sPaletteFadeTable[idx / 16];
 diff --git a/src/palette_util.c b/src/palette_util.c
 index 926d28d1..684b3d20 100644
 --- a/src/palette_util.c

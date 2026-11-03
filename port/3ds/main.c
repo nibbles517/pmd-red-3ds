@@ -319,9 +319,9 @@ static void GpuInit(void)
 }
 
 // GBA BGR555 to RGB565, two pixels at a time (as ToRgb565)
-static void GpuConvert(uint16_t *dst, const uint16_t *src, int w, int h)
+static void GpuConvert(uint16_t *dst, const uint16_t *src, int w, int y0, int y1)
 {
-    for (int y = 0; y < h; y++) {
+    for (int y = y0; y < y1; y++) {
         const uint32_t *s = (const uint32_t *)(src + y * w);
         uint32_t *d = (uint32_t *)(dst + y * TEX_W);
         for (int x = 0; x < w / 2; x++) {
@@ -332,10 +332,15 @@ static void GpuConvert(uint16_t *dst, const uint16_t *src, int w, int h)
 }
 
 // A picture into its texture, to be shown at (x, y), w x h on its screen.
-static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int frameH, int x, int y, int w, int h)
+// Only its rows y0 .. y1 - 1 changed since the last time (the rest of the
+// converted picture is kept); all of it: 0, frameH.
+static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int frameH, int x, int y, int w, int h,
+                      int y0, int y1)
 {
-    GpuConvert(p->stage, frame, frameW, frameH);
-    GSPGPU_FlushDataCache(p->stage, TEX_W * frameH * 2);
+    if (frameW != p->srcW || frameH != p->srcH)
+        y0 = 0, y1 = frameH; // (a new size: none of it kept)
+    GpuConvert(p->stage, frame, frameW, y0, y1);
+    GSPGPU_FlushDataCache(p->stage + y0 * TEX_W, TEX_W * (y1 - y0) * 2);
     C3D_SyncDisplayTransfer((u32 *)p->stage, GX_BUFFER_DIM(TEX_W, TEX_H), (u32 *)p->tex.data,
                             GX_BUFFER_DIM(TEX_W, TEX_H), TEX_TRANSFER_FLAGS);
     p->shown = true;
@@ -449,7 +454,7 @@ static void GpuPresentMain(const uint16_t *frame, int frameW, int frameH)
 {
     int x, y, w, h;
     ScaleRect(frameW, frameH, sBottom ? 320 : 400, Port_ScreenScale(0), &x, &y, &w, &h);
-    GpuUpload(&sGpuMain, frame, frameW, frameH, x, y, w, h);
+    GpuUpload(&sGpuMain, frame, frameW, frameH, x, y, w, h, 0, frameH);
 }
 
 static void PresentMain(const uint16_t *frame, int frameW, int frameH)
@@ -571,11 +576,11 @@ static void PresentSub(void)
         }
     }
     memcpy(sPend, area, sizeof(sPend));
-    if (sGpu) { // the whole picture again, when anything in it changed
+    if (sGpu) { // the rows that changed, when anything did
         if (area[0] < area[2] && area[1] < area[3]) {
             int x, y, w, h;
             ScaleRect(subW, subH, width, Port_ScreenScale(1), &x, &y, &w, &h);
-            GpuUpload(&sGpuSub, sSubFrame, subW, subH, x, y, w, h);
+            GpuUpload(&sGpuSub, sSubFrame, subW, subH, x, y, w, h, area[1], area[3]); // (only the rows that changed)
         } else if (sGpuSub.shown) { // (the setting may have changed)
             int x, y, w, h;
             ScaleRect(subW, subH, width, Port_ScreenScale(1), &x, &y, &w, &h);

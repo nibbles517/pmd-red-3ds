@@ -70,10 +70,24 @@ static inline u16 Rgb(int r, int g, int b)
     return (u16)((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10));
 }
 
+// Drawing stays inside the clip box (normally the whole picture); with
+// sTrackBox, the box around what is drawn grows (the team panel's sprites).
+static int sClipX0, sClipY0, sClipX1 = 0x7FFF, sClipY1 = 0x7FFF;
+static bool8 sTrackBox;
+static int sBoxX0, sBoxY0, sBoxX1, sBoxY1;
+
 static inline void Plot(int x, int y, u16 c)
 {
-    if ((unsigned)x < W && (unsigned)y < H)
-        sOut[y * W + x] = c;
+    if ((unsigned)x < W && (unsigned)y < H) {
+        if (sTrackBox) {
+            if (x < sBoxX0) sBoxX0 = x;
+            if (y < sBoxY0) sBoxY0 = y;
+            if (x >= sBoxX1) sBoxX1 = x + 1;
+            if (y >= sBoxY1) sBoxY1 = y + 1;
+        }
+        if (x >= sClipX0 && x < sClipX1 && y >= sClipY0 && y < sClipY1)
+            sOut[y * W + x] = c;
+    }
 }
 
 static void Fill(int x, int y, int w, int h, u16 c)
@@ -82,6 +96,19 @@ static void Fill(int x, int y, int w, int h, u16 c)
         for (int i = x; i < x + w; i++)
             Plot(i, j, c);
 }
+
+u16 Port_PaletteColor(u16 index); // palette_fade_util.c: as set, before fades
+
+// The colours of OBJ palette pal as the game set them (the main screen's
+// fades and flashes do not reach the second screen).
+static void ObjPalette(int pal, u16 *out)
+{
+    for (int i = 0; i < 16; i++)
+        out[i] = Port_PaletteColor(256 + (pal & 15) * 16 + i) & 0x7FFF;
+}
+
+static void Dirty(int x, int y, int w, int h);
+static void Restore(const u16 *from, int x, int y, int w, int h);
 
 static int Lerp(int a, int b, int t, int n) { return a + (b - a) * t / n; }
 
@@ -617,7 +644,8 @@ static void DrawNumberRight(int xRight, int y, int v)
 static void DrawItemSprite(int x0, int y0, int icon, int pal)
 {
     const u8 *tiles = &gPortVram[0x10000 + (0x1A0 + icon * 4) * 32];
-    const u16 *colors = &sPltt[256 + (pal & 15) * 16];
+    u16 colors[16];
+    ObjPalette(pal, colors);
     for (int y = 0; y < 16; y++) {
         for (int x = 0; x < 16; x++) {
             int t = (y >> 3) * 2 + (x >> 3); // 1D: top-left, top-right, bottom-left, bottom-right
@@ -740,10 +768,10 @@ static void StartDungeonLayout(int layout, DrawKey *k)
     KeyAdd(k, &sLayoutDrawn, sizeof(sLayoutDrawn));
 }
 
-// The rows' text (all the panels show of them, but for the sprites).
-static void AddRowsText(DrawKey *k)
+// A row's text (all the panels show of it, but for the sprite).
+static void AddRowText(DrawKey *k, int i)
 {
-    for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
+    {
         const PanelRow *row = &sRows[i];
         KeyAdd(k, &row->used, sizeof(row->used));
         KeyAdd(k, &row->leader, sizeof(row->leader));
@@ -755,41 +783,82 @@ static void AddRowsText(DrawKey *k)
         KeyAdd(k, &row->maxBelly, sizeof(row->maxBelly));
         KeyAdd(k, &row->item, sizeof(row->item));
         KeyAdd(k, &row->itemIcon, sizeof(row->itemIcon));
-        if (row->itemIcon >= 0) // (its colours: drawn again when they change)
-            KeyAdd(k, &sPltt[256 + (row->itemPal & 15) * 16], 16 * sizeof(u16));
+        if (row->itemIcon >= 0) { // (its colours: drawn again when they change)
+            u16 pal[16];
+            ObjPalette(row->itemPal, pal);
+            KeyAdd(k, pal, sizeof(pal));
+        }
         KeyAdd(k, &row->tactic, sizeof(row->tactic));
     }
 }
 
-// Blue: the boxes and text are drawn once into sTeamBg, the sprites over
-// them when a frame changes.
+// The rows' text
+static void AddRowsText(DrawKey *k)
+{
+    for (int i = 0; i < MAX_TEAM_MEMBERS; i++)
+        AddRowText(k, i);
+}
+
+// Blue: each row's boxes and text are drawn into sTeamBg when they change
+// (the boxes themselves made once per size), and the sprites over them when
+// a frame changes. Only the rows that changed are drawn again: a sprite can
+// reach over the next row, so the area it covered (before and now) is put
+// back from sTeamBg and every sprite there drawn again, clipped to it.
 static void DrawRowText(int y0, const PanelRow *row);
 
 static bool8 DrawTeamPanel(void)
 {
     static u16 sTeamBg[CANVAS_PIXELS];
-    static DrawKey sLastBg, sLast, k;
+    static u16 sRowUsed[SUBSCREEN_W_MAX * (SUBSCREEN_H_MAX / 4)], sRowEmpty[SUBSCREEN_W_MAX * (SUBSCREEN_H_MAX / 4)];
+    static int sRowsW = -1;
+    static DrawKey sLastAll, sLastText[MAX_TEAM_MEMBERS], sLastSprite[MAX_TEAM_MEMBERS], k;
+    static int sSprBox[MAX_TEAM_MEMBERS][4]; // what each row's sprite covered (x0, y0, x1, y1)
     u16 *canvas = sOut;
+    bool8 all = FALSE, drawn = FALSE;
+    int area[4] = { W, H, 0, 0 }; // drawn again this time
 
     StartDungeonLayout(PORT_SUB_LAYOUT_BLUE, &k);
-    AddRowsText(&k);
-    if (KeyChanged(&sLastBg, &k)) {
-        sOut = sTeamBg;
-        Fill(0, 0, W, H, Rgb(74, 74, 116));
+    KeyAdd(&k, &W, sizeof(W));
+    if (KeyChanged(&sLastAll, &k)) { // all of it again
+        all = TRUE;
         for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
-            if (sRows[i].used) {
-                DrawSpriteBox(i * ROW_H, FALSE);
-                DrawInfoPanel(i * ROW_H);
-                DrawRowText(i * ROW_H, &sRows[i]);
-            } else {
-                DrawSpriteBox(i * ROW_H, TRUE);
-            }
+            sLastText[i].size = -1;
+            sLastSprite[i].size = -1;
+            sSprBox[i][0] = sSprBox[i][1] = sSprBox[i][2] = sSprBox[i][3] = 0;
         }
-        sOut = canvas;
-        sLast.size = -1; // the sprites go on again
     }
+    if (sRowsW != W) { // the empty row, and the boxes of a used one
+        sRowsW = W;
+        sOut = sRowEmpty;
+        Fill(0, 0, W, ROW_H, Rgb(74, 74, 116));
+        DrawSpriteBox(0, TRUE);
+        memcpy(sRowUsed, sRowEmpty, W * ROW_H * sizeof(u16));
+        sOut = sRowUsed;
+        DrawSpriteBox(0, FALSE);
+        DrawInfoPanel(0);
+        sOut = canvas;
+    }
+
     for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
         const PanelRow *row = &sRows[i];
+        int y0 = i * ROW_H;
+        k.size = 0;
+        AddRowText(&k, i);
+        if (KeyChanged(&sLastText[i], &k)) {
+            memcpy(&sTeamBg[y0 * W], row->used ? sRowUsed : sRowEmpty, W * ROW_H * sizeof(u16));
+            if (row->used) {
+                sOut = sTeamBg;
+                DrawRowText(y0, row);
+                sOut = canvas;
+            }
+            sLastSprite[i].size = -1; // (and the sprite over it)
+            if (area[0] > 0) area[0] = 0;
+            if (area[1] > y0) area[1] = y0;
+            area[2] = W;
+            if (area[3] < y0 + ROW_H) area[3] = y0 + ROW_H;
+        }
+        k.size = 0;
+        KeyAdd(&k, &row->used, sizeof(row->used));
         KeyAdd(&k, &row->sprite, sizeof(row->sprite));
         KeyAdd(&k, &row->anim, sizeof(row->anim));
         KeyAdd(&k, &row->palNum, sizeof(row->palNum));
@@ -801,16 +870,57 @@ static bool8 DrawTeamPanel(void)
             KeyAdd(&k, &row->symbolCount, sizeof(row->symbolCount));
             KeyAdd(&k, row->symbols, sizeof(row->symbols[0]) * row->symbolCount);
         }
-    }
-    if (!KeyChanged(&sLast, &k))
-        return FALSE;
-    memcpy(canvas, sTeamBg, W * H * sizeof(u16));
-    for (int i = 0; i < MAX_TEAM_MEMBERS; i++)
-        if (sRows[i].used) {
-            DrawRowSprite(&sRows[i], 23, i * ROW_H + 41 + ROW_EXTRA); // feet on the middle of the floor
-            if (FIT)
-                DrawRowSymbols(&sRows[i], i * ROW_H);
+        if (KeyChanged(&sLastSprite[i], &k)) {
+            int *b = sSprBox[i];
+            if (b[0] < b[2]) { // where it was
+                if (area[0] > b[0]) area[0] = b[0];
+                if (area[1] > b[1]) area[1] = b[1];
+                if (area[2] < b[2]) area[2] = b[2];
+                if (area[3] < b[3]) area[3] = b[3];
+            }
+            // where it is now (drawn once to find out, off the picture)
+            sTrackBox = TRUE;
+            sBoxX0 = W; sBoxY0 = H; sBoxX1 = 0; sBoxY1 = 0;
+            sClipX0 = sClipY0 = sClipX1 = sClipY1 = 0;
+            if (row->used) {
+                DrawRowSprite(row, 23, y0 + 41 + ROW_EXTRA); // feet on the middle of the floor
+                if (FIT)
+                    DrawRowSymbols(row, y0);
+            }
+            sTrackBox = FALSE;
+            if (sBoxX0 < sBoxX1) {
+                b[0] = sBoxX0; b[1] = sBoxY0; b[2] = sBoxX1; b[3] = sBoxY1;
+                if (area[0] > b[0]) area[0] = b[0];
+                if (area[1] > b[1]) area[1] = b[1];
+                if (area[2] < b[2]) area[2] = b[2];
+                if (area[3] < b[3]) area[3] = b[3];
+            } else {
+                b[0] = b[1] = b[2] = b[3] = 0;
+            }
         }
+    }
+    if (all) {
+        area[0] = 0; area[1] = 0; area[2] = W; area[3] = H;
+    }
+    sClipX0 = 0; sClipY0 = 0; sClipX1 = 0x7FFF; sClipY1 = 0x7FFF;
+    if (area[0] >= area[2] || area[1] >= area[3])
+        return FALSE;
+
+    // That area again: the boxes and text, then the sprites over it, in order
+    Restore(sTeamBg, area[0], area[1], area[2] - area[0], area[3] - area[1]);
+    sClipX0 = area[0]; sClipY0 = area[1]; sClipX1 = area[2]; sClipY1 = area[3];
+    for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
+        const int *b = sSprBox[i];
+        if (!sRows[i].used || b[0] >= b[2] || b[2] <= area[0] || b[0] >= area[2] || b[3] <= area[1] || b[1] >= area[3])
+            continue;
+        DrawRowSprite(&sRows[i], 23, i * ROW_H + 41 + ROW_EXTRA);
+        if (FIT)
+            DrawRowSymbols(&sRows[i], i * ROW_H);
+        drawn = TRUE;
+    }
+    sClipX0 = 0; sClipY0 = 0; sClipX1 = 0x7FFF; sClipY1 = 0x7FFF;
+    Dirty(area[0], area[1], area[2] - area[0], area[3] - area[1]);
+    (void)drawn;
     return TRUE;
 }
 
@@ -1582,6 +1692,8 @@ static bool8 DrawWorldMap(void)
     static s32 sCachedPlace = -1, sCachedArea = -1, sCachedW = -1;
     static int sLoadedSet = -1, sDotX, sDotY;
     static bool8 sSpritesLoaded;
+    static u32 sWater[CANVAS_PIXELS]; // the water's pixels (their colours cycle)
+    static int sWaterCount, sWaterBox[4], sDotBox[4];
     s32 place = GetScriptVarValue(NULL, GROUND_PLACE);
     s32 dungeon = PlaceDungeon(place);
     s32 area = FRIEND_AREA_NONE;
@@ -1633,25 +1745,49 @@ static bool8 DrawWorldMap(void)
             FormatString(GetGroundPlaceName(place), name, name + sizeof(name) - 1, 0);
         DrawNameBox(name);
         // the water's pixels that the name box didn't cover
-        for (int i = 0; i < W * H; i++)
+        sWaterCount = 0;
+        sWaterBox[0] = W; sWaterBox[1] = H; sWaterBox[2] = 0; sWaterBox[3] = 0;
+        for (int i = 0; i < W * H; i++) {
             if (sMapIdx[i] < MAP_ANIM_FIRST || sMapIdx[i] >= MAP_ANIM_FIRST + MAP_ANIM_COLORS
-                || sCache[i] != MapPixel(i))
+                || sCache[i] != MapPixel(i)) {
                 sMapIdx[i] = 0;
+                continue;
+            }
+            int x = i % W, y = i / W;
+            sWater[sWaterCount++] = i;
+            if (x < sWaterBox[0]) sWaterBox[0] = x;
+            if (y < sWaterBox[1]) sWaterBox[1] = y;
+            if (x >= sWaterBox[2]) sWaterBox[2] = x + 1;
+            if (y >= sWaterBox[3]) sWaterBox[3] = y + 1;
+        }
         sCachedPlace = place;
         sCachedArea = area;
         sCachedW = W;
         sOut = sOutFrame;
         sWorldMapChanged = TRUE;
     }
-    if (AnimateMapColors()) { // the water
-        for (int i = 0; i < W * H; i++)
-            if (sMapIdx[i] != 0)
-                sCache[i] = MapPixel(i);
-        sWorldMapChanged = TRUE;
-    }
-    if (sWorldMapChanged) { // (the marker does not move)
+    if (sWorldMapChanged) { // all of it (the marker does not move)
+        AnimateMapColors();
+        for (int n = 0; n < sWaterCount; n++)
+            sCache[sWater[n]] = MapPixel(sWater[n]);
         memcpy(sOutFrame, sCache, W * H * sizeof(u16));
+        sTrackBox = TRUE;
+        sBoxX0 = W; sBoxY0 = H; sBoxX1 = 0; sBoxY1 = 0;
         DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
+        sTrackBox = FALSE;
+        sDotBox[0] = sBoxX0; sDotBox[1] = sBoxY0; sDotBox[2] = sBoxX1; sDotBox[3] = sBoxY1;
+        DirtyAll();
+    }
+    else if (AnimateMapColors() && sWaterCount > 0) { // only the water's pixels, and the marker over them
+        for (int n = 0; n < sWaterCount; n++) {
+            u32 i = sWater[n];
+            sOutFrame[i] = sCache[i] = MapPixel(i);
+        }
+        DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
+        Dirty(sWaterBox[0], sWaterBox[1], sWaterBox[2] - sWaterBox[0], sWaterBox[3] - sWaterBox[1]);
+        if (sDotBox[0] < sDotBox[2])
+            Dirty(sDotBox[0], sDotBox[1], sDotBox[2] - sDotBox[0], sDotBox[3] - sDotBox[1]);
+        sWorldMapChanged = TRUE;
     }
     return TRUE;
 }
@@ -1782,10 +1918,19 @@ static int TransitionBrightness(void)
 
 static void Darken(u16 *out, const u16 *in, int brightness)
 {
+    // Tables: red and green together (the low 10 bits), and blue
+    static u16 sRg[1024], sB[32];
+    static int sBuilt = -1;
+    if (sBuilt != brightness) {
+        sBuilt = brightness;
+        for (int v = 0; v < 32; v++)
+            sB[v] = (u16)((v * brightness >> 8) << 10);
+        for (int c = 0; c < 1024; c++)
+            sRg[c] = (u16)(((c & 31) * brightness >> 8) | ((((c >> 5) & 31) * brightness >> 8) << 5));
+    }
     for (int i = 0; i < W * H; i++) {
         u16 c = in[i];
-        int r = (c & 31) * brightness >> 8, g = ((c >> 5) & 31) * brightness >> 8, b = ((c >> 10) & 31) * brightness >> 8;
-        out[i] = (u16)(r | (g << 5) | (b << 10));
+        out[i] = sRg[c & 0x3FF] | sB[(c >> 10) & 31];
     }
 }
 
@@ -1877,8 +2022,8 @@ bool Port_RenderSubScreen(u16 *out)
             drawn = DrawMessageLog();
         else
             drawn = DrawTeamPanel();
-        if (drawn && gPortConfig.layoutSubScreen != PORT_SUB_LAYOUT_MT)
-            DirtyAll();
+        if (drawn && gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_LOG)
+            DirtyAll(); // (M+T and Blue mark what they drew)
         sLayoutDrawn = gPortConfig.layoutSubScreen;
     } else {
         if (!DrawWorldMap()) {
@@ -1886,9 +2031,7 @@ bool Port_RenderSubScreen(u16 *out)
             sLayoutDrawn = -1;
             return FALSE;
         }
-        drawn = sWorldMapChanged;
-        if (drawn)
-            DirtyAll();
+        drawn = sWorldMapChanged; // (it marks what it drew)
     }
     if (!drawn && brightness == sOutBrightness)
         return TRUE; // out still holds this picture
