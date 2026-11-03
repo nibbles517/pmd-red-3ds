@@ -85,6 +85,9 @@ bool Port_RenderSubScreen(uint16_t *out);
 void Port_SubScreenSize(int *w, int *h);
 bool Port_SubScreenChanged(void);
 void Port_SubScreenChangedArea(int *x0, int *y0, int *x1, int *y1); // what changed (x1/y1 exclusive)
+// The performance meter (debug.txt): what the second screen did since the
+// last call, e.g. "rows=2 spr=40 ..." (then counted again from 0).
+const char *Port_SubScreenStats(void);
 
 // Backend: implemented once per platform.
 // BGR555: 240x160 (GBA size), 256x192 (DS size) or 320x240 (Fit). frame is NULL

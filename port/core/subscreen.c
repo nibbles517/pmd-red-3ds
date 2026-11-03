@@ -10,6 +10,7 @@
 // never calls anything that could change it (no RNG, no allocation).
 // Compiled with pmd-red's include path.
 
+#include <stdio.h>
 #include "global.h"
 #include "constants/direction.h"
 #include "constants/dungeon.h"
@@ -61,6 +62,8 @@ static int sSubW = 256, sSubH = 192;
 #define ROW_H (H / 4)  // Blue: a member's row, 48 lines (60 in Fit)
 #define ROW_EXTRA (ROW_H - 48)
 
+static u16 *sDirect;    // the caller's picture when it holds the canvas as it is (else NULL):
+static bool8 sDirectDone; // ... a layout that drew into it too sets this (nothing to copy out)
 static u16 *sOut;       // where drawing goes
 static u16 *sOutFrame;  // the caller's buffer
 static const u16 *const sPltt = (const u16 *)gPortPltt; // BG palettes, then OBJ
@@ -106,6 +109,11 @@ static void ObjPalette(int pal, u16 *out)
     for (int i = 0; i < 16; i++)
         out[i] = Port_PaletteColor(256 + (pal & 15) * 16 + i) & 0x7FFF;
 }
+
+// For the performance meter (Port_SubScreenStats)
+static struct {
+    int all, rows, sprites, water, map, darken, copied; // copied: pixels copied out
+} sStats;
 
 static void Dirty(int x, int y, int w, int h);
 static void Restore(const u16 *from, int x, int y, int w, int h);
@@ -821,6 +829,7 @@ static bool8 DrawTeamPanel(void)
     KeyAdd(&k, &W, sizeof(W));
     if (KeyChanged(&sLastAll, &k)) { // all of it again
         all = TRUE;
+        sStats.all++;
         for (int i = 0; i < MAX_TEAM_MEMBERS; i++) {
             sLastText[i].size = -1;
             sLastSprite[i].size = -1;
@@ -845,6 +854,7 @@ static bool8 DrawTeamPanel(void)
         k.size = 0;
         AddRowText(&k, i);
         if (KeyChanged(&sLastText[i], &k)) {
+            sStats.rows++;
             memcpy(&sTeamBg[y0 * W], row->used ? sRowUsed : sRowEmpty, W * ROW_H * sizeof(u16));
             if (row->used) {
                 sOut = sTeamBg;
@@ -872,6 +882,7 @@ static bool8 DrawTeamPanel(void)
         }
         if (KeyChanged(&sLastSprite[i], &k)) {
             int *b = sSprBox[i];
+            sStats.sprites++;
             if (b[0] < b[2]) { // where it was
                 if (area[0] > b[0]) area[0] = b[0];
                 if (area[1] > b[1]) area[1] = b[1];
@@ -1767,6 +1778,7 @@ static bool8 DrawWorldMap(void)
         sWorldMapChanged = TRUE;
     }
     if (sWorldMapChanged) { // all of it (the marker does not move)
+        sStats.map++;
         AnimateMapColors();
         for (int n = 0; n < sWaterCount; n++)
             sCache[sWater[n]] = MapPixel(sWater[n]);
@@ -1779,11 +1791,20 @@ static bool8 DrawWorldMap(void)
         DirtyAll();
     }
     else if (AnimateMapColors() && sWaterCount > 0) { // only the water's pixels, and the marker over them
+        sStats.water++;
         for (int n = 0; n < sWaterCount; n++) {
             u32 i = sWater[n];
             sOutFrame[i] = sCache[i] = MapPixel(i);
         }
         DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
+        if (sDirect != NULL) { // the shown picture too: nothing to copy out
+            for (int n = 0; n < sWaterCount; n++)
+                sDirect[sWater[n]] = sCache[sWater[n]];
+            sOut = sDirect;
+            DrawMapSpriteFrame(MARKER_YELLOW_DOT, 0, sDotX, sDotY);
+            sOut = sOutFrame;
+            sDirectDone = TRUE;
+        }
         Dirty(sWaterBox[0], sWaterBox[1], sWaterBox[2] - sWaterBox[0], sWaterBox[3] - sWaterBox[1]);
         if (sDotBox[0] < sDotBox[2])
             Dirty(sDotBox[0], sDotBox[1], sDotBox[2] - sDotBox[0], sDotBox[3] - sDotBox[1]);
@@ -1918,6 +1939,7 @@ static int TransitionBrightness(void)
 
 static void Darken(u16 *out, const u16 *in, int brightness)
 {
+    sStats.darken++;
     // Tables: red and green together (the low 10 bits), and blue
     static u16 sRg[1024], sB[32];
     static int sBuilt = -1;
@@ -1980,6 +2002,8 @@ bool Port_RenderSubScreen(u16 *out)
     bool8 drawn;
 
     sChanged = FALSE;
+    sDirect = NULL;
+    sDirectDone = FALSE;
     sDirtyX0 = sDirtyX1 = 0;
     sDirtyY0 = sDirtyY1 = 0;
     sOut = sOutFrame = sCanvas;
@@ -2015,6 +2039,8 @@ bool Port_RenderSubScreen(u16 *out)
         }
         return TRUE;
     }
+    if (brightness == 0x100 && sOutBrightness == 0x100)
+        sDirect = out;
     if (gDungeon != NULL) {
         if (gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_MT)
             drawn = DrawMapAndTeam();
@@ -2036,11 +2062,14 @@ bool Port_RenderSubScreen(u16 *out)
     if (!drawn && brightness == sOutBrightness)
         return TRUE; // out still holds this picture
     if (brightness == 0x100 && sOutBrightness == 0x100) {
-        // only what changed
-        for (int y = sDirtyY0; y < sDirtyY1; y++)
+        // only what changed (unless it was drawn there already)
+        if (!sDirectDone)
+            sStats.copied += (sDirtyY1 - sDirtyY0) * (sDirtyX1 - sDirtyX0);
+        for (int y = sDirtyY0; y < sDirtyY1 && !sDirectDone; y++)
             memcpy(&out[y * W + sDirtyX0], &sCanvas[y * W + sDirtyX0], (sDirtyX1 - sDirtyX0) * sizeof(u16));
     } else {
         DirtyAll();
+        sStats.copied += W * H;
         if (brightness == 0x100)
             memcpy(out, sCanvas, W * H * sizeof(u16));
         else
@@ -2049,4 +2078,13 @@ bool Port_RenderSubScreen(u16 *out)
     sOutBrightness = brightness;
     sChanged = TRUE;
     return TRUE;
+}
+
+const char *Port_SubScreenStats(void)
+{
+    static char buf[96];
+    snprintf(buf, sizeof(buf), "all=%d rows=%d spr=%d map=%d water=%d dark=%d copyK=%d",
+             sStats.all, sStats.rows, sStats.sprites, sStats.map, sStats.water, sStats.darken, sStats.copied / 1000);
+    memset(&sStats, 0, sizeof(sStats));
+    return buf;
 }

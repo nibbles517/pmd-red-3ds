@@ -637,7 +637,9 @@ static void MeterEndFrame(void)
         for (int i = 0; i < T_COUNT && n < (int)sizeof(line); i++)
             n += snprintf(line + n, sizeof(line) - n, " %s %.1f", sPartNames[i], sPartTicks[i] * ms / sMeterFrames);
         if (n < (int)sizeof(line))
-            snprintf(line + n, sizeof(line) - n, " ms/frame");
+            n += snprintf(line + n, sizeof(line) - n, " ms/frame");
+        if (n < (int)sizeof(line))
+            snprintf(line + n, sizeof(line) - n, " | sub: %s", Port_SubScreenStats());
         fprintf(sLog, "%s\n", line);
         fflush(sLog);
     }
