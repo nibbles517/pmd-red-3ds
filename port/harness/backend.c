@@ -91,11 +91,19 @@ void Backend_Present(const uint16_t *frame, int width, int height)
     }
     static uint16_t sub[SUBSCREEN_W_MAX * SUBSCREEN_H_MAX];
     if (IO[IO_SUBSCREEN]) {
+        // As the 3DS's GPU: the second screen's fades are the backend's
+        static uint16_t shownSub[SUBSCREEN_W_MAX * SUBSCREEN_H_MAX];
+        Port_SetSubScreenFadeByBackend(true);
         bool shown = Port_RenderSubScreen(sub);
         int sw, sh;
         Port_SubScreenSize(&sw, &sh);
+        int b = Port_SubScreenBrightness();
+        for (int i = 0; i < sw * sh; i++) {
+            uint16_t c = sub[i];
+            shownSub[i] = (uint16_t)(((c & 31) * b >> 8) | ((((c >> 5) & 31) * b >> 8) << 5) | ((((c >> 10) & 31) * b >> 8) << 10));
+        }
         IO[IO_SUB_SIZE] = (uint32_t)(sw << 16 | sh);
-        IO[IO_SUBSCREEN] = shown ? (uint32_t)(uintptr_t)sub : 0;
+        IO[IO_SUBSCREEN] = shown ? (uint32_t)(uintptr_t)shownSub : 0;
     }
     IO[IO_PRESENT_SIZE] = (uint32_t)(width << 16 | height);
     IO[IO_PRESENT] = (uint32_t)(uintptr_t)frame;

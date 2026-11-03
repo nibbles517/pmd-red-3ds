@@ -416,6 +416,7 @@ static void GpuDrawFrame(void)
     C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
     if (drawMain) {
         C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
+        C3D_DirtyTexEnv(env); // (a new colour alone is not sent again)
         GpuDrawPicture(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, &sGpuMain);
         sGpuMain.dirty = false;
         sGpuMain.level = level;
@@ -423,6 +424,7 @@ static void GpuDrawFrame(void)
     }
     if (drawSub) {
         C3D_TexEnvColor(env, 0xFF000000 | (subLevel << 16) | (subLevel << 8) | subLevel);
+        C3D_DirtyTexEnv(env); // (a new colour alone is not sent again)
         GpuDrawPicture(sBottom ? sTargetTop : sTargetBottom, sBottom ? &sProjTop : &sProjBottom, &sGpuSub);
         sGpuSub.dirty = false;
         sGpuSub.level = subLevel;
