@@ -219,6 +219,7 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
                 c->tilesW = (want.size & 1) ? 64 : 32;
                 c->tilesH = (want.size & 2) ? 64 : 32;
                 c->indexOk = !(want.color256 && want.wideMap);
+                c->byIndex = 0;
                 BuildTable(c);
                 memset(c->todo, 0xFF, sizeof(c->todo));
                 memset(c->recolor, 0, sizeof(c->recolor));
@@ -235,11 +236,14 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
         // The palettes changed: the colours of the tiles using them are made
         // again from their numbers (4bpp: the tiles of the banks that changed;
         // 256 colours: all), not decoded again.
+        // Most of them (the game's fades: all, every frame): no colours made
+        // this frame, the lines look them up from the numbers instead.
         int palette = palChanged != 0;
-        int byBank = palette && c->indexOk && !c->color256; // (per tile: its bank)
+        c->byIndex = palette && c->indexOk && (c->color256 || __builtin_popcount(palChanged) >= 8);
+        int byBank = palette && c->indexOk && !c->byIndex; // (per tile: its bank)
         if (palette) {
             BuildTable(c);
-            if (c->indexOk && c->color256)
+            if (c->byIndex || (c->indexOk && c->color256))
                 memset(c->recolor, 0xFF, sizeof(c->recolor));
         }
         int slow = (palette && !c->indexOk)

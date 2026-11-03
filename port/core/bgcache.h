@@ -47,6 +47,7 @@ typedef struct {
     uint32_t any[512][2];     // pixel row y of tile column tx has an opaque pixel
     uint32_t full[512][2];    // ... is opaque in all 8 pixels
     uint16_t entry[64 * 64];  // the map entry each tile was decoded from (ty * 64 + tx)
+    int byIndex;              // most palettes changed (a fade): this frame's lines look the colours up
     int indexOk;              // idx stands for every pixel (not so: a 256-colour wide map's black)
     uint16_t table[256];      // the colour of each idx (the palettes as they are now)
     uint16_t px[BGC_STRIDE * 512]; // the pixels (TRANSPARENT: bit 15)

@@ -98,12 +98,12 @@ void Backend_Present(const uint16_t *frame, int width, int height)
         int sw, sh;
         Port_SubScreenSize(&sw, &sh);
         int b = Port_SubScreenBrightness();
-        for (int i = 0; i < sw * sh; i++) {
+        for (int i = 0; i < sw * sh && b < 0x100; i++) {
             uint16_t c = sub[i];
             shownSub[i] = (uint16_t)(((c & 31) * b >> 8) | ((((c >> 5) & 31) * b >> 8) << 5) | ((((c >> 10) & 31) * b >> 8) << 10));
         }
         IO[IO_SUB_SIZE] = (uint32_t)(sw << 16 | sh);
-        IO[IO_SUBSCREEN] = shown ? (uint32_t)(uintptr_t)shownSub : 0;
+        IO[IO_SUBSCREEN] = shown ? (uint32_t)(uintptr_t)(b < 0x100 ? shownSub : sub) : 0;
     }
     IO[IO_PRESENT_SIZE] = (uint32_t)(width << 16 | height);
     IO[IO_PRESENT] = (uint32_t)(uintptr_t)frame;
