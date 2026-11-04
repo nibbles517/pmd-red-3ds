@@ -91,21 +91,20 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
             rows |= st << (r * 2);
         }
     }
-    // The row bits (words shared with the other tiles of the row: atomic)
+    // The row bits
     int w = tx >> 5;
     uint32_t bit = 1u << (tx & 31);
     for (int r = 0; r < 8; r++) {
         unsigned st = (rows >> (r * 2)) & 3;
         int y = ty * 8 + r;
-        if (st) __atomic_fetch_or(&c->any[y][w], bit, __ATOMIC_RELAXED);
-        else __atomic_fetch_and(&c->any[y][w], ~bit, __ATOMIC_RELAXED);
-        if (st == 2) __atomic_fetch_or(&c->full[y][w], bit, __ATOMIC_RELAXED);
-        else __atomic_fetch_and(&c->full[y][w], ~bit, __ATOMIC_RELAXED);
+        if (st) c->any[y][w] |= bit;
+        else c->any[y][w] &= ~bit;
+        if (st == 2) c->full[y][w] |= bit;
+        else c->full[y][w] &= ~bit;
     }
     c->entry[ty * 64 + tx] = (uint16_t)e;
-    __sync_synchronize(); // all of it before the todo bit (the other core may read it)
-    __atomic_fetch_and(&c->recolor[ty][w], ~bit, __ATOMIC_RELAXED);
-    __atomic_fetch_and(&c->todo[ty][w], ~bit, __ATOMIC_RELAXED);
+    c->recolor[ty][w] &= ~bit;
+    c->todo[ty][w] &= ~bit;
 }
 
 void BgCache_Recolor(BgCache *c, int tx, int ty)
@@ -116,8 +115,7 @@ void BgCache_Recolor(BgCache *c, int tx, int ty)
     for (int r = 0; r < 8; r++, dst += BGC_STRIDE, src += BGC_STRIDE)
         for (int i = 0; i < 8; i++)
             dst[i] = table[src[i]];
-    __sync_synchronize(); // (as in Decode)
-    __atomic_fetch_and(&c->recolor[ty][tx >> 5], ~(1u << (tx & 31)), __ATOMIC_RELAXED);
+    c->recolor[ty][tx >> 5] &= ~(1u << (tx & 31));
 }
 
 // The colour of each colour number, from the palettes as they are now

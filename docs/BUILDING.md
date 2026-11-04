@@ -72,7 +72,8 @@ match, at the Music Options volume; it starts, fades and stops with the GBA
 one (which plays on silently), and a DS effect longer than the GBA one plays
 on to its own end. Both settings are GBA only (in red) with another game's ROM.
 With Dual Core on, the DS music and sound effects are made on the second CPU
-core while the game runs, a frame ahead.
+core while the game runs, a frame ahead; that is all the second core does (the
+picture is drawn on the main core).
 
 The matches are built in (port/core/music.c, sDefaultMap). Music Matching, the
 development aid they were made with, is hidden; a build with

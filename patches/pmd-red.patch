@@ -5049,7 +5049,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..b4e524f0
+index 00000000..90a17e46
 --- /dev/null
 +++ b/src/port_screen_menu.c
 @@ -0,0 +1,398 @@
@@ -5057,8 +5057,8 @@ index 00000000..b4e524f0
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
 +//   Frame Skip             Off / Auto / Always (port/core/frame.c)
-+//   Dual Core              Off / On: the second CPU core draws the picture
-+//                          (port/core/frame.c); defaults to On on an Old 3DS
++//   Dual Core              Off / On: the second CPU core makes the DS music
++//                          and sound effects (port/core/music.c)
 +//   Main Screen            Top / Bottom (kept in the save's game options, in the
 +//                          bit the DS version uses for its touch screen option:
 +//                          clear = bottom, set = top)

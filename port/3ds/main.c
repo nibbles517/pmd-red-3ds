@@ -147,26 +147,12 @@ static void Blit(const BlitArgs *b)
     }
 }
 
-static void BlitAsync(void *arg) { Blit(arg); }
-
-// The main screen's copy: with Dual Core on, the second core does the right
-// half while this one does the left.
+// The main screen's copy (on this core: the second one is the sound's)
 static void BlitMain(const uint16_t *frame, int srcW, uint16_t *fb, int ox, int oy, int w, int h,
                      const uint16_t *xmap, const uint16_t *ymap, const uint16_t *lut)
 {
-    BlitArgs left = { frame, srcW, fb, ox, oy, 0, 0, w, h, xmap, ymap, lut };
-    if (!Port_DualCore()) {
-        Blit(&left);
-        return;
-    }
-    static BlitArgs right;
-    int mid = (w / 2) & ~15;
-    right = left;
-    right.x0 = mid;
-    left.x1 = mid;
-    Backend_RunAsync(BlitAsync, &right);
-    Blit(&left);
-    Backend_WaitAsync();
+    BlitArgs args = { frame, srcW, fb, ox, oy, 0, 0, w, h, xmap, ymap, lut };
+    Blit(&args);
 }
 
 static void BuildMaps(void)
@@ -681,16 +667,16 @@ void Backend_Present(const uint16_t *frame, int width, int height)
 
 // --- Dual Core ------------------------------------------------------------------
 //
-// A thread on the second CPU core runs what Backend_RunAsync is given:
-// drawing part of the main screen's picture (port/core/frame.c). If it
-// cannot be started, the work is done at once on this core.
+// A thread on the second CPU core runs what Backend_RunAsync is given: only
+// the DS music and sound effects (port/core/music.c; the drawing is all on
+// this core). If it cannot be started, the work is done at once on this core.
 //
 // A New 3DS has a core of its own for apps (core 2). An Old 3DS lends apps a
 // share of its system core (core 1), which the system's own services (the
 // screens, sound, the HOME Menu) then do without: asking for 80% made those
 // slow (port.log: sound and flushing took twice as long, even with Dual Core
-// turned off again); 50% left the second core too little to draw with; 70%
-// was fine, and 75% is being tried (the DS music is made there too). So
+// turned off again); 50% left the second core too little to draw with (when
+// it drew part of the picture); 70% was fine, and 75% is being tried. So
 // the share is CPU_LIMIT_ON only while Dual Core is on
 // and the game is in front, and the least the system takes (CPU_LIMIT_OFF)
 // otherwise; the thread is stopped when Dual Core is turned off.

@@ -21,11 +21,7 @@
 // A cache is made for the settings a background has when the frame starts
 // (its BGxCNT: tile and map bases, colours, size; or the wide view's map).
 // A line where they differ (changed during the frame), or with mosaic, is
-// drawn the usual way. VRAM and the palettes do not change while a frame's
-// lines are drawn (frame.c), so both renderers (Dual Core) can read and fill
-// the caches at once: a tile's pixels and row bits are written (the bits
-// atomically, being shared with other tiles') before its todo bit is cleared;
-// two cores decoding the same tile write the same values.
+// drawn the usual way.
 
 #ifndef BGCACHE_H
 #define BGCACHE_H
@@ -59,7 +55,7 @@ typedef struct {
 
 extern BgCache gBgCache[4];
 
-// At the start of a drawn frame, before any line (both renderers): the
+// At the start of a drawn frame, before any line: the
 // caches for the frame's settings (regs: its I/O registers; wide: the wide
 // view), and what changed since the last drawn frame marked.
 void BgCache_Prepare(const uint8_t *regs, int wide);

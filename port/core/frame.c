@@ -146,87 +146,6 @@ uint8_t Port_YHeld(void)
     return (sKeysHeld & KEY_BIT_Y) != 0;
 }
 
-// --- Dual Core ------------------------------------------------------------
-//
-// Graphics Options > Dual Core: On. While the frame's lines go by (and the
-// VCount and HBlank events change the registers), the registers each line
-// has are kept; then the picture is drawn by two renderers at once, the main
-// CPU core drawing the top lines and the second core the rest. VRAM, the
-// palettes and OAM do not change until VBlank, so both read them as they are.
-// The split moves a little each frame towards the core that finished first.
-
-#define REG_COPY 0x60 // the registers the renderer reads (DISPCNT .. BLDY)
-static uint8_t sLineRegs[SCREEN_H_MAX][REG_COPY] __attribute__((aligned(4)));
-static uint8_t sStartRegs[REG_COPY] __attribute__((aligned(4)));
-static int sSplit = 96;    // the first line the second core draws
-static int sDualViewWide = -1, sDualViewW;
-
-typedef struct {
-    int first, lines, mode, wide;
-} Part;
-
-static void DrawPartB(void *arg)
-{
-    const Part *p = arg;
-    static uint16_t line[SCREEN_W_MAX];
-    if (p->wide != sDualViewWide || SCREEN_W != sDualViewW) {
-        PpuB_SetView(p->wide);
-        sDualViewWide = p->wide;
-        sDualViewW = SCREEN_W;
-    }
-    PpuB_SetLineRegs(sStartRegs);
-    PpuB_BeginFrame();
-    for (int y = 0; y < p->lines; y++) {
-        PpuB_SetLineRegs(sLineRegs[y]);
-        if (y < p->first)
-            PpuB_SkipLine(y);
-        else if (p->mode == VIEW_GBA)
-            PpuB_RenderLine(y, &sFrame[y * GBA_W]);
-        else if (p->wide)
-            PpuB_RenderLine(y, &sFrame[y * SCREEN_W]);
-        else {
-            PpuB_RenderLine(y, line);
-            memcpy(&sFrame[(y + NARROW_OY) * SCREEN_W + NARROW_OX], line, GBA_W * sizeof(uint16_t));
-        }
-    }
-    PpuB_SetLineRegs(NULL);
-}
-
-static void DrawDual(int mode, int wide, int lines)
-{
-    static Part part;
-    int split = sSplit;
-    if (split > lines - 8) split = lines - 8;
-    if (split < 8) split = 8;
-    part.first = split;
-    part.lines = lines;
-    part.mode = mode;
-    part.wide = wide;
-    Backend_RunAsync(DrawPartB, &part);
-
-    Ppu_SetLineRegs(sStartRegs);
-    Ppu_BeginFrame();
-    for (int y = 0; y < split; y++) {
-        Ppu_SetLineRegs(sLineRegs[y]);
-        if (mode == VIEW_GBA)
-            Ppu_RenderLine(y, &sFrame[y * GBA_W]);
-        else if (wide)
-            Ppu_RenderLine(y, &sFrame[y * SCREEN_W]);
-        else {
-            Ppu_RenderLine(y, sLine);
-            memcpy(&sFrame[(y + NARROW_OY) * SCREEN_W + NARROW_OX], sLine, GBA_W * sizeof(uint16_t));
-        }
-    }
-    Ppu_SetLineRegs(NULL);
-
-    // Whichever core finished first takes a couple more lines next frame.
-    if (Backend_AsyncDone())
-        sSplit = split - 2;
-    else
-        sSplit = split + 2;
-    Backend_WaitAsync();
-}
-
 // The wide view's state the game sets (port_view.h), kept a frame (RunFrame)
 typedef struct {
     struct PortWideBg bg[4];
@@ -290,8 +209,6 @@ static void RunFrame(void)
         sLatched = live;
     LoadWide(&sLatched);
 
-    int dual = Port_DualCore();
-
     // Graphics Options > Frame Skip: the game runs every frame, but the
     // picture is not drawn on some (the main screen keeps the last one).
     // Always: every other frame. Auto: after a frame that took too long (so
@@ -317,10 +234,8 @@ static void RunFrame(void)
     }
     int lines = wide ? SCREEN_H : GBA_H;
     if (!skip)
-        BgCache_Prepare(gPortRegs, wide); // (before either renderer starts)
-    if (!skip && dual)
-        memcpy(sStartRegs, gPortRegs, REG_COPY);
-    else if (!skip)
+        BgCache_Prepare(gPortRegs, wide); // (before the first line)
+    if (!skip)
         Ppu_BeginFrame();
 
     // Lines 0-159: visible. The wide view also draws lines below, as if the
@@ -334,9 +249,6 @@ static void RunFrame(void)
         if (skip) {
             // not drawn
         }
-        else if (dual) {
-            memcpy(sLineRegs[line], gPortRegs, REG_COPY); // drawn below
-        }
         else if (mode == VIEW_GBA) {
             Ppu_RenderLine(line, &sFrame[line * GBA_W]);
         }
@@ -349,8 +261,6 @@ static void RunFrame(void)
         }
         Dma_HBlank();
     }
-    if (!skip && dual)
-        DrawDual(mode, wide, lines);
     Backend_Mark(PORT_MARK_DRAWN, skip);
     LoadWide(&live); // the game's again
     sLatched = live;

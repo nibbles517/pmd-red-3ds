@@ -40,17 +40,6 @@ extern void (*gPortLineHook)(int line);
 void Ppu_BeginFrame(void);
 void Ppu_RenderLine(int line, uint16_t *dst);
 void Ppu_SetView(int wide); // wide: SCREEN_W-pixel lines, lines past 159 too (port_view.h)
-// Dual Core: the lines are drawn after the frame's events, from the
-// registers each line had (NULL: the live ones); two renderers share them
-// out, the second one (PpuB_*, ppu_b.c) on the second CPU core. Ppu_SkipLine:
-// a line the other renderer draws.
-void Ppu_SetLineRegs(const uint8_t *regs);
-void Ppu_SkipLine(int line);
-void PpuB_BeginFrame(void);
-void PpuB_RenderLine(int line, uint16_t *dst);
-void PpuB_SkipLine(int line);
-void PpuB_SetView(int wide);
-void PpuB_SetLineRegs(const uint8_t *regs);
 
 // dma.c
 void Dma_HBlank(void);
@@ -70,7 +59,7 @@ bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Scre
 bool Port_WideSize(void);          // ... > Main Screen Settings > Size is DS or Fit (port_view.h)
 void Port_LoadConfig(void);
 int Port_FrameSkipMode(void);
-int Port_DualCore(void);            // Graphics Options > Dual Core: On       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
+int Port_DualCore(void);            // Graphics Options > Dual Core: On (the DS sound on the second core)       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
 
 // subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
 // true when there is something to show.

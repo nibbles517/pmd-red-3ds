@@ -28,15 +28,6 @@
 #include "port.h"
 #include "bgcache.h"
 
-// Dual Core: ppu_b.c builds this file a second time, with its own state,
-// for the second CPU core to draw part of the lines with (Ppu* -> PpuB*).
-#ifdef PPU_SECOND
-#define Ppu_BeginFrame PpuB_BeginFrame
-#define Ppu_RenderLine PpuB_RenderLine
-#define Ppu_SkipLine PpuB_SkipLine
-#define Ppu_SetView PpuB_SetView
-#define Ppu_SetLineRegs PpuB_SetLineRegs
-#endif
 
 #define W SCREEN_W_MAX // buffer size; the line drawn is sW pixels
 static int sW = GBA_W, sOx = 0, sWide = 0;
@@ -47,23 +38,11 @@ static int sGs = 3;
 // Sprite x (9 bits, GBA screen x) from which it counts as negative: 256, or
 // 320 when the wide view reaches past GBA x 256 (Fit: up to 280)
 static int sObjXWrap = 256;
-#ifndef PPU_SECOND
 struct PortWideBg gPortWideBg[4];
 uint8_t gPortTileBg[4];
 uint8_t gPortHudLines, gPortHudLeft;
 uint32_t gPortHudBar[PORT_HUD_BAR_MAX]; // (PORT_HUD_BAR_MAX / 8 tiles of 8 rows)
-#endif
 
-// The I/O registers the renderer reads: the live ones, or (Dual Core) a
-// copy of them made as the line went by (Ppu_SetLineRegs).
-static const uint8_t *sRegs = gPortRegs;
-
-void Ppu_SetLineRegs(const uint8_t *regs)
-{
-    sRegs = regs ? regs : gPortRegs;
-}
-
-#define gPortRegs sRegs
 #define TILE_OY ((sViewH - GBA_H) / 2)
 static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt);
 
@@ -344,7 +323,6 @@ static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
         todo &= todo - 1;
         BgCache_Decode(c, (tx0 + i) & (c->tilesW - 1), ty);
     }
-    __sync_synchronize(); // (tiles the other core decoded: theirs before their todo bits)
     uint64_t any = CacheRowBits(c->any[y], c->tilesW, tx0) & cols;
     uint64_t full = CacheRowBits(c->full[y], c->tilesW, tx0) & cols;
 
@@ -1220,17 +1198,6 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
         else if (effect == 2) dst[x] = Brighten(dst[x], evy);
         else if (effect == 3) dst[x] = Darken(dst[x], evy);
       }
-    }
-}
-
-// A line left to the other renderer (Dual Core): only what carries over to
-// the next line (the affine backgrounds' reference points) is kept up.
-void Ppu_SkipLine(int line)
-{
-    (void)line;
-    for (int i = 0; i < 2; i++) {
-        AffineReloadIfWritten(i);
-        AffineAdvance(i);
     }
 }
 
