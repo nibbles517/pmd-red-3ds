@@ -100,10 +100,10 @@ CPU (`window=`, `effect=`, `obj-semi=`, ...: docs/GPU.md).
 
 Others > Graphics Options > **GPU Drawing** (On at first) has the GPU draw the
 main screen from the drawing list (docs/GPU.md); Off draws it on the CPU as
-before. If the picture comes out upside down within its pieces (backgrounds
-and sprites each flipped top to bottom), put an empty `gpu-flip.txt` in
-`SD:/3ds/pmd-red-3ds/` and say so: it means the GPU reads its textures' rows
-the other way up from what the port expects.
+before. The GPU reads its textures' rows bottom row first, so they are
+written that way; an empty `gpu-noflip.txt` in `SD:/3ds/pmd-red-3ds/` writes
+them top row first (the first stage 2 build did, and every piece came out
+upside down or missing).
 
 ## Game half (Linux or WSL)
 

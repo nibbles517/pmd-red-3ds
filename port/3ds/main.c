@@ -38,7 +38,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 #define CONFIG_PATH DATA_DIR "/config.bin"
 #define DEBUG_FLAG DATA_DIR "/debug.txt"
 #define CPU_VIDEO_FLAG DATA_DIR "/cpu-video.txt" // the pictures copied by the CPU, as before the GPU did it
-#define GPU_FLIP_FLAG DATA_DIR "/gpu-flip.txt" // GPU Drawing: the textures' rows the other way up (see GpuListInit)
+#define GPU_NOFLIP_FLAG DATA_DIR "/gpu-noflip.txt" // GPU Drawing: the textures' rows top first (see GpuListInit)
 
 void AgbMain(void);
 
@@ -384,9 +384,11 @@ static void GpuDrawPicture(C3D_RenderTarget *target, const C3D_Mtx *proj, GpuPic
 // what is there (the blend colour: eva, evb), setting it to 0 (a first target
 // is never a second one in a listed frame).
 //
-// Which way up a texture's rows are in memory isn't certain here (the first
-// row at the start, as the picture textures turned out); with gpu-flip.txt in
-// the data folder they are written the other way up.
+// Rows: texture coordinate v = y / 512 for the image's row y (y down, as the
+// picture textures are drawn), which the GPU reads from memory row 511 - y:
+// the rows are written bottom row first (the first build wrote the top row
+// first, and every piece came out upside down). With gpu-noflip.txt in the
+// data folder they are written top row first again.
 
 #define GL_TEX 512 // every list texture is 512x512
 static C3D_Tex sGlBg[4], sGlStrip, sGlObj;
@@ -403,10 +405,11 @@ static void GpuListInit(void)
     for (int y = 0; y < 8; y++)
         for (int x = 0; x < 8; x++)
             sGlMorton[y][x] = (uint16_t)((x & 1) | ((y & 1) << 1) | ((x & 2) << 1) | ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3));
-    FILE *flag = fopen(GPU_FLIP_FLAG, "r");
+    sGlFlip = true;
+    FILE *flag = fopen(GPU_NOFLIP_FLAG, "r");
     if (flag != NULL) {
         fclose(flag);
-        sGlFlip = true;
+        sGlFlip = false;
     }
     C3D_Tex *all[6] = { &sGlBg[0], &sGlBg[1], &sGlBg[2], &sGlBg[3], &sGlStrip, &sGlObj };
     for (int i = 0; i < 6; i++) {
@@ -420,7 +423,7 @@ static void GpuListInit(void)
         C3D_TexSetWrap(all[i], GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     }
     sGlReady = true;
-    Backend_Log("gpu drawing: ready%s", sGlFlip ? " (rows flipped: gpu-flip.txt)" : "");
+    Backend_Log("gpu drawing: ready%s", sGlFlip ? "" : " (rows top first: gpu-noflip.txt)");
 }
 
 int Backend_GpuListMode(void)
@@ -516,10 +519,11 @@ static void GpuListUpload(const GpuList *l)
     sGlUploadTicks += svcGetSystemTick() - start;
 }
 
-// A texture coordinate: v at the top edge of image row y
+// A texture coordinate: v at the top edge of image row y (v = 0: the top row,
+// as the picture textures; where the row is in memory is GlTexel's)
 static inline float GlV(int y)
 {
-    return sGlFlip ? (float)(GL_TEX - y) / GL_TEX : (float)y / GL_TEX;
+    return (float)y / GL_TEX;
 }
 
 static int sGlState = -1; // (the last GlSetBlend's, -1: unknown)

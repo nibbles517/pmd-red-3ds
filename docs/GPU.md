@@ -90,8 +90,11 @@ it, and the GPU draws it in `GpuDrawFrame`:
   target replaces the stencil with whether it is a second target; one that
   is draws twice: where the stencil is 0 as it is, then where it is 1 with
   GPU blending (constant colour eva/16, constant alpha evb/16), clearing it.
-- `gpu-flip.txt` writes the textures' rows the other way up, in case the
-  GPU's convention turns out to be the other one.
+- **Rows**: texture coordinate v = y / 512 is image row y, which the GPU
+  reads from memory row 511 - y, so the rows are written bottom row first
+  (the first build on hardware wrote them top first: the pieces read the
+  wrong end of their textures, mostly empty, and came out missing or
+  upside down). `gpu-noflip.txt` writes them top first again.
 
 port.log's `gpu:` part: on/off, frames from the list out of those drawn,
 the time writing textures takes, and why the others weren't listed.
