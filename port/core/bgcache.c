@@ -220,6 +220,7 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
                 c->tilesH = (want.size & 2) ? 64 : 32;
                 c->indexOk = !(want.color256 && want.wideMap);
                 c->byIndex = 0;
+                c->catchUp = 0;
                 BuildTable(c);
                 memset(c->todo, 0xFF, sizeof(c->todo));
                 memset(c->recolor, 0, sizeof(c->recolor));
@@ -239,11 +240,19 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
         // Most of them (the game's fades: all, every frame): no colours made
         // this frame, the lines look them up from the numbers instead.
         int palette = palChanged != 0;
-        c->byIndex = palette && c->indexOk && (c->color256 || __builtin_popcount(palChanged) >= 8);
-        int byBank = palette && c->indexOk && !c->byIndex; // (per tile: its bank)
+        int fade = palette && c->indexOk && (c->color256 || __builtin_popcount(palChanged) >= 8);
+        if (fade) {
+            c->byIndex = 1;
+            c->catchUp = 0;
+            // (after it, the rows on the screen are done first)
+            int top = c->wideMap ? gPortWideBg[bg].scrollY
+                                 : (regs[0x12 + bg * 4] | (regs[0x13 + bg * 4] << 8));
+            c->catchStart = ((top & 511) >> 3) & (c->tilesH - 1);
+        }
+        int byBank = palette && c->indexOk && !fade; // (per tile: its bank)
         if (palette) {
             BuildTable(c);
-            if (c->byIndex || (c->indexOk && c->color256))
+            if (fade || (c->indexOk && c->color256))
                 memset(c->recolor, 0xFF, sizeof(c->recolor));
         }
         int slow = (palette && !c->indexOk)
@@ -283,6 +292,26 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
                         recolor[tx >> 5] |= bit << 1;
                 }
             }
+        }
+        // After a fade: the colours made again a few tile rows a frame (not
+        // all on the first frame after it); the lines look them up until then.
+        if (c->byIndex && !fade) {
+            int budget = 128; // tiles a frame (no more than a fade frame costs)
+            while (budget > 0 && c->catchUp < c->tilesH) {
+                int ty = (c->catchStart + c->catchUp++) & (c->tilesH - 1);
+                for (int w = 0; w < 2; w++) {
+                    uint32_t stale = w * 32 < c->tilesW ? c->recolor[ty][w] & ~c->todo[ty][w] : 0;
+                    while (stale) {
+                        int b = __builtin_ctz(stale);
+                        stale &= stale - 1;
+                        BgCache_Recolor(c, w * 32 + b, ty);
+                        budget--;
+                    }
+                    c->recolor[ty][w] = 0; // (tiles still to decode get their colours then)
+                }
+            }
+            if (c->catchUp >= c->tilesH)
+                c->byIndex = 0;
         }
     }
 }

@@ -348,7 +348,9 @@ static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
     uint64_t any = CacheRowBits(c->any[y], c->tilesW, tx0) & cols;
     uint64_t full = CacheRowBits(c->full[y], c->tilesW, tx0) & cols;
 
-    if (c->byIndex) { // the palettes are fading: the colours looked up from the numbers
+    if (c->byIndex && (CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols)) {
+        // the palettes are fading (or just stopped, and these colours are
+        // not made yet): the colours looked up from the numbers
         const uint8_t *row = &c->idx[y * BGC_STRIDE];
         const uint16_t *table = c->table;
         for (int sx = 0, cx = x; sx < sW;) {
