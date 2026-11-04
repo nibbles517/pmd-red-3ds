@@ -45,6 +45,7 @@ struct PortConfig
     // Game Options > Music Options (version 6)
     u8 musicStyle;          // PORT_MUSIC_GBA, PORT_MUSIC_DS
     u8 musicVolume;         // the DS music's volume, in tens of percent (version 7; 19 at first)
+    u8 sfxStyle;            // Sound Effects: PORT_MUSIC_GBA, PORT_MUSIC_DS (version 9)
 };
 
 extern struct PortConfig gPortConfig;
@@ -116,6 +117,11 @@ int Port_SfxMapSave(const int *ses, int count);
 // Music Style: DS (music.c): slot 0 the background music, 1 a fanfare
 void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64);
 int Port_MusicSlotDone(int slot);
+#ifndef PORT_SFX_SLOTS
+#define PORT_SFX_SLOTS 6 // one for each GBA sound effect player
+#endif
+void Port_MusicSfxSlot(int slot, int track, unsigned serial, int ending, int volume64);
+bool8 Port_DsSfxOn(void); // music.c: Sound Effects DS, with Blue Rescue Team's ROM
 bool8 Port_DsMusicOn(void); // music.c: Music Style DS, with Blue Rescue Team's ROM
 void Port_DsMusicRecheck(void); // after Music Options: its settings, its ROM again
 extern bool8 gPortDsMusicOff; // Music Matching: the game's own music only

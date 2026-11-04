@@ -2873,20 +2873,33 @@ index 79fd9c0d..0a1feab2 100644
          return FALSE;
      }
 diff --git a/src/m4a.c b/src/m4a.c
-index 2bcf6f8a..0bcc0375 100644
+index 2bcf6f8a..603c0a3d 100644
 --- a/src/m4a.c
 +++ b/src/m4a.c
-@@ -1,6 +1,9 @@
+@@ -1,6 +1,11 @@
  #include "global.h"
  #include "m4a.h"
  #include "gba/m4a_internal.h"
 +#ifdef PLATFORM_3DS
 +bool8 Port_MuteMPlay(struct MusicPlayerInfo *mplayInfo); // music.c
++void Port_SongStarted(u16 song, u32 playerIndex); // music.c: Sound Effects: DS
++void Port_MPlayStopped(struct MusicPlayerInfo *mplayInfo); // music.c: Sound Effects: DS
 +#endif
  
  extern const u8 gCgb3Vol[];
  
-@@ -309,10 +312,17 @@ void MPlayExtender(struct CgbChannel *cgbChans)
+@@ -102,6 +107,10 @@ void m4aSongNumStart(u16 n)
+     const struct MusicPlayer *mplay = &mplayTable[song->ms];
+ 
+     MPlayStart(mplay->info, song->header);
++#ifdef PLATFORM_3DS
++    if (mplay->info->status == 0 && mplay->info->songHeader == song->header) // (started: not refused for priority)
++        Port_SongStarted(n, song->ms);
++#endif
+ }
+ 
+ void m4aSongNumStartOrChange(u16 n)
+@@ -309,10 +318,17 @@ void MPlayExtender(struct CgbChannel *cgbChans)
      soundInfo->ident = ident;
  }
  
@@ -2904,7 +2917,7 @@ index 2bcf6f8a..0bcc0375 100644
  
  void ClearChain(void *x)
  {
-@@ -404,10 +414,10 @@ void SampleFreqSet(u32 freq)
+@@ -404,10 +420,10 @@ void SampleFreqSet(u32 freq)
  
      m4aSoundVSyncOn();
  
@@ -2917,7 +2930,17 @@ index 2bcf6f8a..0bcc0375 100644
          ;
  
      REG_TM0CNT_H = TIMER_ENABLE | TIMER_1CLK;
-@@ -771,6 +781,11 @@ void TrkVolPitSet(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *tr
+@@ -657,6 +673,9 @@ void m4aMPlayStop(struct MusicPlayerInfo *mplayInfo)
+ 
+     if (mplayInfo->ident != ID_NUMBER)
+         return;
++#ifdef PLATFORM_3DS
++    Port_MPlayStopped(mplayInfo);
++#endif
+ 
+     mplayInfo->ident++;
+     mplayInfo->status |= MUSICPLAYER_STATUS_PAUSE;
+@@ -771,6 +790,11 @@ void TrkVolPitSet(struct MusicPlayerInfo *mplayInfo, struct MusicPlayerTrack *tr
  
          track->volMR = (u32)((y + 128) * x) >> 8;
          track->volML = (u32)((127 - y) * x) >> 8;
@@ -3319,7 +3342,7 @@ index aeeb69ed..8d2fd375 100644
  
      a0->unk26 = 0;
 diff --git a/src/music.c b/src/music.c
-index a5a58dec..ba77ccd6 100644
+index a5a58dec..30b5dcbf 100644
 --- a/src/music.c
 +++ b/src/music.c
 @@ -3,6 +3,11 @@
@@ -3344,7 +3367,7 @@ index a5a58dec..ba77ccd6 100644
  
      if (sFanfareMusicPlayerState != 0) {
          switch (sFanfareMusicPlayerState) {
-@@ -651,6 +659,86 @@ void UpdateSound(void)
+@@ -651,6 +659,173 @@ void UpdateSound(void)
      }
  }
  
@@ -3360,6 +3383,7 @@ index a5a58dec..ba77ccd6 100644
 +
 +bool8 gPortDsMusicOff; // Music Matching: the game's own music only
 +static s8 sDsReady = -1; // -1: not looked at yet
++static s8 sSfxReady = -1; // (Sound Effects: DS, below)
 +static bool8 sMuteBgm, sMuteFanfare;
 +
 +bool8 Port_DsMusicOn(void)
@@ -3374,11 +3398,67 @@ index a5a58dec..ba77ccd6 100644
 +void Port_DsMusicRecheck(void)
 +{
 +    sDsReady = -1;
++    sSfxReady = -1;
++}
++
++// --- Sound Effects: DS ---
++//
++// The same for the sound effects (with Sound Effects: DS): each GBA sound
++// effect matched with a DS effect (Port_SfxMapGet) plays as that effect. The
++// game has 6 sound effect players (INDEX_SE1-6); each has a DS slot: when a
++// player starts an effect (m4a.c: m4aSongNumStart, once it isn't refused for
++// a higher priority effect playing), its DS effect starts over in that slot
++// and the GBA player plays on silently; the DS effect follows the player's
++// volume (fades), and stops when the player is stopped (m4a.c: m4aMPlayStop)
++// or its fade ends, or it starts another effect. One that ends by itself lets
++// the DS effect play on to its own end (the DS's may be longer), or, if it
++// loops, to its next loop (one that loops plays on while the GBA one does).
++
++static s16 sSfxTrack[PORT_SFX_SLOTS] = { -1, -1, -1, -1, -1, -1 }; // DS effect each player plays (-1: none)
++static u16 sSfxSerial[PORT_SFX_SLOTS];
++static u8 sSfxVolume[PORT_SFX_SLOTS] = { 64, 64, 64, 64, 64, 64 };
++static bool8 sSfxFading[PORT_SFX_SLOTS]; // (its end, then, stops the DS effect too)
++
++bool8 Port_DsSfxOn(void)
++{
++    if (gPortConfig.sfxStyle != PORT_MUSIC_DS || gPortDsMusicOff)
++        return FALSE;
++    if (sSfxReady < 0)
++        sSfxReady = Port_MusicOpen() > 0 && Port_MusicRomIsBlue();
++    return sSfxReady > 0;
++}
++
++void Port_SongStarted(u16 song, u32 playerIndex)
++{
++    s32 slot = (s32)playerIndex - INDEX_SE1;
++
++    if (slot < 0 || slot >= PORT_SFX_SLOTS)
++        return;
++    sSfxTrack[slot] = IsSoundEffect(song) && Port_DsSfxOn() ? Port_SfxMapGet(song) : -1;
++    sSfxSerial[slot]++;
++    sSfxVolume[slot] = 64;
++    sSfxFading[slot] = FALSE;
++}
++
++void Port_MPlayStopped(struct MusicPlayerInfo *mplayInfo)
++{
++    s32 i;
++
++    for (i = 0; i < PORT_SFX_SLOTS; i++)
++        if (mplayInfo == gMPlayTable[INDEX_SE1 + i].info)
++            sSfxTrack[i] = -1;
 +}
 +
 +bool8 Port_MuteMPlay(struct MusicPlayerInfo *mplayInfo)
 +{
-+    return (mplayInfo == &gMPlayInfo_BGM && sMuteBgm) || (mplayInfo == &gMPlayInfo_Fanfare && sMuteFanfare);
++    s32 i;
++
++    if ((mplayInfo == &gMPlayInfo_BGM && sMuteBgm) || (mplayInfo == &gMPlayInfo_Fanfare && sMuteFanfare))
++        return TRUE;
++    for (i = 0; i < PORT_SFX_SLOTS; i++)
++        if (mplayInfo == gMPlayTable[INDEX_SE1 + i].info)
++            return sSfxTrack[i] >= 0;
++    return FALSE;
 +}
 +
 +static void SetMute(struct MusicPlayerInfo *mplayInfo, bool8 *muted, bool8 mute)
@@ -3408,12 +3488,42 @@ index a5a58dec..ba77ccd6 100644
 +    return (mplayInfo->status & MUSICPLAYER_STATUS_TRACK) != 0 && !(mplayInfo->status & MUSICPLAYER_STATUS_PAUSE);
 +}
 +
++static void Port_DsSfxFrame(void)
++{
++    s32 i, k;
++
++    for (i = 0; i < PORT_SFX_SLOTS; i++) {
++        struct MusicPlayerInfo *info = gMPlayTable[INDEX_SE1 + i].info;
++        bool8 ended = FALSE;
++        if (sSfxTrack[i] >= 0) {
++            if (!(info->status & MUSICPLAYER_STATUS_TRACK) || (info->status & MUSICPLAYER_STATUS_PAUSE)) {
++                if (sSfxFading[i]) // its fade ended
++                    sSfxTrack[i] = -1;
++                else // it ended by itself: the DS effect plays on to its end (or next loop)
++                    ended = TRUE;
++            }
++            else {
++                if (info->fadeOI != 0)
++                    sSfxFading[i] = TRUE;
++                for (k = 0; k < info->trackCount; k++)
++                    if (info->tracks[k].flags & MPT_FLG_EXIST) {
++                        sSfxVolume[i] = info->tracks[k].volX > 64 ? 64 : info->tracks[k].volX;
++                        break;
++                    }
++            }
++        }
++        Port_MusicSfxSlot(i, sSfxTrack[i], sSfxSerial[i], ended, sSfxVolume[i]);
++    }
++}
++
 +static void Port_DsMusicFrame(void)
 +{
 +    s32 bgm = -1, fanfare = -1;
 +
-+    if (Port_DsMusicOn()) {
++    if (Port_DsSfxOn() || Port_DsMusicOn())
 +        Port_MusicSetVolume(gPortConfig.musicVolume * 10); // (Music Options' volume)
++    Port_DsSfxFrame();
++    if (Port_DsMusicOn()) {
 +        if (sCurrentBGSong != STOP_BGM)
 +            bgm = Port_MusicMapGet(sCurrentBGSong);
 +        if (sFanfareMusicPlayerState != 0 && sCurrentFanfareSong != STOP_SOUND_EFFECT)
@@ -3464,7 +3574,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..ad7ec450 100644
+index 86f582c2..2ec336cb 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -4251,7 +4361,7 @@ index 86f582c2..ad7ec450 100644
 +        StartNewBGM(MUS_FILE_SELECT); // the title's music again
 +        sMusicStoppedBgm = FALSE;
 +    }
-+    sMusicSettingsEntry = 1; // (Music Player)
++    sMusicSettingsEntry = 2; // (Music Player)
 +    SetOptionsMenuState(OPTIONS_MENU_MUSIC_SETTINGS);
 +}
 +
@@ -4939,10 +5049,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..a2b510d3
+index 00000000..b4e524f0
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,393 @@
+@@ -0,0 +1,398 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -4983,9 +5093,9 @@ index 00000000..a2b510d3
 +#define TOP_ENTRIES 5
 +#define MAX_CHOICES 4
 +
-+enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP, SETTING_BUTTONS, SETTING_TOUCH, SETTING_MUSIC_STYLE };
++enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP, SETTING_BUTTONS, SETTING_TOUCH, SETTING_MUSIC_STYLE, SETTING_SFX_STYLE };
 +// Music Options: Music Style, then Music Player (no choices: opens the player)
-+enum { MUSIC_STYLE, MUSIC_PLAYER };
++enum { MUSIC_STYLE, MUSIC_SFX, MUSIC_PLAYER };
 +
 +static struct {
 +    GameOptions *options;
@@ -5040,6 +5150,7 @@ index 00000000..a2b510d3
 +ALIGNED(4) static const u8 sTitleMusic[] = _("Music Options");
 +ALIGNED(4) static const u8 sMusicStyle[] = _("Music Style");
 +ALIGNED(4) static const u8 sMusicPlayer[] = _("Music Player");
++ALIGNED(4) static const u8 sSfxStyle[] = _("Sound Effects");
 +static const struct {
 +    const u8 *name;
 +    u8 count;
@@ -5052,6 +5163,7 @@ index 00000000..a2b510d3
 +    [SETTING_BUTTONS] = { sButtonStyle, 3, { sSizeGBA, sSizeDS, sSize3DS } },
 +    [SETTING_TOUCH] = { sTouchScreen, 2, { sOn, sOff } },
 +    [SETTING_MUSIC_STYLE] = { sMusicStyle, 2, { sSizeGBA, sSizeDS } },
++    [SETTING_SFX_STYLE] = { sSfxStyle, 2, { sSizeGBA, sSizeDS } },
 +};
 +// (Controls Options: further right, past the longer names)
 +#define CHOICE_X(i) (sMenu.page == PAGE_CONTROLS || sMenu.page == PAGE_MUSIC ? 96 + (i) * 32 : 64 + (i) * 40)
@@ -5063,7 +5175,7 @@ index 00000000..a2b510d3
 +        case PAGE_TOP: return TOP_ENTRIES;
 +        case PAGE_SUB_SCREEN: return 3;
 +        case PAGE_CONTROLS: return 2;
-+        case PAGE_MUSIC: return 2;
++        case PAGE_MUSIC: return 3;
 +        default: return 2;
 +    }
 +}
@@ -5074,7 +5186,7 @@ index 00000000..a2b510d3
 +    if (sMenu.page == PAGE_CONTROLS)
 +        return SETTING_BUTTONS + i;
 +    if (sMenu.page == PAGE_MUSIC)
-+        return i == MUSIC_STYLE ? SETTING_MUSIC_STYLE : -1;
++        return i == MUSIC_STYLE ? SETTING_MUSIC_STYLE : i == MUSIC_SFX ? SETTING_SFX_STYLE : -1;
 +    return sMenu.page == PAGE_SUB_SCREEN ? i : i + 1;
 +}
 +
@@ -5087,6 +5199,8 @@ index 00000000..a2b510d3
 +        return &gPortConfig.touchScreenOff;
 +    if (setting == SETTING_MUSIC_STYLE)
 +        return &gPortConfig.musicStyle;
++    if (setting == SETTING_SFX_STYLE)
++        return &gPortConfig.sfxStyle;
 +    if (setting == SETTING_ENABLED)
 +        return &gPortConfig.subScreenDisabled;
 +    if (setting == SETTING_FRAMESKIP)
@@ -5107,7 +5221,7 @@ index 00000000..a2b510d3
 +{
 +    if (setting == SETTING_TOUCH)
 +        return TRUE;
-+    if (setting == SETTING_MUSIC_STYLE) // another game's ROM: not to be chosen
++    if (setting == SETTING_MUSIC_STYLE || setting == SETTING_SFX_STYLE) // another game's ROM: not to be chosen
 +        return sMenu.musicLocked;
 +    if (setting == SETTING_SIZE)
 +        return choice == PORT_SIZE_3DS;
@@ -5221,7 +5335,7 @@ index 00000000..a2b510d3
 +    ShowPage(0);
 +}
 +
-+// Game Options > Music Options (on the title): Music Style, and Music Player.
++// Game Options > Music Options (on the title): Music Style, Sound Effects, and Music Player.
 +// locked: pmd-blue.nds is another game's: GBA music, and the cursor can't go
 +// to Music Style.
 +void PortMusicMenu_Create(GameOptions *options, bool8 locked, s32 entry)
@@ -5232,6 +5346,7 @@ index 00000000..a2b510d3
 +    sMenu.musicLocked = locked;
 +    if (locked) {
 +        gPortConfig.musicStyle = PORT_MUSIC_GBA;
++        gPortConfig.sfxStyle = PORT_MUSIC_GBA;
 +        entry = MUSIC_PLAYER;
 +    }
 +    sMenu.startConfig = gPortConfig;
@@ -5301,7 +5416,7 @@ index 00000000..a2b510d3
 +                    changed = TRUE;
 +                }
 +            }
-+            else if (sMenu.page == PAGE_MUSIC && (index != MUSIC_STYLE || sMenu.musicLocked)) {
++            else if (sMenu.page == PAGE_MUSIC && (index == MUSIC_PLAYER || sMenu.musicLocked)) {
 +                // (Music Player has no choices; a locked Music Style stays GBA)
 +            }
 +            else {

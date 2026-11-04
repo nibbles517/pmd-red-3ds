@@ -8,7 +8,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 8
+#define PORT_CONFIG_VERSION 9
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19 };
 
 // The settings before any are chosen (no config file yet). Those kept in the
@@ -33,6 +33,7 @@ static void SetDefaultConfig(void)
     // Music Options (DS music only with Blue Rescue Team's ROM, though)
     gPortConfig.musicStyle = PORT_MUSIC_DS;
     gPortConfig.musicVolume = 19;
+    gPortConfig.sfxStyle = PORT_MUSIC_DS; // (the DS's sound effects, at the music's volume)
     // Layout Options (in dungeons)
     gPortConfig.layoutSubScreen = PORT_SUB_LAYOUT_BLUE;
     gPortConfig.layoutInfo = 1; // Additional Info: On
@@ -77,10 +78,16 @@ void Port_LoadConfig(void)
         if (c.musicVolume == 15)
             c.musicVolume = 19;
     }
+    if (c.version == 8) { // before Sound Effects (DS, as the music's default)
+        c.version = 9;
+        c.sfxStyle = PORT_MUSIC_DS;
+    }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
     if (gPortConfig.musicStyle > PORT_MUSIC_DS)
         gPortConfig.musicStyle = PORT_MUSIC_GBA;
+    if (gPortConfig.sfxStyle > PORT_MUSIC_DS)
+        gPortConfig.sfxStyle = PORT_MUSIC_GBA;
     if (gPortConfig.musicVolume < 1 || gPortConfig.musicVolume > 40)
         gPortConfig.musicVolume = 19;
     if (gPortConfig.saveSlot > 2)

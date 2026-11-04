@@ -17,6 +17,10 @@
 #include <string.h>
 #include <stdio.h>
 #include "port.h"
+
+#ifndef PORT_SFX_SLOTS
+#define PORT_SFX_SLOTS 6 // one for each GBA sound effect player (port_game.h)
+#endif
 #include "../ndsmusic/nds_music.h"
 #include "../ndsmusic/song.h"
 
@@ -43,14 +47,22 @@ static int sPaused, sRepeat;
 static int sVolume = 190; // percent (Music Options sets it)
 static uint32_t sMixRate = 2 * 18157; // twice the game's mixing rate (see Port_MusicMix)
 
-// Music Style: DS: the game's background music and fanfare, as DS tracks
+// Music Style: DS: the game's background music and fanfare, as DS tracks;
+// Sound Effects: DS: its sound effects (one slot for each GBA sound effect player)
+enum { SLOT_BGM, SLOT_FANFARE, SLOT_SFX, SLOTS = SLOT_SFX + PORT_SFX_SLOTS };
 typedef struct {
-    Song *song;
-    int track; // -1: none
+    Song *song;     // (NULL: none, or an effect that ended)
+    int track;      // -1: none
+    unsigned serial;// (an effect: started again when it changes)
+    int want;       // what the game asked for, opened when the next frame is made
+    unsigned wantSerial;
+    int loop;
+    int ending, ended; // an effect: to end at its next loop (asked; done)
     int paused;
-    int volume64; // the GBA player's volume (applied when the next frame is made)
+    int volume64;   // the GBA player's volume (applied when the next frame is made)
 } Slot;
-static Slot sSlots[2] = { { NULL, -1, 0, 64 }, { NULL, -1, 0, 64 } };
+static Slot sSlots[SLOTS];
+static int sSlotsInit;
 
 // --- Making the sound: on the second core ----------------------------------------
 //
@@ -61,11 +73,12 @@ static Slot sSlots[2] = { { NULL, -1, 0, 64 }, { NULL, -1, 0, 64 } };
 // game's own sound (about 17 ms).
 //
 // While that job runs it alone touches the songs. Of the calls below, those
-// that open, close or change a song first wait for it to finish (MusicSync);
-// a slot's pause and volume are kept and applied when the next job is given;
+// of the player that open, close or change a song first wait for it to finish
+// (MusicSync); the slots (what the game plays) never wait: what is asked of
+// them (track, pause, volume) is kept and done when the next job is given;
 // the questions (done? where?) are answered from what the last job found.
 
-enum { JOB_PLAYER, JOB_SLOT0, JOB_SLOT1, JOB_SONGS };
+enum { JOB_PLAYER, JOB_SLOT0, JOB_SONGS = JOB_SLOT0 + SLOTS };
 static Song *sJobSong[JOB_SONGS];   // what the job makes (NULL: nothing)
 static int16_t sJobOut[JOB_SONGS][2048 * 2];
 static uint8_t sJobHas[JOB_SONGS];  // ... made into sJobOut
@@ -581,13 +594,56 @@ int Port_SfxMapSave(const int *ses, int count)
 
 // --- Music Style: DS -------------------------------------------------------------
 
+static void InitSlots(void)
+{
+    if (sSlotsInit)
+        return;
+    sSlotsInit = 1;
+    for (int i = 0; i < SLOTS; i++) {
+        sSlots[i].track = sSlots[i].want = -1;
+        sSlots[i].volume64 = 64;
+    }
+}
+
 static void StopSlots(void)
 {
-    for (int i = 0; i < 2; i++) {
+    InitSlots();
+    for (int i = 0; i < SLOTS; i++) {
         song_close(sSlots[i].song);
         sSlots[i].song = NULL;
-        sSlots[i].track = -1;
+        sSlots[i].track = sSlots[i].want = -1;
         sSlots[i].paused = 0;
+    }
+}
+
+// What the game asked of the slots, done (no job running: from Port_MusicMix)
+static void ApplySlots(void)
+{
+    for (int i = 0; i < SLOTS; i++) {
+        Slot *s = &sSlots[i];
+        int want = sOpen ? s->want : -1;
+        if (want != s->track || s->wantSerial != s->serial) {
+            song_close(s->song);
+            s->song = NULL;
+            s->track = want;
+            s->serial = s->wantSerial;
+            s->ended = 0;
+            if (want >= 0 && want < sCount) {
+                s->song = OpenTrack(&sTracks[want]);
+                if (s->song != NULL)
+                    song_set_loops(s->song, s->loop ? 0 : i >= SLOT_SFX ? 0 : 1, 0);
+            }
+            sFound.done[JOB_SLOT0 + i] = sJobFound.done[JOB_SLOT0 + i] = 0;
+        }
+        if (s->song != NULL && s->ending && !s->ended) {
+            // (the GBA effect ended: a looping DS one ends at its next loop, briefly faded)
+            song_set_loops(s->song, song_loops(s->song) + 1, 150);
+            s->ended = 1;
+        }
+        else if (i >= SLOT_SFX && s->song != NULL && sFound.done[JOB_SLOT0 + i]) {
+            song_close(s->song); // an effect that ended (until another starts)
+            s->song = NULL;
+        }
     }
 }
 
@@ -596,23 +652,32 @@ static void StopSlots(void)
 // player's, which follows fades). A track that changes starts over.
 void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64)
 {
+    InitSlots();
     Slot *s = &sSlots[slot & 1];
-    if (!sOpen)
-        track = -1;
-    if (track != s->track) {
-        MusicSync(); // (the job may be making this slot's song)
-        song_close(s->song);
-        s->song = NULL;
-        s->track = track;
-        if (track >= 0 && track < sCount) {
-            s->song = OpenTrack(&sTracks[track]);
-            if (s->song != NULL)
-                song_set_loops(s->song, loop ? 0 : 1, 0);
-        }
-        sFound.done[JOB_SLOT0 + (slot & 1)] = sJobFound.done[JOB_SLOT0 + (slot & 1)] = 0;
-    }
+    if (track != s->want)
+        sFound.done[JOB_SLOT0 + (slot & 1)] = 0;
+    s->want = track;
+    s->loop = loop;
     s->paused = paused;
     s->volume64 = volume64 < 0 ? 0 : volume64 > 64 ? 64 : volume64; // (set when the next frame is made)
+}
+
+// Sound effect slot (0 to PORT_SFX_SLOTS - 1): its track (-1: none), played
+// from the start each time serial changes, and looping (if it does) until
+// ending (the GBA effect ended by itself): then it ends at its next loop;
+// volume 0-64 (the GBA player's: its fades).
+void Port_MusicSfxSlot(int slot, int track, unsigned serial, int ending, int volume64)
+{
+    InitSlots();
+    if (slot < 0 || slot >= PORT_SFX_SLOTS)
+        return;
+    Slot *s = &sSlots[SLOT_SFX + slot];
+    s->want = track;
+    s->wantSerial = serial;
+    s->ending = ending;
+    s->loop = 0;
+    s->paused = 0;
+    s->volume64 = volume64 < 0 ? 0 : volume64 > 64 ? 64 : volume64;
 }
 
 int Port_MusicSlotDone(int slot)
@@ -719,6 +784,7 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     if (!sOpen || count <= 0 || count > 1024)
         return 0;
     MusicSync(); // the samples made for this frame
+    InitSlots();
     // The game's samples, at twice the rate (each one, then the average with the next)
     for (int i = 0; i < count; i++) {
         for (int c = 0; c < 2; c++) {
@@ -742,16 +808,21 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     }
     // The next frame's: the volumes as they are now, then made on the second
     // core while the game runs (Dual Core), else now
+    ApplySlots(); // (the tracks the game asked for since)
     if (sSong != NULL)
         song_set_volume(sSong, sVolume);
-    for (int k = 0; k < 2; k++)
-        if (sSlots[k].song != NULL)
-            song_set_volume(sSlots[k].song, sVolume * sSlots[k].volume64 / 64);
+    int any = 0;
     sJobSong[JOB_PLAYER] = sPaused ? NULL : sSong;
-    sJobSong[JOB_SLOT0] = sSlots[0].paused ? NULL : sSlots[0].song;
-    sJobSong[JOB_SLOT1] = sSlots[1].paused ? NULL : sSlots[1].song;
+    any |= sJobSong[JOB_PLAYER] != NULL;
+    for (int k = 0; k < SLOTS; k++) {
+        Slot *s = &sSlots[k];
+        if (s->song != NULL)
+            song_set_volume(s->song, sVolume * s->volume64 / 64);
+        sJobSong[JOB_SLOT0 + k] = s->paused ? NULL : s->song;
+        any |= sJobSong[JOB_SLOT0 + k] != NULL;
+    }
     sJobCount = (uint32_t)count * 2;
-    if (sJobSong[0] == NULL && sJobSong[1] == NULL && sJobSong[2] == NULL) {
+    if (!any) {
         memset(sJobHas, 0, sizeof(sJobHas)); // (nothing playing: no job)
     }
     else if (Port_DualCore()) {

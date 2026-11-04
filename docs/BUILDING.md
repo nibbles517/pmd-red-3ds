@@ -65,8 +65,14 @@ pairs each of the game's sound effects with one of the DS's (A plays the
 GBA one, Y the DS one, L/R and ZL/ZR pick another, X clears, START or B
 saves `sfx-map.txt` to the same folder). The matches are built in (each GBA
 sound effect as the DS one with the same number); the file only changes the
-ones it names. The game doesn't play them yet. With Dual Core on, the DS music is made on the second CPU core while
-the game runs, a frame ahead.
+ones it names.
+Sound Effects (GBA | DS), under Music Style, picks which sound effects the
+game plays: with DS (the default), each GBA sound effect plays as its DS
+match, at the Music Options volume; it starts, fades and stops with the GBA
+one (which plays on silently), and a DS effect longer than the GBA one plays
+on to its own end. Both settings are GBA only (in red) with another game's ROM.
+With Dual Core on, the DS music and sound effects are made on the second CPU
+core while the game runs, a frame ahead.
 
 The matches are built in (port/core/music.c, sDefaultMap). Music Matching, the
 development aid they were made with, is hidden; a build with

@@ -465,18 +465,22 @@ uint32_t sdat_ssar_entries(const Sdat *s, uint32_t arc, SdatSsarEntry **out) {
 
 int sdat_load_ssar_seq(const Sdat *s, uint32_t arc, uint32_t idx, SdatSeqBundle *out) {
     memset(out, 0, sizeof *out);
-    SdatSsarEntry *ents;
-    uint32_t n = sdat_ssar_entries(s, arc, &ents);
-    if (idx >= n || !ents[idx].valid) {
-        free(ents);
-        return -1;
-    }
-    SdatSsarEntry e = ents[idx];
-    free(ents);
-
     const SdatFatEntry *fe;
     if (ssar_file(s, arc, &fe) != 0) return -1;
+    /* The archive (cached after the first time), and the entry from its table */
     if (!(out->sseq = load_file(s, s->seqarc[arc].file_id, "SSAR", &out->sseq_size))) goto fail;
+    if (out->sseq_size < 0x20) goto fail;
+    uint32_t n = rd32(out->sseq + 0x1C), dofs = rd32(out->sseq + 0x18);
+    if (dofs > out->sseq_size || n == 0 || n > (out->sseq_size - 0x20) / 12 || idx >= n) goto fail;
+    const uint8_t *r = out->sseq + 0x20 + idx * 12;
+    SdatSsarEntry e;
+    e.offset = rd32(r);
+    e.bank = rd16(r + 4);
+    e.vol = r[6];
+    e.cpr = r[7];
+    e.ppr = r[8];
+    e.ply = r[9];
+    if (!(e.offset < out->sseq_size - dofs && e.bank < s->num_bank && s->bank[e.bank].present)) goto fail;
     out->data_off = rd32(out->sseq + 0x18);
     if (out->data_off >= out->sseq_size || e.offset >= out->sseq_size - out->data_off) goto fail;
     out->start_off = out->data_off + e.offset;
