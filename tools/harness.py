@@ -230,6 +230,8 @@ class Harness:
             val = 1 if self.args.dump_maps else 0
         elif reg == 16:  # was the last frame late? (Frame Skip: Auto)
             val = 1 if self.args.late_every and self.frame % self.args.late_every == 0 else 0
+        elif reg == 21:  # the drawing list's mode (port/core/gpulist.h)
+            val = self.args.gpu_list
         elif reg == 14:  # render the second screen this frame?
             val = 1 if self.wants_shot() or self.args.sub_always else 0
         else:
@@ -449,6 +451,7 @@ def main():
     ap.add_argument('--trace', action='append', default=[], help='log calls to this function (frame, r0-r3, lr)')
     ap.add_argument('--watch', action='append', default=[], help='log writes to SYMBOL+OFFSET[:LEN]')
     ap.add_argument('--late-every', type=int, default=0, help='report every Nth frame as late (Frame Skip: Auto)')
+    ap.add_argument('--gpu-list', type=int, default=0, help='drawing list: 1 draw frames from it, 2 also check them against the renderer')
     ap.add_argument('--sub-always', action='store_true', help='render the second screen every frame (as on the 3DS)')
     ap.add_argument('--profile-pcs', help='write the sampled PCs here (address count)')
     ap.add_argument('--profile', type=int, default=0, help='sample the PC every N instructions')

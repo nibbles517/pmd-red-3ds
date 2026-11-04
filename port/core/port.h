@@ -40,6 +40,14 @@ extern void (*gPortLineHook)(int line);
 void Ppu_BeginFrame(void);
 void Ppu_RenderLine(int line, uint16_t *dst);
 void Ppu_SetView(int wide); // wide: SCREEN_W-pixel lines, lines past 159 too (port_view.h)
+// The registers the lines are drawn from: a copy made as the line went by
+// (a frame that was to be drawn from the drawing list), NULL: the live ones
+void Ppu_SetLineRegs(const uint8_t *regs);
+// Drawing list (gpulist.h): line `line` described (Ppu_ListObjects first, at
+// line 0, after Ppu_BeginFrame); 0 if it can't be (the frame is drawn the
+// usual way)
+int Ppu_ListLine(int line);
+int Ppu_ListObjects(int lines);
 
 // dma.c
 void Dma_HBlank(void);
@@ -91,6 +99,10 @@ void Backend_Present(const uint16_t *frame, int width, int height);
 // Whether the last frame took longer than a 60th of a second (Frame Skip:
 // Auto then skips drawing the next one).
 bool Backend_FrameLate(void);
+// The drawing list (gpulist.h): 0 frames drawn as ever; 1 described and drawn
+// from the list (software, for now), the others as ever; 2 the same, and
+// checked against the renderer (the test harness: a report per frame)
+int Backend_GpuListMode(void);
 // Dual Core: runs fn(arg) on the second CPU core (or at once, if there is
 // none); Backend_WaitAsync waits for it to return. Jobs given while one is
 // running are done after it, in order (Backend_WaitAsync: all of them).
@@ -114,7 +126,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version17_UpdateRepoIfMissing;
+extern const int Backend_Version18_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

@@ -20,11 +20,12 @@ enum {
     IO_PRESENT_SIZE = 17, // write: the next IO_PRESENT's width << 16 | height
     IO_SUB_SIZE = 18,     // write: the next IO_SUBSCREEN picture's width << 16 | height
     IO_ARG = 19, IO_HANDLE = 20, // data files: offset, handle
+    IO_GPULIST = 21,      // read: the drawing list's mode (Backend_GpuListMode)
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4, CMD_SAVE_SLOT = 5,
        CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9, CMD_FILE_WRITE = 10 };
 
-const int Backend_Version17_UpdateRepoIfMissing = 17;
+const int Backend_Version18_UpdateRepoIfMissing = 18;
 
 // Dual Core: one core here, so the second core's part is drawn at once.
 void Backend_RunAsync(void (*fn)(void *), void *arg) { fn(arg); }
@@ -63,6 +64,7 @@ void Backend_Fatal(const char *msg)
 }
 
 bool Backend_FrameLate(void) { return IO[IO_LATE] != 0; }
+int Backend_GpuListMode(void) { return (int)IO[IO_GPULIST]; }
 
 void Backend_Present(const uint16_t *frame, int width, int height)
 {

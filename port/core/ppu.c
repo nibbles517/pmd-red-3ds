@@ -27,6 +27,7 @@
 #include <string.h>
 #include "port.h"
 #include "bgcache.h"
+#include "gpulist.h"
 
 
 #define W SCREEN_W_MAX // buffer size; the line drawn is sW pixels
@@ -42,6 +43,26 @@ struct PortWideBg gPortWideBg[4];
 uint8_t gPortTileBg[4];
 uint8_t gPortHudLines, gPortHudLeft;
 uint32_t gPortHudBar[PORT_HUD_BAR_MAX]; // (PORT_HUD_BAR_MAX / 8 tiles of 8 rows)
+
+// The I/O registers the renderer reads: the live ones, or a copy made as the
+// line went by (Ppu_SetLineRegs: a frame described for the drawing list
+// that has to be drawn here after all, frame.c).
+static const uint8_t *sRegs = gPortRegs;
+
+void Ppu_SetLineRegs(const uint8_t *regs)
+{
+    sRegs = regs ? regs : gPortRegs;
+}
+#define gPortRegs sRegs
+
+// Drawing list (gpulist.h): while sListMode is set, a line of a background
+// out of its cache is not copied but described (sDesc: the cache, its row,
+// and its column at screen x 0, up to screen x sDesc.xb); sListXa: where the
+// description starts (the wide view's text layers: their sides are not the
+// map's), sListStrip: pieces of the line given as pixels (BG1's sides).
+static int sListMode;
+static struct { BgCache *c; int y, x, xb, have; } sDesc;
+static int sListXa, sListStripN, sListStrip[2][2];
 
 #define TILE_OY ((sViewH - GBA_H) / 2)
 static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt);
@@ -326,6 +347,23 @@ static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
     uint64_t any = CacheRowBits(c->any[y], c->tilesW, tx0) & cols;
     uint64_t full = CacheRowBits(c->full[y], c->tilesW, tx0) & cols;
 
+    if (sListMode && !(c->byIndex && (CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols))) {
+        // described, not copied (its colours made first where they are stale)
+        uint64_t stale = CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols;
+        while (stale) {
+            uint32_t lo32 = (uint32_t)stale;
+            int i = lo32 ? __builtin_ctz(lo32) : 32 + __builtin_ctz((uint32_t)(stale >> 32));
+            stale &= stale - 1;
+            BgCache_Recolor(c, (tx0 + i) & (c->tilesW - 1), ty);
+        }
+        sDesc.c = c;
+        sDesc.y = y;
+        sDesc.x = x;
+        sDesc.xb = sW;
+        sDesc.have = 1;
+        return any != 0;
+    }
+
     if (c->byIndex && (CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols)) {
         // the palettes are fading (or just stopped, and these colours are
         // not made yet): the colours looked up from the numbers
@@ -475,11 +513,11 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
 {
     static uint16_t gbaLine[GBA_W];
     int gy = ((line - TILE_OY) % GBA_H + GBA_H) % GBA_H;
-    int any;
+    int any, list = sListMode;
 
-    sWide = 0; sW = GBA_W; sOx = 0;
+    sWide = 0; sW = GBA_W; sOx = 0; sListMode = 0; // (pixels: repeated below)
     any = RenderTextBg(bg, gy, gbaLine);
-    sWide = 1; sW = sViewW; sOx = sViewOx;
+    sWide = 1; sW = sViewW; sOx = sViewOx; sListMode = list;
     sLastMask = ALL_GROUPS; sLastFull = 0;
     if (!any)
         return 0; // nothing to show: compositing skips the layer
@@ -500,10 +538,12 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
 static int RenderHud(int line, uint16_t *out, uint16_t cnt)
 {
     int ox = sOx - gPortHudLeft;
-    int saveOx = sOx;
+    int saveOx = sOx, list = sListMode;
     sOx = ox;
     sW = ox + GBA_W;
+    sListMode = 0; // (pixels: changed below)
     int any = RenderTextBgVram(0, line, out, cnt);
+    sListMode = list;
     sOx = saveOx;
     sW = sViewW;
     for (int x = 0; x < ox; x++) out[x] = TRANSPARENT;
@@ -558,6 +598,8 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         int any = RenderTextBgVram(bg, line, out, cnt);
         sW = sViewW;
         uint32_t centerMask = sLastMask, centerFull = sLastFull;
+        if (sDesc.have)
+            sListXa = sOx; // (the sides: none, or the pattern below)
         if (bg == 0) {
             for (int x = 0; x < sOx; x++) out[x] = TRANSPARENT;
             for (int x = sOx + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
@@ -576,6 +618,11 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         for (int i = 0; i < 8; i++) pat[i] = px[(i - sOx + hofs) & 7];
         for (int x = 0; x < sOx; x++) out[x] = pat[x & 7];
         for (int x = sOx + GBA_W; x < sW; x++) out[x] = pat[x & 7];
+        if (sDesc.have && fill) { // (described: the sides as pixels)
+            sListStrip[0][0] = 0; sListStrip[0][1] = sOx;
+            sListStrip[1][0] = sOx + GBA_W; sListStrip[1][1] = sW;
+            sListStripN = 2;
+        }
         // The groups: the middle's as drawn (those wholly to the sides: the
         // side tile's), those taking in the sides opaque only if it is.
         uint32_t sides = Groups(0, sOx) | Groups(sOx + GBA_W, sW - sOx - GBA_W);
@@ -955,41 +1002,26 @@ static void FillSpan(uint8_t *wm, int lo, int hi, uint8_t value)
 static int sVLimit = GBA_H;
 static inline int WinBottom(int hi) { return (sWide && hi >= GBA_H) ? sViewH : hi; }
 
-// Composites one line. Layers are painted back to front through the window
-// mask, tracking each pixel's top two layers; then the colour effect (alpha,
-// brighten or darken) is applied in one pass. Equivalent to the reference's
-// per-pixel search for the top two visible layers, without the per-pixel work.
-static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio[4], uint16_t dispcnt)
+// The window mask of a line: per pixel (wm), bits 0-3 BG0-3, bit 4 OBJ,
+// bit 5 colour effects. Returns the bits set everywhere on the line (the AND
+// of every value the mask can hold), for which the per-pixel test can be
+// skipped; *winout6: the outside's bits.
+static unsigned WindowMask(int line, uint16_t dispcnt, uint8_t *wm, uint8_t *winout6)
 {
-    static uint8_t wm[W] __attribute__((aligned(4))), topL[W], secL[W];
-    static uint16_t secC[W];
-
-    uint16_t bldcnt = R16(0x50);
-    uint16_t bldalpha = R16(0x52);
-    int eva = bldalpha & 0x1F, evb = (bldalpha >> 8) & 0x1F;
-    int evy = R16(0x54) & 0x1F;
-    if (eva > 16) eva = 16;
-    if (evb > 16) evb = 16;
-    if (evy > 16) evy = 16;
-    int effect = (bldcnt >> 6) & 3;
-
-    // Window mask per pixel: bits 0-3 BG0-3, bit 4 OBJ, bit 5 colour effects.
-    // wmAll: the bits set everywhere on the line (the AND of every value
-    // the mask can hold), for which the per-pixel test can be skipped.
     int win0 = (dispcnt >> 13) & 1, win1 = (dispcnt >> 14) & 1, winObj = (dispcnt >> 15) & 1;
     unsigned wmAll = 0x3F;
-    uint8_t winout6 = 0x3F;
+    *winout6 = 0x3F;
     if (!(win0 | win1 | winObj)) {
-        memset(wm, 0x3F, sizeof(wm));
+        memset(wm, 0x3F, W);
     }
     else {
         uint16_t winin = R16(0x48), winout = R16(0x4A);
         wmAll = winout & 0x3F;
-        winout6 = winout & 0x3F;
+        *winout6 = winout & 0x3F;
         if (winObj && sObjWinAny) wmAll &= (winout >> 8) & 0x3F;
         if (win1) wmAll &= (winin >> 8) & 0x3F;
         if (win0) wmAll &= winin & 0x3F;
-        memset(wm, winout & 0x3F, sizeof(wm));
+        memset(wm, winout & 0x3F, W);
         if (winObj && sObjWinAny) {
             uint8_t v = (winout >> 8) & 0x3F;
             for (int x = sObjMinX; x <= sObjMaxX; x++)
@@ -1011,6 +1043,30 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
                 FillSpan(wm, h >> 8, h & 0xFF, winin & 0x3F);
         }
     }
+
+    return wmAll;
+}
+
+// Composites one line. Layers are painted back to front through the window
+// mask, tracking each pixel's top two layers; then the colour effect (alpha,
+// brighten or darken) is applied in one pass. Equivalent to the reference's
+// per-pixel search for the top two visible layers, without the per-pixel work.
+static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio[4], uint16_t dispcnt)
+{
+    static uint8_t wm[W] __attribute__((aligned(4))), topL[W], secL[W];
+    static uint16_t secC[W];
+
+    uint16_t bldcnt = R16(0x50);
+    uint16_t bldalpha = R16(0x52);
+    int eva = bldalpha & 0x1F, evb = (bldalpha >> 8) & 0x1F;
+    int evy = R16(0x54) & 0x1F;
+    if (eva > 16) eva = 16;
+    if (evb > 16) evb = 16;
+    if (evy > 16) evy = 16;
+    int effect = (bldcnt >> 6) & 3;
+
+    uint8_t winout6;
+    unsigned wmAll = WindowMask(line, dispcnt, wm, &winout6);
 
     // Per group, the window bits set in all its pixels / in some (groups
     // wholly inside or outside a window skip the per-pixel test below).
@@ -1269,4 +1325,183 @@ void Ppu_RenderLine(int line, uint16_t *dst)
 
     for (int i = 0; i < 2; i++)
         AffineAdvance(i);
+}
+
+// --- Drawing list (gpulist.h) -------------------------------------------------------
+
+// Describes line `line` for the drawing list instead of drawing it: each
+// background's line as a piece of its cache (or as pixels), cut to where the
+// windows show it. Returns 0 (with gGpuList.fallback set) if the line uses
+// what the list can't express; the frame is then drawn here after all.
+int Ppu_ListLine(int line)
+{
+    static uint8_t wm[W] __attribute__((aligned(4)));
+    static uint16_t sBld0, sAlpha0; // (the sprites were listed with line 0's)
+    uint16_t dispcnt = R16(0x00);
+    GpuList *l = &gGpuList;
+    sPalTBuilt = 0;
+    sVLimit = sWide ? sViewH : GBA_H;
+    if (dispcnt & 0x80) { l->fallback = GPU_WHY_BLANK; return 0; }
+    if ((dispcnt & 7) != 0) { l->fallback = GPU_WHY_MODE; return 0; }
+    if (dispcnt & 0x8000) { l->fallback = GPU_WHY_WINDOW; return 0; } // (the object window)
+    uint16_t bldcnt = R16(0x50), bldalpha = R16(0x52);
+    int effect = (bldcnt >> 6) & 3;
+    unsigned first = effect == 1 ? bldcnt & 0x3F : 0, second = (bldcnt >> 8) & 0x3F;
+    if (effect >= 2 || (first & second) || (first & 0x20)) { l->fallback = GPU_WHY_EFFECT; return 0; }
+    static uint16_t sObjBits;
+    if (line == 0) {
+        int eva = bldalpha & 0x1F, evb = (bldalpha >> 8) & 0x1F;
+        l->backdrop = Pal(0); // (the palettes don't change during a frame)
+        l->bdSecond = (second >> 5) & 1;
+        l->eva = (uint8_t)(eva > 16 ? 16 : eva);
+        l->evb = (uint8_t)(evb > 16 ? 16 : evb);
+        sObjBits = dispcnt & 0x1040;
+        sBld0 = bldcnt;
+        sAlpha0 = bldalpha;
+    }
+    else if ((dispcnt & 0x1040) != sObjBits) { l->fallback = GPU_WHY_OBJ_CHANGE; return 0; }
+    else if (bldcnt != sBld0 || (effect == 1 && bldalpha != sAlpha0)) { l->fallback = GPU_WHY_EFFECT; return 0; }
+
+    // The line's window mask, as runs of the same value
+    uint8_t winout6;
+    unsigned wmAll = WindowMask(line, dispcnt, wm, &winout6);
+    int runX[W / 2 + 2], runN = 0;
+    uint8_t runV[W / 2 + 2];
+    if (wmAll == 0x3F) {
+        runX[0] = 0; runV[0] = 0x3F; runN = 1;
+    }
+    else {
+        for (int x = 0; x < sW; x++)
+            if (x == 0 || wm[x] != wm[x - 1]) {
+                runX[runN] = x;
+                runV[runN++] = wm[x];
+            }
+    }
+    runX[runN] = sW;
+    unsigned shown = 0; // (the layers shown somewhere on the line)
+    for (int r = 0; r < runN; r++)
+        shown |= runV[r];
+    // Sprites are whole rectangles: they must be shown (and their effect
+    // allowed, if they are a first target) all along the line
+    if (dispcnt & 0x1000) {
+        unsigned need = 0x10 | ((first & 0x10) ? 0x20 : 0);
+        for (int r = 0; r < runN; r++)
+            if ((runV[r] & need) != need) { l->fallback = GPU_WHY_OBJ_WINDOW; return 0; }
+    }
+
+    for (int b = 0; b < 4; b++) {
+        if (!(dispcnt & (0x100 << b)) || !(shown & (1u << b)))
+            continue;
+        uint16_t key = GpuKeyBg(R16(0x08 + b * 2) & 3, b);
+        sDesc.have = 0;
+        sListXa = 0;
+        sListStripN = 0;
+        sListMode = 1;
+        sWantPtr = 0;
+        int any = RenderTextBg(b, line, sBg[b]);
+        sListMode = 0;
+        if (!any)
+            continue;
+        // What the layer's line is made of: a piece of its cache, pixels
+        int pa[3], pb[3], pn = 0, descAt = -1;
+        if (sDesc.have) {
+            descAt = pn;
+            pa[pn] = sListXa; pb[pn++] = sDesc.xb;
+            for (int i = 0; i < sListStripN; i++) {
+                pa[pn] = sListStrip[i][0]; pb[pn++] = sListStrip[i][1];
+            }
+        }
+        else {
+            pa[pn] = 0; pb[pn++] = sW;
+        }
+        int wPx = sDesc.have ? sDesc.c->tilesW * 8 : 0;
+        for (int r = 0; r < runN; r++) {
+            uint8_t v = runV[r];
+            if (!(v & (1u << b)))
+                continue;
+            int flags = (((first >> b) & 1) && (v & 0x20) ? GQ_BLEND : 0) | ((second >> b) & 1 ? GQ_SECOND : 0);
+            for (int k = 0; k < pn; k++) {
+                int a = pa[k] > runX[r] ? pa[k] : runX[r];
+                int e = pb[k] < runX[r + 1] ? pb[k] : runX[r + 1];
+                if (a >= e)
+                    continue;
+                if (k == descAt)
+                    GpuList_BgLine(line, b, key, flags, sDesc.y, (sDesc.x + a) & (wPx - 1), wPx, a, e);
+                else
+                    GpuList_StripLine(line, b, key, flags, sBg[b], a, e);
+            }
+        }
+    }
+    if (l->full) { l->fallback = GPU_WHY_FULL; return 0; }
+    return 1;
+}
+
+// The frame's sprites for the drawing list (at its first line, from the
+// registers then: dispcnt, its OBJ bits, which the other lines must keep).
+// Returns 0 (gGpuList.fallback set) for sprites the list can't express.
+int Ppu_ListObjects(int lines)
+{
+    GpuList *l = &gGpuList;
+    uint16_t dispcnt = R16(0x00);
+    if (!(dispcnt & 0x1000))
+        return 1;
+    int oneD = (dispcnt >> 6) & 1;
+    uint16_t mosaic = R16(0x4C);
+    uint16_t bldcnt = R16(0x50);
+    int objFlags = ((((bldcnt >> 6) & 3) == 1 && (bldcnt & 0x10)) ? GQ_BLEND : 0) | ((bldcnt & 0x1000) ? GQ_SECOND : 0);
+
+    for (int k = 0; k < sObjCount; k++) {
+        int n = sObjList[k];
+        const uint8_t *o = &gPortOam[n * 8];
+        uint16_t a0 = (uint16_t)(o[0] | (o[1] << 8));
+        int affine = (a0 >> 8) & 1;
+        if (!affine && (a0 & 0x200))
+            continue; // disabled
+        int shape = (a0 >> 14) & 3;
+        int mode = (a0 >> 10) & 3;
+        if (shape == 3 || mode == 3)
+            continue;
+        uint16_t a1 = (uint16_t)(o[2] | (o[3] << 8));
+        int size = (a1 >> 14) & 3;
+        int w = sObjW[shape][size], h = sObjH[shape][size];
+        int boundW = w, boundH = h;
+        if (affine && (a0 & 0x200)) { boundW *= 2; boundH *= 2; }
+        int y = a0 & 0xFF;
+        int wholeY = gPortOamY[n];
+        if (sWide && (wholeY & 0xFF) == y)
+            y = wholeY;
+        else if (y + boundH > 256) y -= 256;
+        if (y >= lines || y + boundH <= 0)
+            continue;
+        int x = a1 & 0x1FF;
+        if (x >= sObjXWrap) x -= 512;
+        x += sOx;
+        if (x >= sW || x + boundW <= 0)
+            continue;
+        if (mode == 2)
+            continue; // object window: only with windows (not listed)
+        if (affine) { l->fallback = GPU_WHY_OBJ_AFFINE; return 0; }
+        if (mode == 1) { l->fallback = GPU_WHY_OBJ_SEMI; return 0; }
+        if (((a0 >> 12) & 1) && (mosaic & 0xFF00)) { l->fallback = GPU_WHY_OBJ_MOSAIC; return 0; }
+
+        uint16_t a2 = (uint16_t)(o[4] | (o[5] << 8));
+        int color256 = (a0 >> 13) & 1;
+        unsigned tileNum = a2 & 0x3FF;
+        int prio = (a2 >> 10) & 3;
+        unsigned palBank = (a2 >> 12) & 0xF;
+        unsigned rowStride = oneD ? (unsigned)(w >> 3) * (color256 ? 2 : 1) : 32;
+        unsigned tileStep = color256 ? 2 : 1;
+        int flags = objFlags | (((a1 >> 12) & 1) ? GQ_HFLIP : 0) | (((a1 >> 13) & 1) ? GQ_VFLIP : 0);
+        uint16_t *dst = GpuList_Obj(x, y, w, h, flags, GpuKeyObj(prio, n));
+        if (dst == NULL) { l->fallback = GPU_WHY_FULL; return 0; }
+        const uint16_t *pal = &PAL16[256 + (color256 ? 0 : palBank * 16)];
+        for (int ty = 0; ty < h; ty++, dst += GPU_OBJ_W) {
+            unsigned rowTile = tileNum + (ty >> 3) * rowStride;
+            for (int tx = 0; tx < w; tx++) {
+                unsigned idx = ObjTexel(rowTile + (tx >> 3) * tileStep, tx, ty, color256);
+                dst[tx] = idx ? (pal[idx] & 0x7FFF) : TRANSPARENT;
+            }
+        }
+    }
+    return 1;
 }

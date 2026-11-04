@@ -7,8 +7,10 @@
 // game for the next frame.
 
 #include <string.h>
+#include <stdio.h>
 #include "port.h"
 #include "bgcache.h"
+#include "gpulist.h"
 
 unsigned char gPortRegs[0x400] __attribute__((aligned(4)));
 unsigned char gPortVram[0x18000] __attribute__((aligned(4)));
@@ -42,6 +44,78 @@ void (*gPortLineHook)(int line);
 static uint16_t sPictures[2][SCREEN_W_MAX * SCREEN_H_MAX];
 static uint16_t *sFrame = sPictures[0], *sShown = sPictures[1];
 static uint16_t sLine[SCREEN_W_MAX];
+
+// --- Drawing list (gpulist.h) -------------------------------------------------------
+//
+// With Backend_GpuListMode on, each frame's lines are described for the
+// drawing list (Ppu_ListLine) as they go by, with a copy of the registers
+// each line had; the frame is then drawn from the list, or, if a line used
+// what the list can't express, from those copies the usual way.
+
+static uint64_t sFrames; // (below)
+#define REG_COPY 0x60 // the registers the renderer reads (DISPCNT .. BLDY)
+static uint8_t sLineRegs[SCREEN_H_MAX][REG_COPY] __attribute__((aligned(4)));
+static uint8_t sStartRegs[REG_COPY] __attribute__((aligned(4)));
+static struct {
+    uint32_t frames, listed, bad, why[GPU_WHY_COUNT];
+    uint32_t quads, strips;
+} sListStats;
+
+// The frame drawn the usual way, from the registers' copies
+static void DrawFromCopies(int lines, uint16_t *dst, int stride)
+{
+    Ppu_SetLineRegs(sStartRegs);
+    Ppu_BeginFrame();
+    for (int y = 0; y < lines; y++) {
+        Ppu_SetLineRegs(sLineRegs[y]);
+        Ppu_RenderLine(y, &dst[y * stride]);
+    }
+    Ppu_SetLineRegs(NULL);
+}
+
+static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, int stride)
+{
+    static uint16_t check[SCREEN_W_MAX * SCREEN_H_MAX];
+    GpuList *l = &gGpuList;
+    sListStats.frames++;
+    if (listOk) {
+        sListStats.listed++;
+        sListStats.quads += l->quadCount;
+        sListStats.strips += l->stripRows;
+        GpuList_Draw(l, dst, stride);
+        if (listMode == 2) { // checked against the renderer
+            DrawFromCopies(lines, check, l->w);
+            int bad = 0, fx = -1, fy = -1;
+            for (int y = 0; y < lines; y++)
+                for (int x = 0; x < l->w; x++)
+                    if (dst[y * stride + x] != check[y * l->w + x]) {
+                        if (!bad++) { fx = x; fy = y; }
+                    }
+            if (bad) {
+                sListStats.bad++;
+                if (sListStats.bad <= 40)
+                    Backend_Log("gpu-list: frame %lu: %d pixels differ, first at %d,%d (list %04x, renderer %04x); %d quads",
+                                (unsigned long)sFrames, bad, fx, fy, dst[fy * stride + fx], check[fy * l->w + fx], l->quadCount);
+            }
+        }
+    }
+    else {
+        sListStats.why[l->fallback]++;
+        DrawFromCopies(lines, dst, stride);
+    }
+    if (sListStats.frames % 300 == 0) {
+        char why[160];
+        int n = 0;
+        why[0] = 0;
+        for (int i = 1; i < GPU_WHY_COUNT && n < (int)sizeof(why) - 24; i++)
+            if (sListStats.why[i])
+                n += snprintf(why + n, sizeof(why) - n, " %s %lu", gGpuWhy[i], (unsigned long)sListStats.why[i]);
+        Backend_Log("gpu-list: %lu frames, %lu listed (%lu differ), %lu quads and %lu strip rows a frame; others:%s",
+                    (unsigned long)sListStats.frames, (unsigned long)sListStats.listed, (unsigned long)sListStats.bad,
+                    (unsigned long)(sListStats.listed ? sListStats.quads / sListStats.listed : 0),
+                    (unsigned long)(sListStats.listed ? sListStats.strips / sListStats.listed : 0), why);
+    }
+}
 enum { VIEW_GBA, VIEW_FRAMED, VIEW_WIDE };
 static int sViewMode = -1; // view of the last frame
 static int sViewW;         // ... and its width
@@ -91,7 +165,7 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version17_UpdateRepoIfMissing != 17)
+    if (Backend_Version18_UpdateRepoIfMissing != 18)
         Backend_Fatal("backend version mismatch");
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
@@ -237,6 +311,12 @@ static void RunFrame(void)
         BgCache_Prepare(gPortRegs, wide); // (before the first line)
     if (!skip)
         Ppu_BeginFrame();
+    int listMode = skip ? 0 : Backend_GpuListMode(), listOk = 0;
+    if (listMode) {
+        memcpy(sStartRegs, gPortRegs, REG_COPY);
+        GpuList_Begin(wide ? SCREEN_W : GBA_W, lines);
+        listOk = 1;
+    }
 
     // Lines 0-159: visible. The wide view also draws lines below, as if the
     // screen went on (no VCount events there, but the HBlank DMA continues).
@@ -249,6 +329,13 @@ static void RunFrame(void)
         if (skip) {
             // not drawn
         }
+        else if (listMode) { // described (or drawn below, from the copy)
+            memcpy(sLineRegs[line], gPortRegs, REG_COPY);
+            if (listOk && line == 0)
+                listOk = Ppu_ListObjects(lines);
+            if (listOk)
+                listOk = Ppu_ListLine(line);
+        }
         else if (mode == VIEW_GBA) {
             Ppu_RenderLine(line, &sFrame[line * GBA_W]);
         }
@@ -260,6 +347,14 @@ static void RunFrame(void)
             memcpy(&sFrame[(line + NARROW_OY) * SCREEN_W + NARROW_OX], sLine, GBA_W * sizeof(uint16_t));
         }
         Dma_HBlank();
+    }
+    if (listMode) {
+        if (mode == VIEW_GBA)
+            ListFrameDone(listMode, listOk, lines, sFrame, GBA_W);
+        else if (wide)
+            ListFrameDone(listMode, listOk, lines, sFrame, SCREEN_W);
+        else
+            ListFrameDone(listMode, listOk, lines, &sFrame[NARROW_OY * SCREEN_W + NARROW_OX], SCREEN_W);
     }
     Backend_Mark(PORT_MARK_DRAWN, skip);
     LoadWide(&live); // the game's again

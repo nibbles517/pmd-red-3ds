@@ -39,7 +39,11 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 
 void AgbMain(void);
 
-const int Backend_Version17_UpdateRepoIfMissing = 17;
+const int Backend_Version18_UpdateRepoIfMissing = 18;
+
+// The drawing list (port/core/gpulist.h): not used on the 3DS yet (stage 1
+// draws it in software, for the test harness)
+int Backend_GpuListMode(void) { return 0; }
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
