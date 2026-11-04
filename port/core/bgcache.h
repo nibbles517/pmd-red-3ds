@@ -48,6 +48,10 @@ typedef struct {
     int catchUp, catchStart;  // ... tile rows done so far, from the first one on the screen
     int indexOk;              // idx stands for every pixel (not so: a 256-colour wide map's black)
     uint16_t table[256];      // the colour of each idx (the palettes as they are now)
+    // Drawing on the GPU (gpulist.h): tiles whose pixels changed since the
+    // backend last copied them into its texture (set by Decode and Recolor)
+    uint32_t gpuDirty[64][2];
+    int gpuAny;
     uint16_t px[BGC_STRIDE * 512]; // the pixels (TRANSPARENT: bit 15)
     uint8_t idx[BGC_STRIDE * 512]; // ... as colour numbers: 4bpp bank * 16 + n (n 0: clear;
                               // 0x10: the wide map's black), 256 colours the number itself

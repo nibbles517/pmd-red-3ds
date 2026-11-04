@@ -105,6 +105,8 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
     c->entry[ty * 64 + tx] = (uint16_t)e;
     c->recolor[ty][w] &= ~bit;
     c->todo[ty][w] &= ~bit;
+    c->gpuDirty[ty][w] |= bit;
+    c->gpuAny = 1;
 }
 
 void BgCache_Recolor(BgCache *c, int tx, int ty)
@@ -116,6 +118,8 @@ void BgCache_Recolor(BgCache *c, int tx, int ty)
         for (int i = 0; i < 8; i++)
             dst[i] = table[src[i]];
     c->recolor[ty][tx >> 5] &= ~(1u << (tx & 31));
+    c->gpuDirty[ty][tx >> 5] |= 1u << (tx & 31);
+    c->gpuAny = 1;
 }
 
 // The colour of each colour number, from the palettes as they are now

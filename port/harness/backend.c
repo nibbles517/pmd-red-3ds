@@ -65,6 +65,7 @@ void Backend_Fatal(const char *msg)
 
 bool Backend_FrameLate(void) { return IO[IO_LATE] != 0; }
 int Backend_GpuListMode(void) { return (int)IO[IO_GPULIST]; }
+void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int oy) { (void)list; (void)frameW; (void)frameH; (void)ox; (void)oy; }
 
 void Backend_Present(const uint16_t *frame, int width, int height)
 {

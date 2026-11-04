@@ -22,6 +22,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "../core/port.h"
+#include "../core/gpulist.h"
+#include "../core/bgcache.h"
 
 #define DATA_DIR "sdmc:/3ds/pmd-red-3ds"
 // Save Data 1 (Game Options > Change Current Save Data on the title picks
@@ -36,14 +38,12 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 #define CONFIG_PATH DATA_DIR "/config.bin"
 #define DEBUG_FLAG DATA_DIR "/debug.txt"
 #define CPU_VIDEO_FLAG DATA_DIR "/cpu-video.txt" // the pictures copied by the CPU, as before the GPU did it
+#define GPU_FLIP_FLAG DATA_DIR "/gpu-flip.txt" // GPU Drawing: the textures' rows the other way up (see GpuListInit)
 
 void AgbMain(void);
 
 const int Backend_Version18_UpdateRepoIfMissing = 18;
 
-// The drawing list (port/core/gpulist.h): not used on the 3DS yet (stage 1
-// draws it in software, for the test harness)
-int Backend_GpuListMode(void) { return 0; }
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -255,6 +255,7 @@ static shaderProgram_s sShader;
 static int sProjLoc;
 static GpuPicture sGpuMain, sGpuSub;
 static bool sSubModeIsPicture(void);
+static void GpuListInit(void);
 
 static bool GpuPictureInit(GpuPicture *p)
 {
@@ -275,12 +276,13 @@ static void GpuInit(void)
         Backend_Log("video: CPU (cpu-video.txt)");
         return;
     }
-    if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE)) {
+    if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE * 4)) { // (room for GPU Drawing's rectangles)
         Backend_Log("video: CPU (citro3d did not start)");
         return;
     }
-    sTargetTop = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, -1);
-    sTargetBottom = C3D_RenderTargetCreate(240, 320, GPU_RB_RGBA8, -1);
+    // (with a stencil buffer: GPU Drawing's blending, GpuDrawList)
+    sTargetTop = C3D_RenderTargetCreate(240, 400, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
+    sTargetBottom = C3D_RenderTargetCreate(240, 320, GPU_RB_RGBA8, GPU_RB_DEPTH24_STENCIL8);
     sShaderDvlb = DVLB_ParseFile(sPresentShader, PRESENT_SHADER_SIZE);
     if (sTargetTop == NULL || sTargetBottom == NULL || sShaderDvlb == NULL
         || !GpuPictureInit(&sGpuMain) || !GpuPictureInit(&sGpuSub)) {
@@ -305,6 +307,7 @@ static void GpuInit(void)
     Mtx_OrthoTilt(&sProjTop, 0.0f, 400.0f, 240.0f, 0.0f, 1.0f, -1.0f, true);
     Mtx_OrthoTilt(&sProjBottom, 0.0f, 320.0f, 240.0f, 0.0f, 1.0f, -1.0f, true);
     sGpu = true;
+    GpuListInit();
     Port_SetSubScreenFadeByBackend(true); // (its fades: the texture's colours times a grey, as the main screen's)
     Backend_Log("video: GPU");
 }
@@ -360,6 +363,284 @@ static void GpuDrawPicture(C3D_RenderTarget *target, const C3D_Mtx *proj, GpuPic
     C3D_ImmDrawEnd();
 }
 
+// --- GPU Drawing: the drawing list on the GPU (docs/GPU.md) ------------------------
+//
+// A frame the core could describe (port/core/gpulist.h) is drawn by the GPU
+// straight onto the screen, at the picture's place and scale: the backdrop,
+// then the list's rectangles back to front. Its textures are in linear
+// memory, written by the CPU in the GPU's own layout (8x8 tiles, the pixels
+// of each in Z order), as RGBA5551 (alpha 0: transparent):
+//   - one per background cache (512x512): only its tiles that changed (the
+//     cache marks them, gpuDirty) are written;
+//   - the strip and sprite textures: only where the frame's rectangles read.
+// They are written just before the GPU draws the frame (GpuDrawFrame, after
+// C3D_FrameBegin: the GPU is done with the last one).
+//
+// Transparent texels are left out by the alpha test. Alpha blending, as the
+// list says: the stencil buffer holds, per pixel, whether what is there is a
+// second target (cleared to the backdrop's); a rectangle that isn't a first
+// target covers what is there and sets it to whether it is a second target;
+// one that is draws where it is 0 as it is, then where it is 1 blended with
+// what is there (the blend colour: eva, evb), setting it to 0 (a first target
+// is never a second one in a listed frame).
+//
+// Which way up a texture's rows are in memory isn't certain here (the first
+// row at the start, as the picture textures turned out); with gpu-flip.txt in
+// the data folder they are written the other way up.
+
+#define GL_TEX 512 // every list texture is 512x512
+static C3D_Tex sGlBg[4], sGlStrip, sGlObj;
+static bool sGlReady, sGlFlip;
+static const GpuList *sGlList;    // the main screen's picture is this list (else sGpuMain's texture)
+static bool sGlUploaded;          // ... its textures written
+static int sGlFrameW, sGlFrameH, sGlOx, sGlOy; // where the list goes in the frame
+static uint16_t sGlMorton[8][8];  // (y, x) in a tile -> its place in the tile
+static u64 sGlUploadTicks;        // the meter: writing the textures
+static uint32_t sGlLastListed, sGlLastWhy[GPU_WHY_COUNT];
+
+static void GpuListInit(void)
+{
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            sGlMorton[y][x] = (uint16_t)((x & 1) | ((y & 1) << 1) | ((x & 2) << 1) | ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3));
+    FILE *flag = fopen(GPU_FLIP_FLAG, "r");
+    if (flag != NULL) {
+        fclose(flag);
+        sGlFlip = true;
+    }
+    C3D_Tex *all[6] = { &sGlBg[0], &sGlBg[1], &sGlBg[2], &sGlBg[3], &sGlStrip, &sGlObj };
+    for (int i = 0; i < 6; i++) {
+        if (!C3D_TexInit(all[i], GL_TEX, GL_TEX, GPU_RGBA5551)) { // (linear memory)
+            Backend_Log("gpu drawing: not available (no memory for its textures)");
+            return;
+        }
+        memset(all[i]->data, 0, GL_TEX * GL_TEX * 2);
+        GSPGPU_FlushDataCache(all[i]->data, GL_TEX * GL_TEX * 2);
+        C3D_TexSetFilter(all[i], GPU_NEAREST, GPU_NEAREST);
+        C3D_TexSetWrap(all[i], GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    }
+    sGlReady = true;
+    Backend_Log("gpu drawing: ready%s", sGlFlip ? " (rows flipped: gpu-flip.txt)" : "");
+}
+
+int Backend_GpuListMode(void)
+{
+    return sGpu && sGlReady && Port_GpuDraw() ? 3 : 0;
+}
+
+// GBA BGR555 (bit 15: transparent) -> RGBA5551
+static inline uint16_t To5551(uint16_t c)
+{
+    if (c & 0x8000)
+        return 0;
+    return (uint16_t)(((c & 0x1F) << 11) | ((c & 0x3E0) << 1) | ((c >> 9) & 0x3E) | 1);
+}
+
+// Texel (x, y) of a list texture (y: the image's row, from its top)
+static inline uint16_t *GlTexel(uint16_t *tex, int x, int y)
+{
+    if (sGlFlip)
+        y = GL_TEX - 1 - y;
+    return tex + ((((y >> 3) * (GL_TEX / 8) + (x >> 3)) << 6) | sGlMorton[y & 7][x & 7]);
+}
+
+// The rows of a texture written since the last flush (in memory order)
+static int sGlLo, sGlHi;
+static void GlTouch(int y0, int y1) // (image rows y0 .. y1 - 1)
+{
+    int a = sGlFlip ? GL_TEX - y1 : y0, b = sGlFlip ? GL_TEX - y0 : y1;
+    a &= ~7;
+    b = (b + 7) & ~7;
+    if (a < sGlLo) sGlLo = a;
+    if (b > sGlHi) sGlHi = b;
+}
+static void GlFlush(C3D_Tex *t)
+{
+    if (sGlHi > sGlLo)
+        GSPGPU_FlushDataCache((uint16_t *)t->data + sGlLo * GL_TEX, (sGlHi - sGlLo) * GL_TEX * 2);
+    sGlLo = GL_TEX;
+    sGlHi = 0;
+}
+
+// A rectangle of pixels (BGR555, srcStride a row) into a list texture at (x, y)
+static void GlWriteRect(uint16_t *tex, const uint16_t *src, int srcStride, int x, int y, int w, int h)
+{
+    for (int j = 0; j < h; j++) {
+        const uint16_t *s = src + j * srcStride;
+        int ty = y + j;
+        for (int i = 0; i < w; i++)
+            *GlTexel(tex, x + i, ty) = To5551(s[i]);
+    }
+    GlTouch(y, y + h);
+}
+
+// The list's textures: the background caches' changed tiles, then the strips
+// and the sprites the rectangles read
+static void GpuListUpload(const GpuList *l)
+{
+    u64 start = svcGetSystemTick();
+    sGlLo = GL_TEX;
+    sGlHi = 0;
+    for (int b = 0; b < 4; b++) {
+        BgCache *c = &gBgCache[b];
+        if (!c->gpuAny)
+            continue;
+        uint16_t *tex = (uint16_t *)sGlBg[b].data;
+        for (int ty = 0; ty < 64; ty++)
+            for (int w = 0; w < 2; w++) {
+                uint32_t bits = c->gpuDirty[ty][w];
+                if (!bits)
+                    continue;
+                c->gpuDirty[ty][w] = 0;
+                while (bits) {
+                    int tx = w * 32 + __builtin_ctz(bits);
+                    bits &= bits - 1;
+                    GlWriteRect(tex, &c->px[ty * 8 * BGC_STRIDE + tx * 8], BGC_STRIDE, tx * 8, ty * 8, 8, 8);
+                }
+            }
+        c->gpuAny = 0;
+        GlFlush(&sGlBg[b]);
+    }
+    for (int pass = 0; pass < 2; pass++) {
+        int which = pass ? GTEX_OBJ : GTEX_STRIP;
+        C3D_Tex *t = pass ? &sGlObj : &sGlStrip;
+        for (int i = 0; i < l->quadCount; i++) {
+            const GpuQuad *q = &l->quads[i];
+            if (q->tex != which)
+                continue;
+            const uint16_t *src = pass ? &gGpuObj[q->sy][q->sx] : &gGpuStrip[q->sy][q->sx];
+            GlWriteRect((uint16_t *)t->data, src, pass ? GPU_OBJ_W : GPU_STRIP_W, q->sx, q->sy, q->w, q->h);
+        }
+        GlFlush(t);
+    }
+    sGlUploadTicks += svcGetSystemTick() - start;
+}
+
+// A texture coordinate: v at the top edge of image row y
+static inline float GlV(int y)
+{
+    return sGlFlip ? (float)(GL_TEX - y) / GL_TEX : (float)y / GL_TEX;
+}
+
+static int sGlState = -1; // (the last GlSetBlend's, -1: unknown)
+static void GlSetBlend(bool blend, int stencilRef, GPU_TESTFUNC test, GPU_STENCILOP pass)
+{
+    int state = (blend ? 1 : 0) | (stencilRef << 1) | ((int)test << 2) | ((int)pass << 6);
+    if (state == sGlState)
+        return;
+    sGlState = state;
+    if (blend)
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_CONSTANT_COLOR, GPU_CONSTANT_ALPHA, GPU_ONE, GPU_ZERO);
+    else
+        C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO, GPU_ONE, GPU_ZERO);
+    C3D_StencilTest(true, test, stencilRef, 0xFF, 0xFF);
+    C3D_StencilOp(GPU_STENCIL_KEEP, GPU_STENCIL_KEEP, pass);
+}
+
+// The list on its screen: picture (x, y, w, h) on the screen is the frame
+static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const GpuList *l, unsigned level)
+{
+    const float sx = (float)sGpuMain.w / sGlFrameW, sy = (float)sGpuMain.h / sGlFrameH;
+    const float px = sGpuMain.x + sGlOx * sx, py = sGpuMain.y + sGlOy * sy;
+    C3D_Tex *texs[6] = { &sGlBg[0], &sGlBg[1], &sGlBg[2], &sGlBg[3], &sGlStrip, &sGlObj };
+    static uint16_t order[GPU_MAX_QUADS], start[1024];
+
+    C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0x000000FF, (u32)(l->bdSecond ? 1 : 0) << 24);
+    C3D_FrameDrawOn(target);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, sProjLoc, proj);
+    C3D_DepthTest(true, GPU_ALWAYS, GPU_WRITE_COLOR); // (no depth: the stencil's ops on "pass")
+
+    // The backdrop: the list's area in its colour (as it fades)
+    C3D_TexEnv *env = C3D_GetTexEnv(0);
+    unsigned r = (l->backdrop & 31) * level / 31, g = ((l->backdrop >> 5) & 31) * level / 31, b = ((l->backdrop >> 10) & 31) * level / 31;
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_CONSTANT, GPU_CONSTANT, GPU_CONSTANT);
+    C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+    C3D_TexEnvColor(env, 0xFF000000 | (b << 16) | (g << 8) | r);
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    C3D_StencilTest(false, GPU_ALWAYS, 0, 0, 0);
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO, GPU_ONE, GPU_ZERO);
+    {
+        float x0 = px, y0 = py, x1 = px + l->w * sx, y1 = py + l->h * sy;
+        C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
+        C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmSendAttrib(x1, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmDrawEnd();
+    }
+
+    // The rectangles: texels times the fade's grey, transparent ones left out
+    env = C3D_GetTexEnv(0);
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_CONSTANT, GPU_PRIMARY_COLOR);
+    C3D_TexEnvFunc(env, C3D_RGB, GPU_MODULATE);
+    C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
+    C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
+    C3D_AlphaTest(true, GPU_GREATER, 0);
+    sGlState = -1;
+    unsigned eva = l->eva * 255 / 16, evb = l->evb * 255 / 16;
+    C3D_BlendingColor((evb << 24) | (eva << 16) | (eva << 8) | eva);
+
+    // Back to front: the keys from the largest down (each key's in the order added)
+    memset(start, 0, sizeof(start));
+    for (int i = 0; i < l->quadCount; i++)
+        start[1023 - (l->quads[i].key & 1023)]++;
+    for (int k = 0, sum = 0; k < 1024; k++) {
+        int c = start[k];
+        start[k] = (uint16_t)sum;
+        sum += c;
+    }
+    for (int i = 0; i < l->quadCount; i++)
+        order[start[1023 - (l->quads[i].key & 1023)]++] = (uint16_t)i;
+
+    int boundTex = -1;
+    for (int n = 0; n < l->quadCount; n++) {
+        const GpuQuad *q = &l->quads[order[n]];
+        // Cut to the list's area (sprites can reach past it)
+        int dx0 = q->dx, dy0 = q->dy, dx1 = q->dx + q->w, dy1 = q->dy + q->h;
+        int cx0 = dx0 < 0 ? 0 : dx0, cy0 = dy0 < 0 ? 0 : dy0;
+        int cx1 = dx1 > l->w ? l->w : dx1, cy1 = dy1 > l->h ? l->h : dy1;
+        if (cx0 >= cx1 || cy0 >= cy1)
+            continue;
+        // The texels at the cut rectangle's edges (flips: read from the other end)
+        int u0, u1, t0, t1;
+        if (q->flags & GQ_HFLIP) { u0 = q->sx + (dx1 - cx0); u1 = q->sx + (dx1 - cx1); }
+        else                     { u0 = q->sx + (cx0 - dx0); u1 = q->sx + (cx1 - dx0); }
+        if (q->flags & GQ_VFLIP) { t0 = q->sy + (dy1 - cy0); t1 = q->sy + (dy1 - cy1); }
+        else                     { t0 = q->sy + (cy0 - dy0); t1 = q->sy + (cy1 - dy0); }
+        float fu0 = (float)u0 / GL_TEX, fu1 = (float)u1 / GL_TEX, fv0 = GlV(t0), fv1 = GlV(t1);
+        float x0 = px + cx0 * sx, y0 = py + cy0 * sy, x1 = px + cx1 * sx, y1 = py + cy1 * sy;
+
+        if (q->tex != boundTex) {
+            C3D_TexBind(0, texs[q->tex]);
+            boundTex = q->tex;
+        }
+        int passes = (q->flags & GQ_BLEND) ? 2 : 1;
+        for (int pass = 0; pass < passes; pass++) {
+            if (passes == 1) // covers; the flag: whether it is a second target
+                GlSetBlend(false, (q->flags & GQ_SECOND) ? 1 : 0, GPU_ALWAYS, GPU_STENCIL_REPLACE);
+            else if (pass == 0) // a first target over what isn't a second one: as it is
+                GlSetBlend(false, 0, GPU_EQUAL, GPU_STENCIL_KEEP);
+            else // ... over a second target: blended, and the flag cleared
+                GlSetBlend(true, 1, GPU_EQUAL, GPU_STENCIL_ZERO);
+            C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
+            C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(fu0, fv0, 0.0f, 0.0f);
+            C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(fu1, fv0, 0.0f, 0.0f);
+            C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(fu0, fv1, 0.0f, 0.0f);
+            C3D_ImmSendAttrib(x1, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(fu1, fv1, 0.0f, 0.0f);
+            C3D_ImmDrawEnd();
+        }
+    }
+
+    // Back to how the pictures are drawn
+    C3D_AlphaTest(false, GPU_ALWAYS, 0);
+    C3D_StencilTest(false, GPU_ALWAYS, 0, 0, 0);
+    C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
+    C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO, GPU_ONE, GPU_ZERO);
+}
+
+
 // A screen's swap (asked for when the GPU finished copying its picture to
 // the framebuffer) happens at its next VBlank; until then the screen still
 // shows the other buffer, the one the next copy goes into. Copying over the
@@ -397,6 +678,13 @@ static void GpuDrawFrame(void)
         GpuWaitForSwap(mainScreen);
     if (drawSub)
         GpuWaitForSwap(subScreen);
+    if (drawMain && sGlList != NULL) { // GPU Drawing: the drawing list
+        if (!sGlUploaded) {
+            GpuListUpload(sGlList);
+            sGlUploaded = true;
+        }
+        GpuDrawList(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, sGlList, level);
+    }
     // The screen change fade: the texture's colours times a grey
     C3D_TexEnv *env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
@@ -407,7 +695,8 @@ static void GpuDrawFrame(void)
     if (drawMain) {
         C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
         C3D_DirtyTexEnv(env); // (a new colour alone is not sent again)
-        GpuDrawPicture(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, &sGpuMain);
+        if (sGlList == NULL)
+            GpuDrawPicture(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, &sGpuMain);
         sGpuMain.dirty = false;
         sGpuMain.level = level;
         sGpuCopiedTo[mainScreen] = gfxGetFramebuffer(mainScreen, GFX_LEFT, NULL, NULL);
@@ -456,6 +745,7 @@ static void GpuPresentMain(const uint16_t *frame, int frameW, int frameH)
 static void PresentMain(const uint16_t *frame, int frameW, int frameH)
 {
     sScaled = Port_ScreenScale(0) != PORT_SCALE_NONE; // (the CPU: Full and Stretch alike)
+    sGlList = NULL; // (the picture, not a drawing list)
     if (sGpu) {
         GpuPresentMain(frame, frameW, frameH);
         return;
@@ -627,7 +917,7 @@ static void MeterEndFrame(void)
     if (now - sMeterStart < 5 * (u64)SYSCLOCK_ARM11)
         return;
     if (sLog != NULL) {
-        char line[512];
+        char line[768];
         double ms = 1000.0 / SYSCLOCK_ARM11, secs = (now - sMeterStart) / (double)SYSCLOCK_ARM11;
         bool isNew = false;
         APT_CheckNew3DS(&isNew);
@@ -646,7 +936,20 @@ static void MeterEndFrame(void)
                               busy * ms / sMeterFrames, music * ms / sMeterFrames, (int)(busy * 100.0 / (now - sMeterStart)));
         }
         if (n < (int)sizeof(line))
-            snprintf(line + n, sizeof(line) - n, " | sub: %s", Port_SubScreenStats());
+            n += snprintf(line + n, sizeof(line) - n, " | sub: %s", Port_SubScreenStats());
+        if (sGlReady && n < (int)sizeof(line)) { // GPU Drawing: frames from the list, its textures, why not
+            uint32_t listed, why[GPU_WHY_COUNT];
+            Port_GpuListCounts(&listed, why);
+            n += snprintf(line + n, sizeof(line) - n, " | gpu: %s list=%lu/%d up %.1f ms/frame",
+                          Port_GpuDraw() ? "on" : "off", (unsigned long)(listed - sGlLastListed),
+                          sMeterFrames - sMeterSkipped, sGlUploadTicks * ms / sMeterFrames);
+            for (int i = 1; i < GPU_WHY_COUNT && n < (int)sizeof(line); i++)
+                if (why[i] != sGlLastWhy[i])
+                    n += snprintf(line + n, sizeof(line) - n, " %s=%lu", gGpuWhy[i], (unsigned long)(why[i] - sGlLastWhy[i]));
+            sGlLastListed = listed;
+            memcpy(sGlLastWhy, why, sizeof(why));
+            sGlUploadTicks = 0;
+        }
         fprintf(sLog, "%s\n", line);
         fflush(sLog);
     }
@@ -659,12 +962,31 @@ void Backend_Present(const uint16_t *frame, int width, int height)
 {
     // NULL: a frame Frame Skip did not draw. During the screen change fade
     // the last picture is shown again (the fade changes its colours).
-    if (frame == NULL && sFadeDir != 0)
-        frame = Port_Framebuffer();
+    if (frame == NULL && sFadeDir != 0 && sGlList == NULL)
+        frame = Port_Framebuffer(); // (a list: drawn again as it is, GpuDrawFrame)
     sMainPresented = frame != NULL;
     sMarkTick = svcGetSystemTick();
     if (frame != NULL)
         PresentMain(frame, width, height);
+    Part(T_OUT);
+    PresentSub(); // (times T_SUB and T_SUBOUT)
+}
+
+// GPU Drawing: the frame is the drawing list (frame.c), drawn in GpuDrawFrame
+void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int oy)
+{
+    int x, y, w, h;
+    sMainPresented = 1;
+    sMarkTick = svcGetSystemTick();
+    ScaleRect(frameW, frameH, sBottom ? 320 : 400, Port_ScreenScale(0), &x, &y, &w, &h);
+    sGlList = (const GpuList *)list;
+    sGlUploaded = false;
+    sGlFrameW = frameW; sGlFrameH = frameH;
+    sGlOx = ox; sGlOy = oy;
+    sGpuMain.shown = true;
+    sGpuMain.dirty = true;
+    sGpuMain.x = x; sGpuMain.y = y; sGpuMain.w = w; sGpuMain.h = h;
+    sGpuMain.srcW = 0; // (the picture texture no longer holds what is shown)
     Part(T_OUT);
     PresentSub(); // (times T_SUB and T_SUBOUT)
 }

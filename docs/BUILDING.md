@@ -93,6 +93,17 @@ For a log, create an empty file `SD:/3ds/pmd-red-3ds/debug.txt`; the port then
 writes `port.log` next to it. Every 5 seconds it has a line with the time each part
 of a frame took, what the second screen drew, and how busy the second core
 was (`core2`: all its work, and of that the DS music's, in ms per frame).
+With GPU Drawing its `gpu:` part says whether it is on, how many of the
+frames drawn came from the drawing list (`list=listed/drawn`), how long
+writing its textures took (`up`), and why the other frames were drawn by the
+CPU (`window=`, `effect=`, `obj-semi=`, ...: docs/GPU.md).
+
+Others > Graphics Options > **GPU Drawing** (On at first) has the GPU draw the
+main screen from the drawing list (docs/GPU.md); Off draws it on the CPU as
+before. If the picture comes out upside down within its pieces (backgrounds
+and sprites each flipped top to bottom), put an empty `gpu-flip.txt` in
+`SD:/3ds/pmd-red-3ds/` and say so: it means the GPU reads its textures' rows
+the other way up from what the port expects.
 
 ## Game half (Linux or WSL)
 

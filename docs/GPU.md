@@ -67,17 +67,40 @@ it takes the main core about a tenth of the instructions drawing it does
 check the caches either way); what is left is the GPU's work, and sending
 it the changed tiles and the strips.
 
-On the 3DS the list is not used yet (`Backend_GpuListMode` returns 0).
+## The 3DS side (stage 2: built, being tried on hardware)
+
+`port/3ds/main.c`, "GPU Drawing". With Graphics Options > GPU Drawing On (and
+the GPU path in use, not `cpu-video.txt`), `Backend_GpuListMode` returns 3:
+frame.c hands each listed frame to `Backend_PresentList` instead of drawing
+it, and the GPU draws it in `GpuDrawFrame`:
+
+- **Textures** in linear memory, RGBA5551 (alpha 0: transparent), written by
+  the CPU straight in the GPU's layout (8x8 tiles, each in Z order): one
+  512x512 per background cache, of which only the tiles the cache marked
+  changed (`gpuDirty`, set by `BgCache_Decode` and `BgCache_Recolor`) are
+  written; the strip and sprite textures, only where the frame's rectangles
+  read. Written after `C3D_FrameBegin` (the GPU is done with the last frame).
+- **Drawing** straight onto the screen at the picture's place and scale (the
+  same as the CPU picture's: Size and Scale settings): the target cleared
+  black, a backdrop rectangle, then the rectangles back to front, cut to the
+  list's area, transparent texels left out by the alpha test. The screen
+  change fade multiplies everything by a grey, as for the CPU picture.
+- **Blending**: the screens' render targets have a stencil buffer, cleared to
+  whether the backdrop is a second target. A rectangle that isn't a first
+  target replaces the stencil with whether it is a second target; one that
+  is draws twice: where the stencil is 0 as it is, then where it is 1 with
+  GPU blending (constant colour eva/16, constant alpha evb/16), clearing it.
+- `gpu-flip.txt` writes the textures' rows the other way up, in case the
+  GPU's convention turns out to be the other one.
+
+port.log's `gpu:` part: on/off, frames from the list out of those drawn,
+the time writing textures takes, and why the others weren't listed.
 
 ## Next stages
 
-2. **The 3DS side.** Each background cache as a 512x512 GPU texture (the
-   GBA's 8x8 tiles match the GPU's own 8x8 texture blocks, so a changed tile
-   is a small update: only the tiles decoded or recoloured since the last
-   frame are sent); the strip and sprite textures each frame; the list's
-   rectangles as quads, sorted back to front; alpha blending with the
-   stencil buffer; the picture into the framebuffer as now. Then tuning on
-   the hardware, with port.log showing how much CPU time the list takes.
+2. **Tuning on the hardware** (stage 2 is built): what port.log shows the
+   list, its textures and the GPU taking; the strips and sprites written in
+   the GPU's format by the core instead of converted.
 3. **Fewer strips.** The HUD row from BG0's cache, and the other strips
    that remain (about 45 rows a frame).
 4. **Fades on the GPU.** The game fades by changing every palette; the

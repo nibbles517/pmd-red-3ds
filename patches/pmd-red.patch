@@ -5092,16 +5092,18 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..9384c5c8
+index 00000000..584d844c
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,426 @@
+@@ -0,0 +1,439 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
 +//   Frame Skip             Off / Auto / Always (port/core/frame.c)
 +//   Dual Core              Off / On: the second CPU core makes the DS music
 +//                          and sound effects (port/core/music.c)
++//   GPU Drawing            Off / On: the main screen drawn by the GPU, from the
++//                          drawing list (port/core/gpulist.h, docs/GPU.md)
 +//   Main Screen            Top / Bottom (kept in the save's game options, in the
 +//                          bit the DS version uses for its touch screen option:
 +//                          clear = bottom, set = top)
@@ -5132,9 +5134,9 @@ index 00000000..9384c5c8
 +
 +enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN, PAGE_CONTROLS, PAGE_MUSIC };
 +// First page entries
-+enum { TOP_FRAMESKIP, TOP_DUALCORE, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
++enum { TOP_FRAMESKIP, TOP_DUALCORE, TOP_GPU, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
 +
-+#define TOP_ENTRIES 5
++#define TOP_ENTRIES 6
 +#define MAX_CHOICES 4
 +
 +enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP, SETTING_BUTTONS, SETTING_TOUCH, SETTING_MUSIC_STYLE, SETTING_SFX_STYLE };
@@ -5172,6 +5174,7 @@ index 00000000..9384c5c8
 +ALIGNED(4) static const u8 sAuto[] = _("Auto");
 +ALIGNED(4) static const u8 sAlways[] = _("Always");
 +ALIGNED(4) static const u8 sDualCore[] = _("Dual Core");
++ALIGNED(4) static const u8 sGpuDraw[] = _("GPU Drawing");
 +ALIGNED(4) static const u8 sOn[] = _("On");
 +ALIGNED(4) static const u8 sMainScreen[] = _("Main Screen{MOVE_X_POSITION_BY_80}Top{MOVE_X_POSITION_BY_120}Bottom");
 +ALIGNED(4) static const u8 sTop[] = _("Top");
@@ -5318,6 +5321,12 @@ index 00000000..9384c5c8
 +        PrintStringOnWindow(FRAMESKIP_X(1), y, sOn, win, 0);
 +        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.dualCore ? 1 : 0), y + 10,
 +                                     GetStringLineWidth(gPortConfig.dualCore ? sOn : sOff), COLOR_WHITE_2);
++        y = GetMenuEntryYCoord(&sMenu.input, TOP_GPU);
++        PrintStringOnWindow(8, y, sGpuDraw, win, 0);
++        PrintStringOnWindow(FRAMESKIP_X(0), y, sOff, win, 0);
++        PrintStringOnWindow(FRAMESKIP_X(1), y, sOn, win, 0);
++        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.gpuDrawOff ? 0 : 1), y + 10,
++                                     GetStringLineWidth(gPortConfig.gpuDrawOff ? sOff : sOn), COLOR_WHITE_2);
 +        y = GetMenuEntryYCoord(&sMenu.input, TOP_MAIN_SCREEN);
 +        PrintStringOnWindow(8, y, sMainScreen, win, 0);
 +        if (sMenu.options->touchScreen)
@@ -5467,6 +5476,10 @@ index 00000000..9384c5c8
 +                if (index == TOP_FRAMESKIP) {
 +                    s32 v = gPortConfig.frameSkip < 3 ? gPortConfig.frameSkip : PORT_FRAMESKIP_AUTO;
 +                    gPortConfig.frameSkip = (u8)((v + 3 + step) % 3);
++                    changed = TRUE;
++                }
++                else if (index == TOP_GPU) {
++                    gPortConfig.gpuDrawOff = !gPortConfig.gpuDrawOff;
 +                    changed = TRUE;
 +                }
 +                else if (index == TOP_DUALCORE) {

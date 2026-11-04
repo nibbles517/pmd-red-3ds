@@ -8,7 +8,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 10
+#define PORT_CONFIG_VERSION 11
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19, .sfxVolume = 10 };
 
 // The settings before any are chosen (no config file yet). Those kept in the
@@ -87,6 +87,10 @@ void Port_LoadConfig(void)
         c.version = 10;
         c.sfxVolume = 10;
     }
+    if (c.version == 10) { // before GPU Drawing (On)
+        c.version = 11;
+        c.gpuDrawOff = 0;
+    }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
     if (gPortConfig.musicStyle > PORT_MUSIC_DS)
@@ -127,6 +131,11 @@ void Port_UpdateScreenSize(void)
 int Port_DualCore(void)
 {
     return gPortConfig.dualCore != 0;
+}
+
+int Port_GpuDraw(void)
+{
+    return gPortConfig.gpuDrawOff == 0;
 }
 
 extern bool8 gPortGroundRunning; // subscreen.c

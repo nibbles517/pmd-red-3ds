@@ -73,6 +73,14 @@ static void DrawFromCopies(int lines, uint16_t *dst, int stride)
     Ppu_SetLineRegs(NULL);
 }
 
+// For the 3DS's meter: frames listed (drawn from the list), and why the
+// others weren't (GPU_WHY_*), since the start
+void Port_GpuListCounts(uint32_t *listed, uint32_t why[GPU_WHY_COUNT])
+{
+    *listed = sListStats.listed;
+    memcpy(why, sListStats.why, sizeof(sListStats.why));
+}
+
 static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, int stride)
 {
     static uint16_t check[SCREEN_W_MAX * SCREEN_H_MAX];
@@ -82,6 +90,8 @@ static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, in
         sListStats.listed++;
         sListStats.quads += l->quadCount;
         sListStats.strips += l->stripRows;
+        if (listMode == 3)
+            return; // (the backend draws it: Backend_PresentList)
         GpuList_Draw(l, dst, stride);
         if (listMode == 2) { // checked against the renderer
             DrawFromCopies(lines, check, l->w);
@@ -103,7 +113,7 @@ static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, in
         sListStats.why[l->fallback]++;
         DrawFromCopies(lines, dst, stride);
     }
-    if (sListStats.frames % 300 == 0) {
+    if (listMode != 3 && sListStats.frames % 300 == 0) { // (the 3DS: in its own meter's lines)
         char why[160];
         int n = 0;
         why[0] = 0;
@@ -367,7 +377,15 @@ static void RunFrame(void)
         sShown = sFrame;
         sFrame = t;
     }
-    if (mode == VIEW_GBA)
+    if (listMode == 3 && listOk) { // the backend draws the list (on the GPU)
+        if (mode == VIEW_GBA)
+            Backend_PresentList(&gGpuList, GBA_W, GBA_H, 0, 0);
+        else if (wide)
+            Backend_PresentList(&gGpuList, SCREEN_W, SCREEN_H, 0, 0);
+        else
+            Backend_PresentList(&gGpuList, SCREEN_W, SCREEN_H, NARROW_OX, NARROW_OY);
+    }
+    else if (mode == VIEW_GBA)
         Backend_Present(skip ? NULL : sShown, GBA_W, GBA_H);
     else
         Backend_Present(skip ? NULL : sShown, SCREEN_W, SCREEN_H);

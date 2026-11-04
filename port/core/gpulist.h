@@ -83,6 +83,7 @@ extern uint16_t gGpuStrip[GPU_STRIP_ROWS][GPU_STRIP_W];
 extern uint16_t gGpuObj[GPU_OBJ_H][GPU_OBJ_W];
 
 void GpuList_Begin(int w, int h);
+void Port_GpuListCounts(uint32_t *listed, uint32_t why[GPU_WHY_COUNT]); // (frame.c)
 
 // A background's line (ppu.c): screen x xa..xb-1 read from cache layer bg's
 // row y, from column x0 at screen x xa (wrapping at the map's width wPx);

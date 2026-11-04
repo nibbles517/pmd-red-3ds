@@ -67,6 +67,7 @@ bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Scre
 bool Port_WideSize(void);          // ... > Main Screen Settings > Size is DS or Fit (port_view.h)
 void Port_LoadConfig(void);
 int Port_FrameSkipMode(void);
+int Port_GpuDraw(void);             // Graphics Options > GPU Drawing: On (the drawing list on the GPU)
 int Port_DualCore(void);            // Graphics Options > Dual Core: On (the DS sound on the second core)       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
 
 // subscreen.c: the second screen, DS-style. Fills out (BGR555) and returns
@@ -103,6 +104,10 @@ bool Backend_FrameLate(void);
 // from the list (software, for now), the others as ever; 2 the same, and
 // checked against the renderer (the test harness: a report per frame)
 int Backend_GpuListMode(void);
+// ... 3: the backend draws the frames that could be listed (on the GPU):
+// list (struct GpuList, gpulist.h) is the picture, frameW x frameH (black
+// around it: the list's own w x h at ox, oy), in place of Backend_Present
+void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int oy);
 // Dual Core: runs fn(arg) on the second CPU core (or at once, if there is
 // none); Backend_WaitAsync waits for it to return. Jobs given while one is
 // running are done after it, in order (Backend_WaitAsync: all of them).
