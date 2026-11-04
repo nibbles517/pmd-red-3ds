@@ -8,8 +8,8 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 9
-struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19 };
+#define PORT_CONFIG_VERSION 10
+struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19, .sfxVolume = 10 };
 
 // The settings before any are chosen (no config file yet). Those kept in the
 // game's own options have theirs in InitializeGameOptions (game_options.c):
@@ -33,7 +33,8 @@ static void SetDefaultConfig(void)
     // Music Options (DS music only with Blue Rescue Team's ROM, though)
     gPortConfig.musicStyle = PORT_MUSIC_DS;
     gPortConfig.musicVolume = 19;
-    gPortConfig.sfxStyle = PORT_MUSIC_DS; // (the DS's sound effects, at the music's volume)
+    gPortConfig.sfxStyle = PORT_MUSIC_DS; // (the DS's sound effects)
+    gPortConfig.sfxVolume = 10;
     // Layout Options (in dungeons)
     gPortConfig.layoutSubScreen = PORT_SUB_LAYOUT_BLUE;
     gPortConfig.layoutInfo = 1; // Additional Info: On
@@ -82,6 +83,10 @@ void Port_LoadConfig(void)
         c.version = 9;
         c.sfxStyle = PORT_MUSIC_DS;
     }
+    if (c.version == 9) { // before their own volume (they had the music's)
+        c.version = 10;
+        c.sfxVolume = 10;
+    }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
     if (gPortConfig.musicStyle > PORT_MUSIC_DS)
@@ -90,6 +95,8 @@ void Port_LoadConfig(void)
         gPortConfig.sfxStyle = PORT_MUSIC_GBA;
     if (gPortConfig.musicVolume < 1 || gPortConfig.musicVolume > 40)
         gPortConfig.musicVolume = 19;
+    if (gPortConfig.sfxVolume < 1 || gPortConfig.sfxVolume > 40)
+        gPortConfig.sfxVolume = 10;
     if (gPortConfig.saveSlot > 2)
         gPortConfig.saveSlot = 0;
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));

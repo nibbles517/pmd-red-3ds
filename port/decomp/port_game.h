@@ -46,6 +46,7 @@ struct PortConfig
     u8 musicStyle;          // PORT_MUSIC_GBA, PORT_MUSIC_DS
     u8 musicVolume;         // the DS music's volume, in tens of percent (version 7; 19 at first)
     u8 sfxStyle;            // Sound Effects: PORT_MUSIC_GBA, PORT_MUSIC_DS (version 9)
+    u8 sfxVolume;           // the DS sound effects' volume, in tens of percent (version 10; 10 at first)
 };
 
 extern struct PortConfig gPortConfig;
@@ -149,6 +150,7 @@ unsigned Port_KeysHeld(void);
 // ROM icon, at twice its size (string_format.c)
 #define PORT_PORTRAIT_ICON 0x80
 void Port_MusicSetVolume(int percent); // 10-400; 100: as the DS plays it
+void Port_MusicSetSfxVolume(int percent); // the sound effects' (the same)
 extern u8 gPortRawXY;
 // Change Current Save Data: Save Data 1-3 (port/core/save.c)
 void Port_ChangeSaveSlot(int slot);

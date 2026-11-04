@@ -68,9 +68,13 @@ sound effect as the DS one with the same number); the file only changes the
 ones it names.
 Sound Effects (GBA | DS), under Music Style, picks which sound effects the
 game plays: with DS (the default), each GBA sound effect plays as its DS
-match, at the Music Options volume; it starts, fades and stops with the GBA
+match, at the SFX Volume; it starts, fades and stops with the GBA
 one (which plays on silently), and a DS effect longer than the GBA one plays
 on to its own end. Both settings are GBA only (in red) with another game's ROM.
+Music Volume and SFX Volume (Left/Right: 10% a press) set the DS music's and
+the DS sound effects' volumes; the Music Player's volume buttons (Circle Pad
+up/down or ZL/ZR) set the volume of what plays (or of the track the cursor is
+on), and Sound Effect Matching's (Circle Pad up/down) the DS side's.
 With Dual Core on, the DS music and sound effects are made on the second CPU
 core while the game runs, a frame ahead; that is all the second core does (the
 picture is drawn on the main core).

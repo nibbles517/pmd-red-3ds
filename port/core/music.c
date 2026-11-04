@@ -45,6 +45,7 @@ static Song *sSong;
 static int sPlaying = -1; // the track playing (or stopped mid-way: -1 once stopped)
 static int sPaused, sRepeat;
 static int sVolume = 190; // percent (Music Options sets it)
+static int sSfxVolume = 100; // ... the sound effects' (theirs, in the Music Player too)
 static uint32_t sMixRate = 2 * 18157; // twice the game's mixing rate (see Port_MusicMix)
 
 // Music Style: DS: the game's background music and fanfare, as DS tracks;
@@ -706,7 +707,7 @@ int Port_MusicPlay(int i)
     if (g == NULL)
         return 0;
     ApplyTiming(g);
-    song_set_volume(g, sVolume);
+    song_set_volume(g, sTracks[i].isEffect ? sSfxVolume : sVolume);
     sSong = g;
     sFound.done[JOB_PLAYER] = sJobFound.done[JOB_PLAYER] = 0;
     sFound.posMs = sJobFound.posMs = 0;
@@ -733,6 +734,11 @@ int Port_MusicPaused(void)
 void Port_MusicSetVolume(int percent)
 {
     sVolume = percent; // (set when the next frame is made)
+}
+
+void Port_MusicSetSfxVolume(int percent)
+{
+    sSfxVolume = percent; // (set when the next frame is made)
 }
 
 void Port_MusicSetRepeat(int repeat)
@@ -810,14 +816,14 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     // core while the game runs (Dual Core), else now
     ApplySlots(); // (the tracks the game asked for since)
     if (sSong != NULL)
-        song_set_volume(sSong, sVolume);
+        song_set_volume(sSong, sPlaying >= 0 && sPlaying < sCount && sTracks[sPlaying].isEffect ? sSfxVolume : sVolume);
     int any = 0;
     sJobSong[JOB_PLAYER] = sPaused ? NULL : sSong;
     any |= sJobSong[JOB_PLAYER] != NULL;
     for (int k = 0; k < SLOTS; k++) {
         Slot *s = &sSlots[k];
         if (s->song != NULL)
-            song_set_volume(s->song, sVolume * s->volume64 / 64);
+            song_set_volume(s->song, (k >= SLOT_SFX ? sSfxVolume : sVolume) * s->volume64 / 64);
         sJobSong[JOB_SLOT0 + k] = s->paused ? NULL : s->song;
         any |= sJobSong[JOB_SLOT0 + k] != NULL;
     }
