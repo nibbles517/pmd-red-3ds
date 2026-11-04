@@ -150,6 +150,7 @@ struct SseqPlayer {
     uint32_t bank_size;
     Wave *waves[SDAT_MAX_WAVEARCS];
     uint32_t nwaves[SDAT_MAX_WAVEARCS];
+    uint8_t waves_shared[SDAT_MAX_WAVEARCS]; /* the file cache's (sdat.c): not freed here */
 
     Track trk[NUM_TRK];
     Chan ch[NUM_CH];
@@ -231,7 +232,11 @@ static int load_waves(SseqPlayer *p, const SdatSeqBundle *bun) {
 
     for (int k = 0; k < SDAT_MAX_WAVEARCS; k++) {
         p->nwaves[k] = bun->swar[k] ? swar_count(bun->swar[k], bun->swar_size[k]) : 0;
-        p->waves[k] = (Wave *)calloc(p->nwaves[k] ? p->nwaves[k] : 1, sizeof(Wave));
+        /* (a cached SWAR: its samples decoded once, shared with the songs using it) */
+        p->waves[k] = bun->swar[k] ? sdat_swar_waves(bun->swar[k], p->nwaves[k]) : NULL;
+        p->waves_shared[k] = p->waves[k] != NULL;
+        if (!p->waves[k])
+            p->waves[k] = (Wave *)calloc(p->nwaves[k] ? p->nwaves[k] : 1, sizeof(Wave));
         used[k] = (uint8_t *)calloc(p->nwaves[k] ? p->nwaves[k] : 1, 1);
         if (!p->waves[k] || !used[k]) goto done;
     }
@@ -263,7 +268,11 @@ static int load_waves(SseqPlayer *p, const SdatSeqBundle *bun) {
 
     for (int k = 0; k < SDAT_MAX_WAVEARCS; k++)
         for (uint32_t i = 0; i < p->nwaves[k]; i++)
-            if (used[k][i]) swar_decode(bun->swar[k], bun->swar_size[k], i, &p->waves[k][i]); /* failures stay silent */
+            if (used[k][i] && !p->waves[k][i].data) { /* (not decoded yet; failures stay silent) */
+                swar_decode(bun->swar[k], bun->swar_size[k], i, &p->waves[k][i]);
+                if (p->waves_shared[k] && p->waves[k][i].data)
+                    sdat_cache_account(bun->swar[k], (p->waves[k][i].len + 1) * 2);
+            }
     ok = 1;
 
 done:
@@ -841,6 +850,8 @@ SseqPlayer *sseq_create(const SdatSeqBundle *b, uint32_t out_rate) {
 void sseq_destroy(SseqPlayer *p) {
     if (!p) return;
     for (int k = 0; k < SDAT_MAX_WAVEARCS; k++) {
+        if (p->waves_shared[k])
+            continue; /* (the file cache's) */
         if (p->waves[k])
             for (uint32_t i = 0; i < p->nwaves[k]; i++) wave_free(&p->waves[k][i]);
         free(p->waves[k]);

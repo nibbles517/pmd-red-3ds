@@ -121,6 +121,14 @@ void sdat_free_seq(SdatSeqBundle *b);
 /* View of a STRM file for chunked streaming (size 0 if invalid). */
 DataSource sdat_strm_source(const Sdat *s, uint32_t strm_index);
 
+/* ---- the file cache (sdat.c): files songs load are kept, with their decoded samples ---- */
+#include "wave.h"
+/* A cached SWAR's decoded samples (n of them, decoded on demand: empty until
+ * then), or NULL if `swar` isn't a cached file. Shared by every song using it. */
+Wave *sdat_swar_waves(const uint8_t *swar, uint32_t n);
+/* Counts `bytes` more against the cache's budget for that file (samples decoded into it). */
+void sdat_cache_account(const uint8_t *data, uint32_t bytes);
+
 /* ---- sequence archives (SSAR: mostly sound effects) ---- */
 const char *sdat_ssar_name(const Sdat *s, uint32_t arc);                 /* may be NULL */
 const char *sdat_ssar_entry_name(const Sdat *s, uint32_t arc, uint32_t idx); /* may be NULL */

@@ -3,6 +3,7 @@
  * Options. Files are read through the backend (Backend_File*) instead of stdio.
  */
 #include "sdat.h"
+#include "wave.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -201,7 +202,10 @@ fail:
     return -1;
 }
 
+static void cache_drop(const Sdat *s);
+
 void sdat_close(Sdat *s) {
+    cache_drop(s);
     free(s->seq);
     free(s->seqarc);
     free(s->bank);
@@ -227,7 +231,124 @@ const char *sdat_strm_name(const Sdat *s, uint32_t i) {
 
 /* ---- loading ----------------------------------------------------------------------- */
 
+/* ---- file cache ----------------------------------------------------------------------
+ * The files songs load (SSEQ/SSAR, SBNK, SWAR) are kept after use, with the
+ * samples decoded from SWARs, so the next song using them (sound effects
+ * mostly share one bank and archive) needs no reading or decoding. Files in
+ * use stay; the least recently used others go when the cache is full. */
+
+#define CACHE_SLOTS 32
+#define CACHE_BUDGET (12u << 20) /* bytes: files and decoded samples */
+
+typedef struct {
+    const Sdat *s;
+    uint16_t file;
+    uint8_t *data;
+    uint32_t size;
+    int refs;
+    uint32_t used;   /* when last asked for */
+    Wave *waves;     /* a SWAR's samples, decoded on demand (sdat_swar_waves) */
+    uint32_t nwaves;
+    uint32_t bytes;  /* data + decoded samples */
+} CacheEntry;
+
+static CacheEntry g_cache[CACHE_SLOTS];
+static uint32_t g_cache_clock, g_cache_bytes;
+
+static void cache_free(CacheEntry *c) {
+    if (c->waves)
+        for (uint32_t i = 0; i < c->nwaves; i++) wave_free(&c->waves[i]);
+    free(c->waves);
+    free(c->data);
+    g_cache_bytes -= c->bytes;
+    memset(c, 0, sizeof *c);
+}
+
+static void cache_drop(const Sdat *s) {
+    for (int i = 0; i < CACHE_SLOTS; i++)
+        if (g_cache[i].data && g_cache[i].s == s) cache_free(&g_cache[i]); /* (nothing of a closed SDAT plays) */
+}
+
+static CacheEntry *cache_find(const uint8_t *data) {
+    for (int i = 0; data && i < CACHE_SLOTS; i++)
+        if (g_cache[i].data == data) return &g_cache[i];
+    return NULL;
+}
+
+/* Room for `need` more bytes and a slot: the least recently used unused files go. */
+static CacheEntry *cache_room(uint32_t need) {
+    for (;;) {
+        CacheEntry *free_slot = NULL, *oldest = NULL;
+        for (int i = 0; i < CACHE_SLOTS; i++) {
+            CacheEntry *c = &g_cache[i];
+            if (!c->data) { if (!free_slot) free_slot = c; continue; }
+            if (c->refs == 0 && (!oldest || c->used < oldest->used)) oldest = c;
+        }
+        if (free_slot && g_cache_bytes + need <= CACHE_BUDGET) return free_slot;
+        if (!oldest) return free_slot; /* (all in use: over budget rather than fail) */
+        cache_free(oldest);
+    }
+}
+
+void sdat_cache_account(const uint8_t *data, uint32_t bytes) {
+    CacheEntry *c = cache_find(data);
+    if (!c) return;
+    c->bytes += bytes;
+    g_cache_bytes += bytes;
+}
+
+Wave *sdat_swar_waves(const uint8_t *data, uint32_t n) {
+    CacheEntry *c = cache_find(data);
+    if (!c) return NULL;
+    if (!c->waves) {
+        c->waves = (Wave *)calloc(n ? n : 1, sizeof(Wave));
+        if (!c->waves) return NULL;
+        c->nwaves = n;
+    }
+    return c->nwaves == n ? c->waves : NULL;
+}
+
+/* A bundle's buffer done with: a cached file is kept (for the next song), any other freed. */
+static void release(uint8_t *data) {
+    CacheEntry *c = cache_find(data);
+    if (c) {
+        if (c->refs > 0) c->refs--;
+        return;
+    }
+    free(data);
+}
+
+static uint8_t *load_file_uncached(const Sdat *s, uint16_t file_id, const char *magic, uint32_t *size_out);
+
 static uint8_t *load_file(const Sdat *s, uint16_t file_id, const char *magic, uint32_t *size_out) {
+    for (int i = 0; i < CACHE_SLOTS; i++) {
+        CacheEntry *c = &g_cache[i];
+        if (c->data && c->s == s && c->file == file_id && memcmp(c->data, magic, 4) == 0) {
+            c->refs++;
+            c->used = ++g_cache_clock;
+            *size_out = c->size;
+            return c->data;
+        }
+    }
+    uint32_t size = 0;
+    uint8_t *data = load_file_uncached(s, file_id, magic, &size);
+    if (!data) return NULL;
+    CacheEntry *c = cache_room(size);
+    if (c) {
+        c->s = s;
+        c->file = file_id;
+        c->data = data;
+        c->size = size;
+        c->refs = 1;
+        c->used = ++g_cache_clock;
+        c->bytes = size;
+        g_cache_bytes += size;
+    }
+    *size_out = size;
+    return data;
+}
+
+static uint8_t *load_file_uncached(const Sdat *s, uint16_t file_id, const char *magic, uint32_t *size_out) {
     if (file_id >= s->num_fat) return NULL;
     const SdatFatEntry *e = &s->fat[file_id];
     if (e->size < 16) return NULL;
@@ -241,9 +362,9 @@ static uint8_t *load_file(const Sdat *s, uint16_t file_id, const char *magic, ui
 }
 
 void sdat_free_seq(SdatSeqBundle *b) {
-    free(b->sseq);
-    free(b->sbnk);
-    for (int k = 0; k < SDAT_MAX_WAVEARCS; k++) free(b->swar[k]);
+    release(b->sseq);
+    release(b->sbnk);
+    for (int k = 0; k < SDAT_MAX_WAVEARCS; k++) release(b->swar[k]);
     memset(b, 0, sizeof *b);
 }
 
