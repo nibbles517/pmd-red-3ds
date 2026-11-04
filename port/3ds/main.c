@@ -689,12 +689,13 @@ void Backend_Present(const uint16_t *frame, int width, int height)
 // share of its system core (core 1), which the system's own services (the
 // screens, sound, the HOME Menu) then do without: asking for 80% made those
 // slow (port.log: sound and flushing took twice as long, even with Dual Core
-// turned off again); 50% left the second core too little to draw with. So
+// turned off again); 50% left the second core too little to draw with; 70%
+// was fine, and 75% is being tried (the DS music is made there too). So
 // the share is CPU_LIMIT_ON only while Dual Core is on
 // and the game is in front, and the least the system takes (CPU_LIMIT_OFF)
 // otherwise; the thread is stopped when Dual Core is turned off.
 
-#define CPU_LIMIT_ON 70
+#define CPU_LIMIT_ON 75
 #define CPU_LIMIT_OFF 5
 static Thread sWorker;
 static bool sWorkerOld3DS; // the worker uses the system core's share

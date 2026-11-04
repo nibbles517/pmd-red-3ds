@@ -60,8 +60,10 @@ music: put your own dump of Pokémon Mystery Dungeon: Blue Rescue Team, named
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 The Music Player lists the ROM's sound effects after its music (in green);
-an effect plays once. (The game's own sound effects are not matched to them
-yet.) With Dual Core on, the DS music is made on the second CPU core while
+an effect plays once. Sound Effect Matching (Dev), in Game Options for now,
+pairs each of the game's sound effects with one of the DS's (A plays the
+GBA one, Y the DS one, L/R and ZL/ZR pick another, X clears, START or B
+saves `sfx-map.txt` to the same folder). The game doesn't play them yet. With Dual Core on, the DS music is made on the second CPU core while
 the game runs, a frame ahead.
 
 The matches are built in (port/core/music.c, sDefaultMap). Music Matching, the

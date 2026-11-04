@@ -3464,7 +3464,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..e0c8e4b0 100644
+index 86f582c2..ad7ec450 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3493,7 +3493,7 @@ index 86f582c2..e0c8e4b0 100644
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +33,16 @@ enum
+@@ -18,7 +33,17 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -3504,6 +3504,7 @@ index 86f582c2..e0c8e4b0 100644
 +    MENU_OPTION_SAVE_DATA, // 3DS port: Change Current Save Data (title only)
 +    MENU_OPTION_MUSIC, // 3DS port: Music Options (title only)
 +    MENU_OPTION_MUSIC_MATCH, // 3DS port: Music Matching (development aid, title only)
++    MENU_OPTION_SFX_MATCH, // 3DS port: Sound Effect Matching (development aid, title only)
 +    MENU_OPTION_RETURN, // 3DS port: Return to Main Menu (outside dungeons)
 +    MENU_OPTION_SAVE_SLOT1, // ... Save Data 1, 2, 3
 +    MENU_OPTION_SAVE_SLOT2,
@@ -3511,7 +3512,7 @@ index 86f582c2..e0c8e4b0 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +55,20 @@ enum OptionsMenuStates
+@@ -31,6 +56,20 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -3532,7 +3533,7 @@ index 86f582c2..e0c8e4b0 100644
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +86,109 @@ static void sub_801DED0(void);
+@@ -48,6 +87,115 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -3564,6 +3565,12 @@ index 86f582c2..e0c8e4b0 100644
 +#define PORT_DEV_MUSIC_MATCHING 0
 +#endif
 +ALIGNED(4) static const u8 sMusicMatching[] = _("Music Matching (Dev)");
++// Sound Effect Matching: shown while the matches are being made (-DPORT_DEV_SFX_MATCHING=0 hides it)
++#ifndef PORT_DEV_SFX_MATCHING
++#define PORT_DEV_SFX_MATCHING 1
++#endif
++ALIGNED(4) static const u8 sSfxMatching[] = _("Sound Effect Matching (Dev)");
++static bool8 sMatchSfx; // Matching: the sound effects (else the music)
 +ALIGNED(4) static const u8 sReturnToMainMenu[] = _("{COLOR YELLOW}Return to Main Menu{RESET}");
 +ALIGNED(4) static const u8 sReturnPrompt[] = _("Would you like to save your adventure\nand return to the main menu?");
 +static bool8 sReturnToTitle; // saved: the field ends, for the title's main menu
@@ -3642,7 +3649,7 @@ index 86f582c2..e0c8e4b0 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +217,55 @@ u32 sub_801DCE8(void)
+@@ -76,8 +224,55 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -3656,10 +3663,10 @@ index 86f582c2..e0c8e4b0 100644
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
 +            HandleScreenMenu();
-             break;
++            break;
 +        case OPTIONS_MENU_SAVE_DATA:
 +            HandleSaveDataMenu();
-+            break;
+             break;
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            HandleSaveDataLoaded();
 +            break;
@@ -3698,7 +3705,7 @@ index 86f582c2..e0c8e4b0 100644
          default:
              break;
      }
-@@ -120,9 +308,13 @@ static void sub_801DD84(void)
+@@ -120,9 +315,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3713,7 +3720,7 @@ index 86f582c2..e0c8e4b0 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +322,32 @@ static void sub_801DD84(void)
+@@ -130,10 +329,32 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -3736,18 +3743,18 @@ index 86f582c2..e0c8e4b0 100644
 +            SetGameOptionsWindow();
 +            sUnknown_203B25C->unkBC.id[1] = sSaveDataWindow;
 +            sub_8012D08(&sUnknown_203B25C->unkBC.id[1], 3);
-+            break;
+             break;
 +        case OPTIONS_MENU_MUSIC:
 +        case OPTIONS_MENU_MUSIC_MATCH:
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetMusicWindows();
-             break;
++            break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +364,10 @@ static void sub_801DED0(void)
+@@ -150,6 +371,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -3758,7 +3765,7 @@ index 86f582c2..e0c8e4b0 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +382,81 @@ static void sub_801DED0(void)
+@@ -164,12 +389,81 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -3840,7 +3847,7 @@ index 86f582c2..e0c8e4b0 100644
      }
  }
  
-@@ -180,12 +467,49 @@ static void CreateOthersMenu(void)
+@@ -180,12 +474,54 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -3870,6 +3877,11 @@ index 86f582c2..e0c8e4b0 100644
 +        sUnknown_203B25C->menuItems[loopMax].text = sMusicMatching;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_MUSIC_MATCH;
 +#endif
++#if PORT_DEV_SFX_MATCHING
++        loopMax++;
++        sUnknown_203B25C->menuItems[loopMax].text = sSfxMatching;
++        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SFX_MATCH;
++#endif
 +        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sChangeSaveData;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SAVE_DATA;
@@ -3890,7 +3902,7 @@ index 86f582c2..e0c8e4b0 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +553,42 @@ static void HandleOthersMenu(void)
+@@ -229,6 +565,44 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -3921,7 +3933,9 @@ index 86f582c2..e0c8e4b0 100644
 +            SetOptionsMenuState(OPTIONS_MENU_RETURN_ASK);
 +            break;
 +        case MENU_OPTION_MUSIC_MATCH:
++        case MENU_OPTION_SFX_MATCH:
 +            // Blue Rescue Team's tracks only
++            sMatchSfx = menuAction == MENU_OPTION_SFX_MATCH;
 +            if (Port_MusicOpen() <= 0)
 +                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
 +            else if (!Port_MusicRomIsBlue())
@@ -3933,7 +3947,7 @@ index 86f582c2..e0c8e4b0 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +632,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +646,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -3950,7 +3964,7 @@ index 86f582c2..e0c8e4b0 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,11 +652,772 @@ static void sub_801E0FC(void)
+@@ -282,12 +666,841 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -4251,7 +4265,7 @@ index 86f582c2..e0c8e4b0 100644
 +            Port_MusicClose();
 +            Port_DsMusicRecheck(); // (Music Style: DS opens the ROM again)
 +            LeaveSettings(memcmp(&sOpenedConfig, &gPortConfig, sizeof(gPortConfig)) != 0);
-             break;
++            break;
 +        case 3: // A on Music Player
 +            PortScreenMenu_Destroy();
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC);
@@ -4294,7 +4308,7 @@ index 86f582c2..e0c8e4b0 100644
 +        Port_MusicSetRepeat(!Port_MusicRepeat());
 +        PlayMenuSoundEffect(MENU_SFX_TOGGLE);
 +        info = TRUE;
-     }
++    }
 +    else if (pressed & PORT_KEY_X) {
 +        Port_MusicStop();
 +        sMusicStatus = NULL;
@@ -4479,6 +4493,45 @@ index 86f582c2..e0c8e4b0 100644
 +#define MATCH_SONGS ((s32)(sizeof(sMatchSongs) / sizeof(sMatchSongs[0])))
 +#define MATCH_PER_PAGE 5
 +
++// Sound Effect Matching: the game's sound effects, the songs from 300 on in its
++// song table (sound/song_table.inc), each matched with one of the DS's
++// (port/core/music.c: sfx-map.txt). The same screen and buttons.
++static const struct { u16 first, last; } sSfxRanges[] = {
++    { 301, 313 }, { 330, 333 }, { 335, 348 }, { 351, 372 }, { 390, 392 },
++    { 400, 426 }, { 450, 495 }, { 497, 518 }, { 600, 805 }, { 807, 939 },
++};
++static u16 sSfxIds[512];
++static s32 sSfxCount;
++
++static void BuildSfxIds(void)
++{
++    u32 r;
++    s32 id;
++    sSfxCount = 0;
++    for (r = 0; r < sizeof(sSfxRanges) / sizeof(sSfxRanges[0]); r++)
++        for (id = sSfxRanges[r].first; id <= sSfxRanges[r].last && sSfxCount < (s32)ARRAY_COUNT(sSfxIds); id++)
++            sSfxIds[sSfxCount++] = (u16)id;
++}
++
++static s32 MatchCount(void) { return sMatchSfx ? sSfxCount : MATCH_SONGS; }
++static s32 MatchId(s32 i) { return sMatchSfx ? sSfxIds[i] : sMatchSongs[i].id; }
++static s32 MatchGet(s32 i) { return sMatchSfx ? Port_SfxMapGet(MatchId(i)) : Port_MusicMapGet(MatchId(i)); }
++static void MatchSet(s32 i, s32 track)
++{
++    if (sMatchSfx)
++        Port_SfxMapSet(MatchId(i), track);
++    else
++        Port_MusicMapSet(MatchId(i), track);
++}
++// "GBA 012 FILE_SELECT" / "SE 412"
++static void MatchName(u8 *out, s32 size, s32 i)
++{
++    if (sMatchSfx)
++        snprintf((char *)out, size, "SE %03d", MatchId(i));
++    else
++        snprintf((char *)out, size, "%03d %s", sMatchSongs[i].id, sMatchSongs[i].name);
++}
++
 +ALIGNED(4) static const u8 sMatchTitle[] = _("Music Matching");
 +ALIGNED(4) static const u8 sMatchControls1[] = _("A GBA  Y DS  L/R DS -/+1  ZL/ZR -/+10");
 +ALIGNED(4) static const u8 sMatchControls2[] = _("X Clear  START Save  B Save and leave");
@@ -4486,9 +4539,14 @@ index 86f582c2..e0c8e4b0 100644
 +ALIGNED(4) static const u8 sMatchNotSaved[] = _("{COLOR RED}Couldn't save music-map.txt.{RESET}");
 +ALIGNED(4) static const u8 sMatchPlayingGba[] = _("{COLOR CYAN}Playing the GBA song{RESET}");
 +ALIGNED(4) static const u8 sMatchPlayingDs[] = _("{COLOR CYAN}Playing the DS track{RESET}");
++ALIGNED(4) static const u8 sSfxMatchTitle[] = _("SFX Matching");
++ALIGNED(4) static const u8 sSfxMatchSaved[] = _("{COLOR GREEN}Saved sfx-map.txt.{RESET}");
++ALIGNED(4) static const u8 sSfxMatchNotSaved[] = _("{COLOR RED}Couldn't save sfx-map.txt.{RESET}");
++ALIGNED(4) static const u8 sSfxMatchPlayingGba[] = _("{COLOR CYAN}Playing the GBA sound effect{RESET}");
++ALIGNED(4) static const u8 sSfxMatchPlayingDs[] = _("{COLOR CYAN}Playing the DS sound effect{RESET}");
 +ALIGNED(4) static const u8 sMatchIdle[] = _("{COLOR CYAN}Nothing playing{RESET}");
 +static MenuInputStruct sMatchInput;
-+static s32 sMatchCursor;
++static s32 sMatchCursor, sMatchCursorSfx;
 +static s32 sMatchPlayingSong = -1; // the GBA song playing (sMatchSongs index)
 +static const u8 *sMatchStatus;
 +
@@ -4500,24 +4558,25 @@ index 86f582c2..e0c8e4b0 100644
 +
 +    CallPrepareTextbox_8008C54(MUSIC_LIST_WIN);
 +    sub_80073B8(MUSIC_LIST_WIN);
-+    PrintStringOnWindow(10, 0, sMatchTitle, MUSIC_LIST_WIN, 0);
++    PrintStringOnWindow(10, 0, sMatchSfx ? sSfxMatchTitle : sMatchTitle, MUSIC_LIST_WIN, 0);
 +    snprintf((char *)text, sizeof(text), "%d/%d", in->currPage + 1, in->pagesCount > 0 ? in->pagesCount : 1);
 +    PrintStringOnWindow(90, 0, text, MUSIC_LIST_WIN, 0);
 +    for (i = 0; i < in->currPageEntries; i++) {
 +        s32 song = in->currPage * in->entriesPerPage + i;
 +        s32 y = GetMenuEntryYCoord(in, i), track;
++        s32 x = sMatchSfx ? 150 : 176;
 +        if (song == sMatchPlayingSong)
 +            PrintStringOnWindow(8, y, sMusicStar, MUSIC_LIST_WIN, 0);
-+        snprintf((char *)text, sizeof(text), "%03d %s", sMatchSongs[song].id, sMatchSongs[song].name);
++        MatchName(text, sizeof(text), song);
 +        MusicLabel(text, 32, (const char *)text);
 +        PrintStringOnWindow(20, y, text, MUSIC_LIST_WIN, 0);
-+        track = Port_MusicMapGet(sMatchSongs[song].id);
++        track = MatchGet(song);
 +        if (track >= 0) {
-+            MusicLabel(text, 5, Port_MusicLabel(track)); // its number ("012", "S03")
-+            PrintStringOnWindow(176, y, text, MUSIC_LIST_WIN, 0);
++            MusicLabel(text, sMatchSfx ? 8 : 5, Port_MusicLabel(track)); // its number ("012", "S03", "E01.023")
++            PrintStringOnWindow(x, y, text, MUSIC_LIST_WIN, 0);
 +        }
 +        else
-+            PrintStringOnWindow(176, y, (const u8 *)"-", MUSIC_LIST_WIN, 0);
++            PrintStringOnWindow(x, y, (const u8 *)"-", MUSIC_LIST_WIN, 0);
 +    }
 +    sub_80073E0(MUSIC_LIST_WIN);
 +}
@@ -4526,15 +4585,18 @@ index 86f582c2..e0c8e4b0 100644
 +{
 +    u8 text[64];
 +    s32 song = GET_CURRENT_MENU_ENTRY(sMatchInput);
-+    s32 track = Port_MusicMapGet(sMatchSongs[song].id);
++    s32 track = MatchGet(song);
 +    const u8 *status = sMatchStatus;
++    u8 name[40];
 +
 +    if (status == NULL)
-+        status = Port_MusicPlaying() >= 0 ? sMatchPlayingDs : sMatchPlayingSong >= 0 ? sMatchPlayingGba : sMatchIdle;
++        status = Port_MusicPlaying() >= 0 ? (sMatchSfx ? sSfxMatchPlayingDs : sMatchPlayingDs)
++               : sMatchPlayingSong >= 0 ? (sMatchSfx ? sSfxMatchPlayingGba : sMatchPlayingGba) : sMatchIdle;
 +    CallPrepareTextbox_8008C54(MUSIC_INFO_WIN);
 +    sub_80073B8(MUSIC_INFO_WIN);
 +    PrintStringOnWindow(4, 0, status, MUSIC_INFO_WIN, 0);
-+    snprintf((char *)text, sizeof(text), "GBA %03d %s", sMatchSongs[song].id, sMatchSongs[song].name);
++    MatchName(name, sizeof(name), song);
++    snprintf((char *)text, sizeof(text), "GBA %s", name);
 +    MusicLabel(text, 44, (const char *)text);
 +    PrintStringOnWindow(4, 12, text, MUSIC_INFO_WIN, 0);
 +    snprintf((char *)text, sizeof(text), "DS  %s", track >= 0 ? Port_MusicLabel(track) : "(none)");
@@ -4554,17 +4616,24 @@ index 86f582c2..e0c8e4b0 100644
 +    StopBGMusic(); // the title's music
 +    sMatchPlayingSong = -1;
 +    sMatchStatus = NULL;
-+    CreateMenuOnWindow(&sMatchInput, MATCH_SONGS, MUSIC_PER_PAGE, MUSIC_LIST_WIN);
-+    MoveMenuToEntryId(&sMatchInput, sMatchCursor);
++    BuildSfxIds();
++    CreateMenuOnWindow(&sMatchInput, MatchCount(), MUSIC_PER_PAGE, MUSIC_LIST_WIN);
++    MoveMenuToEntryId(&sMatchInput, sMatchSfx ? sMatchCursorSfx : sMatchCursor);
 +    DrawMatchList();
 +    DrawMatchInfo();
 +}
 +
 +static void PlayMatchGba(s32 song)
 +{
-+    u16 id = sMatchSongs[song].id;
++    u16 id = MatchId(song);
 +
 +    Port_MusicStop();
++    if (sMatchSfx) { // (another one stops the last)
++        StopFanfareSE(STOP_SOUND_EFFECT);
++        PlayFanfareSE(id, MAX_VOLUME);
++        sMatchPlayingSong = song;
++        return;
++    }
 +    StopBGM();
 +    if (id >= FANFARE_START_INDEX)
 +        PlayFanfareSE(id, MAX_VOLUME);
@@ -4575,10 +4644,10 @@ index 86f582c2..e0c8e4b0 100644
 +
 +static void PlayMatchDs(s32 song)
 +{
-+    s32 track = Port_MusicMapGet(sMatchSongs[song].id);
++    s32 track = MatchGet(song);
 +
 +    StopBGM();
-+    StopFanfareSE(STOP_FANFARE);
++    StopFanfareSE(sMatchSfx ? STOP_SOUND_EFFECT : STOP_FANFARE);
 +    sMatchPlayingSong = -1;
 +    if (track >= 0)
 +        Port_MusicPlay(track);
@@ -4590,7 +4659,14 @@ index 86f582c2..e0c8e4b0 100644
 +{
 +    static int ids[MATCH_SONGS];
 +    static const char *names[MATCH_SONGS];
++    static int sfx[ARRAY_COUNT(sSfxIds)];
 +    s32 i;
++
++    if (sMatchSfx) {
++        for (i = 0; i < sSfxCount; i++)
++            sfx[i] = sSfxIds[i];
++        return Port_SfxMapSave(sfx, sSfxCount);
++    }
 +
 +    for (i = 0; i < MATCH_SONGS; i++) {
 +        ids[i] = sMatchSongs[i].id;
@@ -4617,25 +4693,27 @@ index 86f582c2..e0c8e4b0 100644
 +    else if (pressed & PORT_KEY_ZR)
 +        step = 10;
 +
-+    if (step != 0) { // another DS track for this song, played at once
-+        s32 count = Port_MusicSongCount(), track = Port_MusicMapGet(sMatchSongs[song].id); // (music only)
-+        track = track < 0 ? (step > 0 ? step - 1 : count + step) : track + step;
-+        if (track < 0)
-+            track = 0;
-+        if (track >= count)
-+            track = count - 1;
-+        Port_MusicMapSet(sMatchSongs[song].id, track);
++    if (step != 0) { // another DS track (or sound effect) for this one, played at once
++        // (music: the tracks before the sound effects; sound effects: those after)
++        s32 first = sMatchSfx ? Port_MusicSongCount() : 0, last = sMatchSfx ? Port_MusicCount() - 1 : Port_MusicSongCount() - 1;
++        s32 track = MatchGet(song);
++        track = track < 0 ? (step > 0 ? first + step - 1 : last + 1 + step) : track + step;
++        if (track < first)
++            track = first;
++        if (track > last)
++            track = last;
++        MatchSet(song, track);
 +        PlayMatchDs(song);
 +        sMatchStatus = NULL;
 +        redraw = TRUE;
 +    }
 +    else if (gRealInputs.pressed & START_BUTTON) {
-+        sMatchStatus = SaveMatches() ? sMatchSaved : sMatchNotSaved;
++        sMatchStatus = SaveMatches() ? (sMatchSfx ? sSfxMatchSaved : sMatchSaved) : (sMatchSfx ? sSfxMatchNotSaved : sMatchNotSaved);
 +        PlayMenuSoundEffect(MENU_SFX_ACCEPT);
 +        redraw = TRUE;
 +    }
 +    else if (pressed & PORT_KEY_X) {
-+        Port_MusicMapSet(sMatchSongs[song].id, -1);
++        MatchSet(song, -1);
 +        Port_MusicStop();
 +        sMatchStatus = NULL;
 +        redraw = TRUE;
@@ -4650,10 +4728,14 @@ index 86f582c2..e0c8e4b0 100644
 +            case INPUT_B_BUTTON:
 +                PlayMenuSoundEffect(MENU_SFX_BACK);
 +                SaveMatches();
-+                sMatchCursor = song;
++                if (sMatchSfx)
++                    sMatchCursorSfx = song;
++                else
++                    sMatchCursor = song;
 +                Port_MusicClose();
 +                StopBGM();
 +                StopFanfareSE(STOP_FANFARE);
++                StopFanfareSE(STOP_SOUND_EFFECT);
 +                gPortDsMusicOff = FALSE;
 +                gPortRawXY = FALSE;
 +                Port_DsMusicRecheck();
@@ -4708,21 +4790,22 @@ index 86f582c2..e0c8e4b0 100644
 +            break;
 +        default:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
-+            break;
-+    }
-+}
-+
+             break;
+     }
+ }
+ 
 +static void HandleChangesSaved(void)
 +{
 +    s32 menuAction;
 +
 +    if (sub_80144A4(&menuAction) == 0)
 +        SetOptionsMenuState(OPTIONS_MENU_MAIN);
- }
++}
 +#endif
- 
++
  static void HandleChangeSettingsMenu(void)
  {
+     s32 menuAction;
 diff --git a/src/options_menu2.c b/src/options_menu2.c
 index 03531690..0d6913a0 100644
 --- a/src/options_menu2.c

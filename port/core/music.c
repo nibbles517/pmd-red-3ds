@@ -217,6 +217,7 @@ static const struct {
 };
 
 static void LoadMap(void);
+static void LoadSfxMap(void);
 static void StopSlots(void);
 
 void Port_MusicClose(void);
@@ -301,6 +302,7 @@ int Port_MusicOpen(void)
         return -1;
     }
     LoadMap();
+    LoadSfxMap();
     return sCount;
 }
 
@@ -489,6 +491,87 @@ int Port_MusicMapSave(const int *songs, const char *const *names, int count)
     if (len > cap)
         len = cap;
     int ok = Backend_FileWrite(MAP_FILE, text, (uint32_t)len);
+    free(text);
+    return ok;
+}
+
+// --- GBA sound effect -> DS sound effect ------------------------------------------
+//
+// Sound Effect Matching (options_menu1.c) pairs each of the game's sound
+// effects (songs 300-999) with one of the ROM's (a sequence archive entry),
+// kept in sfx-map.txt: "SE <id> = E<archive>.<entry>" or "= NONE". (Not
+// played in the game yet: only matched.)
+
+#define SFX_FIRST 300
+#define SFX_LAST 999
+#define SFX_FILE "sfx-map.txt"
+static int16_t sSfxMap[SFX_LAST - SFX_FIRST + 1]; // track index, -1: none
+
+static int FindEffect(int arc, int index)
+{
+    for (int i = sSongCount; i < sCount; i++)
+        if (sTracks[i].sdat == 0 && sTracks[i].isEffect && sTracks[i].arc == arc && sTracks[i].index == index)
+            return i;
+    return -1;
+}
+
+static void LoadSfxMap(void)
+{
+    for (int i = 0; i <= SFX_LAST - SFX_FIRST; i++)
+        sSfxMap[i] = -1;
+    void *f = Backend_FileOpen(SFX_FILE);
+    if (f == NULL)
+        return;
+    uint32_t size = Backend_FileSize(f);
+    char *text = malloc(size + 1);
+    if (text != NULL && Backend_FileRead(f, 0, text, size)) {
+        text[size] = '\0';
+        for (char *line = text; line != NULL && *line; ) {
+            char *next = strchr(line, '\n');
+            if (next != NULL)
+                *next++ = '\0';
+            int se, arc, idx;
+            if (sscanf(line, "SE %d = E%d.%d", &se, &arc, &idx) == 3 && se >= SFX_FIRST && se <= SFX_LAST)
+                sSfxMap[se - SFX_FIRST] = (int16_t)FindEffect(arc, idx);
+            line = next;
+        }
+        Backend_Log("music: %s loaded", SFX_FILE);
+    }
+    free(text);
+    Backend_FileClose(f);
+}
+
+int Port_SfxMapGet(int se)
+{
+    return se >= SFX_FIRST && se <= SFX_LAST ? sSfxMap[se - SFX_FIRST] : -1;
+}
+
+void Port_SfxMapSet(int se, int track)
+{
+    if (se >= SFX_FIRST && se <= SFX_LAST)
+        sSfxMap[se - SFX_FIRST] = (int16_t)(Port_MusicIsEffect(track) ? track : -1);
+}
+
+// Writes every match (the sound effects ses[0..count-1]) to sfx-map.txt.
+int Port_SfxMapSave(const int *ses, int count)
+{
+    size_t cap = (size_t)count * 64 + 256, len = 0;
+    char *text = malloc(cap);
+    if (text == NULL)
+        return 0;
+    len += (size_t)snprintf(text + len, cap - len,
+                            "# Sound Effect Matching: GBA sound effect = DS sound effect of %s\n", Port_MusicRomTitle());
+    for (int i = 0; i < count && len < cap; i++) {
+        int t = Port_SfxMapGet(ses[i]);
+        if (t < 0)
+            len += (size_t)snprintf(text + len, cap - len, "SE %d = NONE\n", ses[i]);
+        else
+            len += (size_t)snprintf(text + len, cap - len, "SE %d = E%02u.%03u  # %s\n", ses[i],
+                                    (unsigned)sTracks[t].arc, (unsigned)sTracks[t].index, sTracks[t].label);
+    }
+    if (len > cap)
+        len = cap;
+    int ok = Backend_FileWrite(SFX_FILE, text, (uint32_t)len);
     free(text);
     return ok;
 }

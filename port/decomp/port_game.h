@@ -108,6 +108,11 @@ int Port_MusicRomIsBlue(void); // APHE, APHP or APHJ
 int Port_MusicMapGet(int gbaSong);
 void Port_MusicMapSet(int gbaSong, int track);
 int Port_MusicMapSave(const int *songs, const char *const *names, int count);
+// GBA sound effect (300-999) -> DS sound effect (track list index, -1: none);
+// Sound Effect Matching saves them (sfx-map.txt)
+int Port_SfxMapGet(int se);
+void Port_SfxMapSet(int se, int track);
+int Port_SfxMapSave(const int *ses, int count);
 // Music Style: DS (music.c): slot 0 the background music, 1 a fanfare
 void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64);
 int Port_MusicSlotDone(int slot);
