@@ -63,6 +63,9 @@ void Ppu_SetLineRegs(const uint8_t *regs)
 static int sListMode;
 static struct { BgCache *c; int y, x, xb, have; } sDesc;
 static int sListXa, sListStripN, sListStrip[2][2];
+// ... BG1's sides (the wide view): its fill tile, repeated: the tile's
+// texels in the cache from sListSideX, texel (x + sListSidePhase) & 7 at screen x
+static int sListSide, sListSideX, sListSidePhase;
 
 #define TILE_OY ((sViewH - GBA_H) / 2)
 static int RenderTextBgVram(int bg, int line, uint16_t *out, uint16_t cnt);
@@ -600,6 +603,21 @@ static int RenderTextBg(int bg, int line, uint16_t *out)
         uint32_t centerMask = sLastMask, centerFull = sLastFull;
         if (sDesc.have)
             sListXa = sOx; // (the sides: none, or the pattern below)
+        if (bg == 0 && sListMode && sDesc.have)
+            return any; // (described: nothing to the sides)
+        if (bg == 1 && sListMode && sDesc.have && sDesc.c->tilesH == 32) {
+            // described: the fill tile (in the cache's first 32 columns, on
+            // this row: decoded, and coloured, as the middle's columns were)
+            int hofs = R16(0x14) & 0x1FF;
+            BgCache *c = sDesc.c;
+            int cx = (hofs >> 3) & 31;
+            if ((c->any[sDesc.y][0] >> cx) & 1) {
+                sListSide = 1;
+                sListSideX = cx * 8;
+                sListSidePhase = hofs - sOx;
+            }
+            return any | 1;
+        }
         if (bg == 0) {
             for (int x = 0; x < sOx; x++) out[x] = TRANSPARENT;
             for (int x = sOx + GBA_W; x < sW; x++) out[x] = TRANSPARENT;
@@ -1362,22 +1380,46 @@ int Ppu_ListLine(int line)
     else if ((dispcnt & 0x1040) != sObjBits) { l->fallback = GPU_WHY_OBJ_CHANGE; return 0; }
     else if (bldcnt != sBld0 || (effect == 1 && bldalpha != sAlpha0)) { l->fallback = GPU_WHY_EFFECT; return 0; }
 
-    // The line's window mask, as runs of the same value
-    uint8_t winout6;
-    unsigned wmAll = WindowMask(line, dispcnt, wm, &winout6);
-    int runX[W / 2 + 2], runN = 0;
-    uint8_t runV[W / 2 + 2];
-    if (wmAll == 0x3F) {
-        runX[0] = 0; runV[0] = 0x3F; runN = 1;
+    // The line's window mask, as runs of the same value (the last line's,
+    // when what makes the mask is the same)
+    static int runX[W / 2 + 2], runN;
+    static uint8_t runV[W / 2 + 2];
+    static struct {
+        uint16_t win, in, out, h0, h1, wide;
+        uint8_t in0, in1;
+        struct PortWinX x1;
+    } sWinKey, key;
+    memset(&key, 0, sizeof(key));
+    key.win = dispcnt & 0xE000;
+    if (key.win) {
+        uint16_t v0 = R16(0x44), v1 = R16(0x46);
+        key.in = R16(0x48); key.out = R16(0x4A);
+        key.h0 = R16(0x40); key.h1 = R16(0x42);
+        key.wide = (uint16_t)(sWide | (sW << 1));
+        key.in0 = (dispcnt & 0x2000) && InWindowRange(line, v0 >> 8, WinBottom(v0 & 0xFF), sVLimit);
+        key.in1 = (dispcnt & 0x4000) && InWindowRange(line, v1 >> 8, WinBottom(v1 & 0xFF), sVLimit);
+        if (key.in1 && sWide && gPortWin1X[line].valid)
+            key.x1 = gPortWin1X[line];
     }
-    else {
-        for (int x = 0; x < sW; x++)
-            if (x == 0 || wm[x] != wm[x - 1]) {
-                runX[runN] = x;
-                runV[runN++] = wm[x];
-            }
+    else
+        key.wide = (uint16_t)(sWide | (sW << 1));
+    if (line == 0 || memcmp(&key, &sWinKey, sizeof(key)) != 0) {
+        memcpy(&sWinKey, &key, sizeof(key));
+        uint8_t winout6;
+        unsigned wmAll = WindowMask(line, dispcnt, wm, &winout6);
+        runN = 0;
+        if (wmAll == 0x3F) {
+            runX[0] = 0; runV[0] = 0x3F; runN = 1;
+        }
+        else {
+            for (int x = 0; x < sW; x++)
+                if (x == 0 || wm[x] != wm[x - 1]) {
+                    runX[runN] = x;
+                    runV[runN++] = wm[x];
+                }
+        }
+        runX[runN] = sW;
     }
-    runX[runN] = sW;
     unsigned shown = 0; // (the layers shown somewhere on the line)
     for (int r = 0; r < runN; r++)
         shown |= runV[r];
@@ -1396,6 +1438,7 @@ int Ppu_ListLine(int line)
         sDesc.have = 0;
         sListXa = 0;
         sListStripN = 0;
+        sListSide = 0;
         sListMode = 1;
         sWantPtr = 0;
         int any = RenderTextBg(b, line, sBg[b]);
@@ -1403,12 +1446,17 @@ int Ppu_ListLine(int line)
         if (!any)
             continue;
         // What the layer's line is made of: a piece of its cache, pixels
-        int pa[3], pb[3], pn = 0, descAt = -1;
+        int pa[5], pb[5], pn = 0, descAt = -1, sideAt = -1;
         if (sDesc.have) {
             descAt = pn;
             pa[pn] = sListXa; pb[pn++] = sDesc.xb;
             for (int i = 0; i < sListStripN; i++) {
                 pa[pn] = sListStrip[i][0]; pb[pn++] = sListStrip[i][1];
+            }
+            if (sListSide) {
+                sideAt = pn;
+                pa[pn] = 0; pb[pn++] = sOx;
+                pa[pn] = sOx + GBA_W; pb[pn++] = sW;
             }
         }
         else {
@@ -1427,12 +1475,20 @@ int Ppu_ListLine(int line)
                     continue;
                 if (k == descAt)
                     GpuList_BgLine(line, b, key, flags, sDesc.y, (sDesc.x + a) & (wPx - 1), wPx, a, e);
+                else if (sideAt >= 0 && k >= sideAt) {
+                    for (int x = a; x < e;) { // (a piece of the tile, then whole tiles)
+                        int t = (x + sListSidePhase) & 7, n = 8 - t;
+                        if (n > e - x) n = e - x;
+                        GpuList_BgLine(line, b, key, flags, sDesc.y, sListSideX + t, wPx, x, x + n);
+                        x += n;
+                    }
+                }
                 else
                     GpuList_StripLine(line, b, key, flags, sBg[b], a, e);
             }
         }
     }
-    if (l->full) { l->fallback = GPU_WHY_FULL; return 0; }
+    if (l->full) { l->fallback = l->full == 2 ? GPU_WHY_STRIP_FULL : GPU_WHY_FULL; return 0; }
     return 1;
 }
 
@@ -1493,7 +1549,7 @@ int Ppu_ListObjects(int lines)
         unsigned tileStep = color256 ? 2 : 1;
         int flags = objFlags | (((a1 >> 12) & 1) ? GQ_HFLIP : 0) | (((a1 >> 13) & 1) ? GQ_VFLIP : 0);
         uint16_t *dst = GpuList_Obj(x, y, w, h, flags, GpuKeyObj(prio, n));
-        if (dst == NULL) { l->fallback = GPU_WHY_FULL; return 0; }
+        if (dst == NULL) { l->fallback = l->quadCount >= GPU_MAX_QUADS ? GPU_WHY_FULL : GPU_WHY_OBJ_FULL; return 0; }
         const uint16_t *pal = &PAL16[256 + (color256 ? 0 : palBank * 16)];
         for (int ty = 0; ty < h; ty++, dst += GPU_OBJ_W) {
             unsigned rowTile = tileNum + (ty >> 3) * rowStride;

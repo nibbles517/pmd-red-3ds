@@ -9,12 +9,12 @@ uint16_t gGpuStrip[GPU_STRIP_ROWS][GPU_STRIP_W];
 uint16_t gGpuObj[GPU_OBJ_H][GPU_OBJ_W];
 
 const char *const gGpuWhy[GPU_WHY_COUNT] = {
-    "none", "blank", "mode", "window", "effect", "obj-change", "obj-affine", "obj-semi", "obj-mosaic", "full", "obj-window",
+    "none", "blank", "mode", "window", "effect", "obj-change", "obj-affine", "obj-semi", "obj-mosaic", "full", "obj-window", "obj-full", "strip-full",
 };
 
 // The rectangles each layer added on the line before (to be made a line
 // taller when this line continues them)
-#define LAST_MAX 12
+#define LAST_MAX 32
 static int16_t sLast[4][LAST_MAX];
 static int sLastCount[4], sLastLine[4];
 static int16_t sNow[4][LAST_MAX]; // ... and this line's, so far
@@ -122,7 +122,7 @@ void GpuList_StripLine(int line, int bg, uint16_t key, int flags, const uint16_t
     }
     if (row < 0) {
         if (l->stripRows >= GPU_STRIP_ROWS) {
-            l->full = 1;
+            l->full = 2;
             return;
         }
         row = l->stripRows++;

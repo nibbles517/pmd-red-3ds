@@ -18,12 +18,15 @@ frame instead of drawing it, line by line as the frame's events go by
   the same columns of the next map row as the line before continues the
   same rectangle, so a background is usually one to four rectangles (more
   where it wraps, or where its scroll changes down the screen).
+- **BG1's side tiles** in the wide view (the dungeon darkness reaching the
+  screen's edges: its fill tile repeated) are rectangles of that tile in
+  BG1's cache, one per 8-pixel column of the pattern, each the height of
+  the screen.
 - **What can't be read from a map that way** goes in as *line strips*: the
   line's pixels, copied into a strip texture. That is the wide view's HUD
-  row, BG1's repeated side tiles (the dungeon darkness), the full-screen
-  tiled move effects, lines of a background whose cache doesn't match (its
-  settings changed mid-frame, mosaic), and lines whose colours are being
-  looked up during a fade.
+  row, the full-screen tiled move effects, lines of a background whose
+  cache doesn't match (its settings changed mid-frame, mosaic), and lines
+  whose colours are being looked up during a fade.
 - **Sprites** are one rectangle each, of a sprite texture into which their
   pixels are coloured with their palettes (flips are the rectangle's).
 - **Priority**: each rectangle has a key: within a priority (3 to 0),
@@ -32,8 +35,8 @@ frame instead of drawing it, line by line as the frame's events go by
   transparent texels left out.
 - **Windows** cut each layer's pieces of a line to where the windows show
   it (the game keeps windows 0 and 1 on all the time, mostly to show or
-  hide the dungeon darkness, BG1; the light circle will be the same, a line
-  at a time).
+  hide the dungeon darkness, BG1; the light circle is the same, a line at a
+  time). A line whose window settings are the last line's reuses its cuts.
 - **Alpha blending** (on in nearly every frame: 50/50 with BG2 in towns, the
   darkness over the floor in dungeons): every pixel keeps a flag, which will
   be the GPU's stencil: whether what is there is a second target. A first
@@ -52,9 +55,17 @@ weren't (`gpu-list:` lines).
 
 `GpuList_Draw` draws a list in software. The test harness's `--gpu-list 2`
 draws every frame from its list and checks it against the renderer, pixel for
-pixel (`--gpu-list 1` only draws from it). On the first runs (town, intro,
-dungeon floors, menus, all three screen sizes) every frame but those with a
-semi-transparent sprite was listed, and every listed frame matched.
+pixel (`--gpu-list 1` only draws from it).
+
+Results so far (harness runs through the title, intro, town, four dungeon
+saves, menus and attacks, in the GBA, DS and Fit sizes; over 40,000 frames):
+every frame was listed except a few with a semi-transparent sprite (about 1
+in 1,000), and every listed frame matched the renderer's, pixel for pixel.
+A dungeon frame (Fit) is about 190 rectangles and 45 strip rows. Describing
+it takes the main core about a tenth of the instructions drawing it does
+(dungeon, Fit: about 0.35 million against 4.5 million, plus 0.16 million to
+check the caches either way); what is left is the GPU's work, and sending
+it the changed tiles and the strips.
 
 On the 3DS the list is not used yet (`Backend_GpuListMode` returns 0).
 
@@ -67,9 +78,8 @@ On the 3DS the list is not used yet (`Backend_GpuListMode` returns 0).
    rectangles as quads, sorted back to front; alpha blending with the
    stencil buffer; the picture into the framebuffer as now. Then tuning on
    the hardware, with port.log showing how much CPU time the list takes.
-3. **Fewer strips.** BG1's side tiles as repeated quads instead of pixels,
-   and the HUD row from BG0's cache: in the dungeon those are most of the
-   strip rows.
+3. **Fewer strips.** The HUD row from BG0's cache, and the other strips
+   that remain (about 45 rows a frame).
 4. **Fades on the GPU.** The game fades by changing every palette; the
    caches' colours are then looked up line by line (and go into strips).
    With the un-faded colours in the textures and the fade amount known, the
