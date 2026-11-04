@@ -497,10 +497,13 @@ int Port_MusicMapSave(const int *songs, const char *const *names, int count)
 
 // --- GBA sound effect -> DS sound effect ------------------------------------------
 //
-// Sound Effect Matching (options_menu1.c) pairs each of the game's sound
-// effects (songs 300-999) with one of the ROM's (a sequence archive entry),
-// kept in sfx-map.txt: "SE <id> = E<archive>.<entry>" or "= NONE". (Not
-// played in the game yet: only matched.)
+// Each of the game's sound effects (songs 300-999) is matched with one of
+// the ROM's (a sequence archive entry). Built in: the same number in the
+// first archive (GBA sound effect n = DS E00.n; Sound Effect Matching showed
+// the DS version kept the GBA's numbering), when the ROM has that entry.
+// sfx-map.txt, which Sound Effect Matching (options_menu1.c) writes, changes
+// those it names: "SE <id> = E<archive>.<entry>" ("= NONE" lines are left
+// as built in). (Not played in the game yet: only matched.)
 
 #define SFX_FIRST 300
 #define SFX_LAST 999
@@ -518,7 +521,7 @@ static int FindEffect(int arc, int index)
 static void LoadSfxMap(void)
 {
     for (int i = 0; i <= SFX_LAST - SFX_FIRST; i++)
-        sSfxMap[i] = -1;
+        sSfxMap[i] = (int16_t)FindEffect(0, SFX_FIRST + i); // (the built-in matches)
     void *f = Backend_FileOpen(SFX_FILE);
     if (f == NULL)
         return;

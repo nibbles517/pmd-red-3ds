@@ -63,7 +63,9 @@ The Music Player lists the ROM's sound effects after its music (in green);
 an effect plays once. Sound Effect Matching (Dev), in Game Options for now,
 pairs each of the game's sound effects with one of the DS's (A plays the
 GBA one, Y the DS one, L/R and ZL/ZR pick another, X clears, START or B
-saves `sfx-map.txt` to the same folder). The game doesn't play them yet. With Dual Core on, the DS music is made on the second CPU core while
+saves `sfx-map.txt` to the same folder). The matches are built in (each GBA
+sound effect as the DS one with the same number); the file only changes the
+ones it names. The game doesn't play them yet. With Dual Core on, the DS music is made on the second CPU core while
 the game runs, a frame ahead.
 
 The matches are built in (port/core/music.c, sDefaultMap). Music Matching, the
