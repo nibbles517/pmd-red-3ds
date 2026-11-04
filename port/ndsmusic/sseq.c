@@ -805,8 +805,9 @@ void sseq_render(SseqPlayer *p, int16_t *out, uint32_t frames) {
 
 SseqPlayer *sseq_create(const SdatSeqBundle *b, uint32_t out_rate) {
     if (!b->sseq || b->sseq_size < 0x1C || !b->sbnk || out_rate == 0) return NULL;
-    uint32_t data_off = rd32(b->sseq + 0x18);
-    if (data_off >= b->sseq_size) return NULL;
+    uint32_t data_off = b->data_off, start_off = b->start_off;
+    if (data_off == 0) data_off = start_off = rd32(b->sseq + 0x18); /* bundle built by hand */
+    if (data_off >= b->sseq_size || start_off < data_off || start_off >= b->sseq_size) return NULL;
 
     init_tables();
     SseqPlayer *p = (SseqPlayer *)calloc(1, sizeof *p);
@@ -833,7 +834,7 @@ SseqPlayer *sseq_create(const SdatSeqBundle *b, uint32_t out_rate) {
     p->chan_mask = (b->player.present && b->player.channel_mask) ? b->player.channel_mask : 0xFFFF;
     p->rng = 0x12345678u;
     for (int i = 0; i < 32; i++) p->vars[i] = -1;
-    track_init(&p->trk[0], data_off);
+    track_init(&p->trk[0], start_off);
     return p;
 }
 

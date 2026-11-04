@@ -17,6 +17,8 @@ typedef struct Song Song;
  * SSEQ songs copy what they need and don't depend on the Sdat afterwards. */
 Song *song_open_seq(const Sdat *s, uint32_t seq_index, uint32_t out_rate);
 Song *song_open_strm(const Sdat *s, uint32_t strm_index, uint32_t out_rate);
+/* Entry `idx` of sequence archive `arc` (usually a sound effect). */
+Song *song_open_ssar(const Sdat *s, uint32_t arc, uint32_t idx, uint32_t out_rate);
 void song_close(Song *g);
 
 /* Fixed timing (from NCSF tags): play length_ms, then fade over fade_ms. */

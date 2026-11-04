@@ -98,6 +98,8 @@ void Port_MusicClose(void);
 int Port_MusicCount(void);
 const char *Port_MusicLabel(int track);
 int Port_MusicIsStream(int track);
+int Port_MusicIsEffect(int track); // a sound effect (listed after the music)
+int Port_MusicSongCount(void); // the music's tracks (the first ones)
 const char *Port_MusicRomTitle(void);
 int Port_MusicIcon(u8 *tiles, u8 *colors); // the DS Menu icon, 64x64 (8x8 tiles)
 const char *Port_MusicGameCode(void); // e.g. "APHE" (Blue Rescue Team, North America)

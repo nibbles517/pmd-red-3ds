@@ -26,6 +26,8 @@
 typedef struct {
     uint8_t sdat;
     uint8_t isStream;
+    uint8_t isEffect; // a sound effect: entry index of sequence archive arc
+    uint16_t arc;
     uint16_t index;
     char label[LABEL_LEN];
 } Track;
@@ -33,7 +35,7 @@ typedef struct {
 static NdsMusic sRom;
 static int sOpen;
 static Track *sTracks;
-static int sCount;
+static int sCount, sSongCount; // all the tracks; the music (the sound effects come after it)
 
 static Song *sSong;
 static int sPlaying = -1; // the track playing (or stopped mid-way: -1 once stopped)
@@ -46,8 +48,63 @@ typedef struct {
     Song *song;
     int track; // -1: none
     int paused;
+    int volume64; // the GBA player's volume (applied when the next frame is made)
 } Slot;
-static Slot sSlots[2] = { { NULL, -1, 0 }, { NULL, -1, 0 } };
+static Slot sSlots[2] = { { NULL, -1, 0, 64 }, { NULL, -1, 0, 64 } };
+
+// --- Making the sound: on the second core ----------------------------------------
+//
+// Each frame, Sound_EndFrame (Port_MusicMix) adds the DS songs' samples made
+// during the frame before, and has the next frame's made: on the second core
+// (Port_MusicRenderJob, Backend_RunAsync) while the game runs its frame, when
+// Dual Core is on, else at once. So the DS music is a frame later than the
+// game's own sound (about 17 ms).
+//
+// While that job runs it alone touches the songs. Of the calls below, those
+// that open, close or change a song first wait for it to finish (MusicSync);
+// a slot's pause and volume are kept and applied when the next job is given;
+// the questions (done? where?) are answered from what the last job found.
+
+enum { JOB_PLAYER, JOB_SLOT0, JOB_SLOT1, JOB_SONGS };
+static Song *sJobSong[JOB_SONGS];   // what the job makes (NULL: nothing)
+static int16_t sJobOut[JOB_SONGS][2048 * 2];
+static uint8_t sJobHas[JOB_SONGS];  // ... made into sJobOut
+static uint32_t sJobCount;          // samples a song (at the mixing rate)
+static int sJobPending;             // given and not waited for
+static struct {
+    uint8_t done[JOB_SONGS];
+    unsigned posMs, voices;
+    int loops;
+} sJobFound, sFound;                // what the job found out; as last collected
+
+void Port_MusicRenderJob(void *unused)
+{
+    (void)unused;
+    for (int k = 0; k < JOB_SONGS; k++) {
+        Song *g = sJobSong[k];
+        sJobHas[k] = 0;
+        if (g == NULL)
+            continue;
+        song_render(g, sJobOut[k], sJobCount);
+        sJobHas[k] = 1;
+        sJobFound.done[k] = (uint8_t)song_done(g);
+        if (k == JOB_PLAYER) {
+            sJobFound.posMs = song_pos_ms(g);
+            sJobFound.loops = song_loops(g);
+            sJobFound.voices = song_voices(g);
+        }
+    }
+}
+
+// The job (if any) finished; what it found collected
+static void MusicSync(void)
+{
+    if (!sJobPending)
+        return;
+    Backend_WaitAsync();
+    sJobPending = 0;
+    sFound = sJobFound;
+}
 
 // GBA song (1-127 background music, 200-218 fanfares) -> DS track
 #define MAP_SONGS 300
@@ -168,13 +225,20 @@ int Port_MusicOpen(void)
 {
     if (sOpen)
         return sCount;
+    MusicSync();
     if (nds_music_open(&sRom, MUSIC_FILE) != NDSM_OK)
         return -1;
     sOpen = 1;
 
     int total = 0;
-    for (int i = 0; i < sRom.num_sdats; i++)
+    for (int i = 0; i < sRom.num_sdats; i++) {
         total += (int)(sRom.sdat[i].num_seq + sRom.sdat[i].num_strm);
+        for (uint32_t a = 0; a < sRom.sdat[i].num_seqarc; a++) {
+            SdatSsarEntry *ents;
+            total += (int)sdat_ssar_entries(&sRom.sdat[i], a, &ents);
+            free(ents);
+        }
+    }
     sTracks = calloc((size_t)(total ? total : 1), sizeof(Track));
     if (sTracks == NULL) {
         Port_MusicClose();
@@ -206,6 +270,32 @@ int Port_MusicOpen(void)
             snprintf(t->label, sizeof(t->label), "%sS%02u %s", pre, (unsigned)q, nm ? nm : "(stream)");
         }
     }
+    sSongCount = sCount;
+    // Then the sound effects (sequence archives' entries), as the player lists them
+    for (int i = 0; i < sRom.num_sdats; i++) {
+        const Sdat *s = &sRom.sdat[i];
+        char pre[8] = "";
+        if (sRom.num_sdats > 1)
+            snprintf(pre, sizeof(pre), "%d:", i + 1);
+        for (uint32_t a = 0; a < s->num_seqarc; a++) {
+            SdatSsarEntry *ents;
+            uint32_t n = sdat_ssar_entries(s, a, &ents);
+            const char *an = sdat_ssar_name(s, a);
+            for (uint32_t q = 0; q < n && sCount < total; q++) {
+                if (!ents[q].valid)
+                    continue;
+                Track *t = &sTracks[sCount++];
+                const char *nm = sdat_ssar_entry_name(s, a, q);
+                t->sdat = (uint8_t)i;
+                t->isEffect = 1;
+                t->arc = (uint16_t)a;
+                t->index = (uint16_t)q;
+                snprintf(t->label, sizeof(t->label), "%sE%02u.%03u %s", pre, (unsigned)a, (unsigned)q,
+                         nm ? nm : an ? an : "(effect)");
+            }
+            free(ents);
+        }
+    }
     if (sCount == 0) {
         Port_MusicClose();
         return -1;
@@ -216,6 +306,7 @@ int Port_MusicOpen(void)
 
 void Port_MusicStop(void)
 {
+    MusicSync();
     Song *g = sSong;
     sSong = NULL;
     song_close(g);
@@ -225,6 +316,7 @@ void Port_MusicStop(void)
 
 void Port_MusicClose(void)
 {
+    MusicSync();
     Port_MusicStop();
     StopSlots(); // (a stream reads the ROM file as it plays)
     if (sOpen)
@@ -232,7 +324,7 @@ void Port_MusicClose(void)
     sOpen = 0;
     free(sTracks);
     sTracks = NULL;
-    sCount = 0;
+    sCount = sSongCount = 0;
 }
 
 int Port_MusicCount(void)
@@ -248,6 +340,25 @@ const char *Port_MusicLabel(int i)
 int Port_MusicIsStream(int i)
 {
     return i >= 0 && i < sCount && sTracks[i].isStream;
+}
+
+int Port_MusicIsEffect(int i)
+{
+    return i >= 0 && i < sCount && sTracks[i].isEffect;
+}
+
+int Port_MusicSongCount(void)
+{
+    return sSongCount;
+}
+
+// A track's song, at the mixing rate
+static Song *OpenTrack(const Track *t)
+{
+    const Sdat *s = &sRom.sdat[t->sdat];
+    if (t->isEffect)
+        return song_open_ssar(s, t->arc, t->index, sMixRate);
+    return t->isStream ? song_open_strm(s, t->index, sMixRate) : song_open_seq(s, t->index, sMixRate);
 }
 
 const char *Port_MusicRomTitle(void)
@@ -302,7 +413,7 @@ int Port_MusicRomIsBlue(void)
 static int FindTrack(int stream, int index)
 {
     for (int i = 0; i < sCount; i++)
-        if (sTracks[i].sdat == 0 && sTracks[i].isStream == stream && sTracks[i].index == index)
+        if (sTracks[i].sdat == 0 && !sTracks[i].isEffect && sTracks[i].isStream == stream && sTracks[i].index == index)
             return i;
     return -1;
 }
@@ -403,32 +514,33 @@ void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64)
     if (!sOpen)
         track = -1;
     if (track != s->track) {
+        MusicSync(); // (the job may be making this slot's song)
         song_close(s->song);
         s->song = NULL;
         s->track = track;
         if (track >= 0 && track < sCount) {
-            const Track *t = &sTracks[track];
-            const Sdat *sd = &sRom.sdat[t->sdat];
-            s->song = t->isStream ? song_open_strm(sd, t->index, sMixRate) : song_open_seq(sd, t->index, sMixRate);
+            s->song = OpenTrack(&sTracks[track]);
             if (s->song != NULL)
                 song_set_loops(s->song, loop ? 0 : 1, 0);
         }
+        sFound.done[JOB_SLOT0 + (slot & 1)] = sJobFound.done[JOB_SLOT0 + (slot & 1)] = 0;
     }
     s->paused = paused;
-    if (s->song != NULL)
-        song_set_volume(s->song, sVolume * (volume64 < 0 ? 0 : volume64 > 64 ? 64 : volume64) / 64);
+    s->volume64 = volume64 < 0 ? 0 : volume64 > 64 ? 64 : volume64; // (set when the next frame is made)
 }
 
 int Port_MusicSlotDone(int slot)
 {
     const Slot *s = &sSlots[slot & 1];
-    return s->song == NULL || song_done(s->song);
+    return s->song == NULL || sFound.done[JOB_SLOT0 + (slot & 1)];
 }
 
 static void ApplyTiming(Song *g)
 {
     if (sRepeat)
         song_set_loops(g, 0, 0); // forever
+    else if (sPlaying >= 0 && sPlaying < sCount && sTracks[sPlaying].isEffect)
+        song_set_loops(g, 1, 1500); // (looping effects: once round, a short fade)
     else
         song_set_loops(g, 2, 8000); // two loops, then an 8 s fade
 }
@@ -438,15 +550,17 @@ int Port_MusicPlay(int i)
     if (!sOpen || i < 0 || i >= sCount)
         return 0;
     Port_MusicStop(); // (a stream reads the ROM file as it plays)
-    const Track *t = &sTracks[i];
-    const Sdat *s = &sRom.sdat[t->sdat];
-    Song *g = t->isStream ? song_open_strm(s, t->index, sMixRate) : song_open_seq(s, t->index, sMixRate);
+    Song *g = OpenTrack(&sTracks[i]);
     sPlaying = i;
     if (g == NULL)
         return 0;
     ApplyTiming(g);
     song_set_volume(g, sVolume);
     sSong = g;
+    sFound.done[JOB_PLAYER] = sJobFound.done[JOB_PLAYER] = 0;
+    sFound.posMs = sJobFound.posMs = 0;
+    sFound.loops = sJobFound.loops = 0;
+    sFound.voices = sJobFound.voices = 0;
     return 1;
 }
 
@@ -467,13 +581,12 @@ int Port_MusicPaused(void)
 
 void Port_MusicSetVolume(int percent)
 {
-    sVolume = percent;
-    if (sSong != NULL)
-        song_set_volume(sSong, percent);
+    sVolume = percent; // (set when the next frame is made)
 }
 
 void Port_MusicSetRepeat(int repeat)
 {
+    MusicSync();
     sRepeat = repeat;
     if (sSong != NULL)
         ApplyTiming(sSong);
@@ -486,32 +599,32 @@ int Port_MusicRepeat(void)
 
 int Port_MusicDone(void)
 {
-    return sSong != NULL && song_done(sSong);
+    return sSong != NULL && sFound.done[JOB_PLAYER];
 }
 
 unsigned Port_MusicPosMs(void)
 {
-    return sSong != NULL ? song_pos_ms(sSong) : 0;
+    return sSong != NULL ? sFound.posMs : 0;
 }
 
 int Port_MusicLoops(void)
 {
-    return sSong != NULL ? song_loops(sSong) : 0;
+    return sSong != NULL ? sFound.loops : 0;
 }
 
 unsigned Port_MusicVoices(void)
 {
-    return sSong != NULL ? song_voices(sSong) : 0;
+    return sSong != NULL ? sFound.voices : 0;
 }
 
-// One frame of the game's sound (count stereo samples at rate): with a track
-// playing, the frame goes out at twice the rate, with the track (rendered at
-// that rate, near the DS's own 32728 Hz) added. Returns the samples now in
-// out2 (0: send the game's frame as it is).
+// One frame of the game's sound (count stereo samples at rate): with the ROM
+// open, the frame goes out at twice the rate, with the DS songs (made at that
+// rate, near the DS's own 32728 Hz) added: the samples made during the last
+// frame (see above). Returns the samples now in out2 (0: send the game's
+// frame as it is).
 int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *outRate)
 {
     static int16_t last[2];
-    static int16_t track[2048 * 2];
 
     if (rate > 0)
         sMixRate = 2 * (uint32_t)rate;
@@ -519,6 +632,7 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     // change, nor the sound with it, between one track and the next)
     if (!sOpen || count <= 0 || count > 1024)
         return 0;
+    MusicSync(); // the samples made for this frame
     // The game's samples, at twice the rate (each one, then the average with the next)
     for (int i = 0; i < count; i++) {
         for (int c = 0; c < 2; c++) {
@@ -529,15 +643,38 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     }
     last[0] = in[(count - 1) * 2];
     last[1] = in[(count - 1) * 2 + 1];
-    for (int k = -1; k < 2; k++) { // the player's track, then the slots'
-        Song *g = k < 0 ? (sPaused ? NULL : sSong) : (sSlots[k].paused ? NULL : sSlots[k].song);
-        if (g == NULL)
-            continue;
-        song_render(g, track, (uint32_t)count * 2);
-        for (int i = 0; i < count * 4; i++) {
-            int v = out2[i] + track[i];
-            out2[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+    if (sJobCount == (uint32_t)count * 2) { // (else the first frame, or a new rate: nothing made yet)
+        for (int k = 0; k < JOB_SONGS; k++) { // the player's track, then the slots'
+            if (!sJobHas[k])
+                continue;
+            const int16_t *track = sJobOut[k];
+            for (int i = 0; i < count * 4; i++) {
+                int v = out2[i] + track[i];
+                out2[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+            }
         }
+    }
+    // The next frame's: the volumes as they are now, then made on the second
+    // core while the game runs (Dual Core), else now
+    if (sSong != NULL)
+        song_set_volume(sSong, sVolume);
+    for (int k = 0; k < 2; k++)
+        if (sSlots[k].song != NULL)
+            song_set_volume(sSlots[k].song, sVolume * sSlots[k].volume64 / 64);
+    sJobSong[JOB_PLAYER] = sPaused ? NULL : sSong;
+    sJobSong[JOB_SLOT0] = sSlots[0].paused ? NULL : sSlots[0].song;
+    sJobSong[JOB_SLOT1] = sSlots[1].paused ? NULL : sSlots[1].song;
+    sJobCount = (uint32_t)count * 2;
+    if (sJobSong[0] == NULL && sJobSong[1] == NULL && sJobSong[2] == NULL) {
+        memset(sJobHas, 0, sizeof(sJobHas)); // (nothing playing: no job)
+    }
+    else if (Port_DualCore()) {
+        Backend_RunAsync(Port_MusicRenderJob, NULL);
+        sJobPending = 1;
+    }
+    else {
+        Port_MusicRenderJob(NULL);
+        sFound = sJobFound;
     }
     *outRate = 2 * rate;
     return count * 2;

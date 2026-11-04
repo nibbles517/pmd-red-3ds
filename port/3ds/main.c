@@ -39,7 +39,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 
 void AgbMain(void);
 
-const int Backend_Version16_UpdateRepoIfMissing = 16;
+const int Backend_Version17_UpdateRepoIfMissing = 17;
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
 static uint16_t sDimLut[0x8000]; // the same, darkened during a screen change fade
@@ -621,11 +621,15 @@ void Backend_Mark(int mark, int skipped)
     }
 }
 
+static void WorkerTicks(u32 *all, u32 *music);
+
 static void MeterEndFrame(void)
 {
     u64 now = svcGetSystemTick();
     if (sMeterStart == 0) {
         sMeterStart = sMeterBoot = now;
+        u32 a, m;
+        WorkerTicks(&a, &m); // (from now on)
         return;
     }
     sMeterFrames++;
@@ -644,6 +648,13 @@ static void MeterEndFrame(void)
             n += snprintf(line + n, sizeof(line) - n, " %s %.1f", sPartNames[i], sPartTicks[i] * ms / sMeterFrames);
         if (n < (int)sizeof(line))
             n += snprintf(line + n, sizeof(line) - n, " ms/frame");
+        { // the second core: busy, and of that the DS music (ms/frame; its own share of the time)
+            u32 busy, music;
+            WorkerTicks(&busy, &music);
+            if (n < (int)sizeof(line))
+                n += snprintf(line + n, sizeof(line) - n, " | core2 %.1f (music %.1f) ms/frame, %d%% busy",
+                              busy * ms / sMeterFrames, music * ms / sMeterFrames, (int)(busy * 100.0 / (now - sMeterStart)));
+        }
         if (n < (int)sizeof(line))
             snprintf(line + n, sizeof(line) - n, " | sub: %s", Port_SubScreenStats());
         fprintf(sLog, "%s\n", line);
@@ -708,10 +719,16 @@ static void AptEvents(APT_HookType hook, void *param)
         return;
     SetCpuLimit();
 }
-static bool sWorkerTried, sWorkerQuit, sWorkerBusy;
+static bool sWorkerTried, sWorkerQuit;
 static LightEvent sWorkGo, sWorkDone;
-static void (*sWorkFn)(void *);
-static void *sWorkArg;
+// The jobs given and not done yet, in order (the DS music's next frame, then
+// a part of the picture, say): the worker takes them from sJobHead, this
+// core adds them at sJobTail.
+#define WORK_JOBS 4
+static struct { void (*fn)(void *); void *arg; } sJobs[WORK_JOBS];
+static volatile unsigned sJobHead, sJobTail;
+// The performance meter: the worker's busy time (all of it, and the DS music's)
+static volatile u32 sWorkerTicks, sWorkerMusicTicks; // (only the worker adds to them)
 
 bool Backend_IsNew3DS(void)
 {
@@ -728,9 +745,19 @@ static void WorkerMain(void *unused)
         __sync_synchronize();
         if (sWorkerQuit)
             break;
-        sWorkFn(sWorkArg);
-        __sync_synchronize();
-        LightEvent_Signal(&sWorkDone);
+        while (sJobHead != sJobTail) {
+            unsigned at = sJobHead % WORK_JOBS;
+            void (*fn)(void *) = sJobs[at].fn;
+            u64 t0 = svcGetSystemTick();
+            fn(sJobs[at].arg);
+            u32 dt = (u32)(svcGetSystemTick() - t0);
+            sWorkerTicks += dt;
+            if (fn == Port_MusicRenderJob)
+                sWorkerMusicTicks += dt;
+            __sync_synchronize();
+            sJobHead++;
+            LightEvent_Signal(&sWorkDone);
+        }
     }
 }
 
@@ -763,31 +790,41 @@ void Backend_RunAsync(void (*fn)(void *), void *arg)
         fn(arg);
         return;
     }
-    sWorkFn = fn;
-    sWorkArg = arg;
-    sWorkerBusy = true;
+    while (sJobTail - sJobHead >= WORK_JOBS) // (full: never, with two at most)
+        LightEvent_Wait(&sWorkDone);
+    unsigned at = sJobTail % WORK_JOBS;
+    sJobs[at].fn = fn;
+    sJobs[at].arg = arg;
     __sync_synchronize();
+    sJobTail++;
     LightEvent_Signal(&sWorkGo);
 }
 
+// All the jobs given done
 void Backend_WaitAsync(void)
 {
-    if (!sWorkerBusy)
-        return;
-    LightEvent_Wait(&sWorkDone);
+    while (sJobHead != sJobTail)
+        LightEvent_Wait(&sWorkDone);
     __sync_synchronize();
-    sWorkerBusy = false;
 }
 
 bool Backend_AsyncDone(void)
 {
-    if (!sWorkerBusy)
-        return true;
-    if (!LightEvent_TryWait(&sWorkDone))
+    if (sJobHead != sJobTail)
         return false;
     __sync_synchronize();
-    sWorkerBusy = false;
     return true;
+}
+
+// The performance meter: the worker's busy time since the last call (ticks)
+static void WorkerTicks(u32 *all, u32 *music)
+{
+    static u32 sLastAll, sLastMusic;
+    u32 a = sWorkerTicks, m = sWorkerMusicTicks;
+    *all = a - sLastAll;
+    *music = m - sLastMusic;
+    sLastAll = a;
+    sLastMusic = m;
 }
 
 static void StopWorker(void)

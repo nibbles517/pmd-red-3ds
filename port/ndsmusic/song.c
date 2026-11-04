@@ -49,6 +49,16 @@ Song *song_open_seq(const Sdat *s, uint32_t idx, uint32_t rate) {
     return g;
 }
 
+Song *song_open_ssar(const Sdat *s, uint32_t arc, uint32_t idx, uint32_t rate) {
+    Song *g = song_new(rate);
+    if (!g) return NULL;
+    if (sdat_load_ssar_seq(s, arc, idx, &g->bundle) != 0 || !(g->seq = sseq_create(&g->bundle, rate))) {
+        song_close(g);
+        return NULL;
+    }
+    return g;
+}
+
 Song *song_open_strm(const Sdat *s, uint32_t idx, uint32_t rate) {
     DataSource src = sdat_strm_source(s, idx);
     if (src.size == 0) return NULL;

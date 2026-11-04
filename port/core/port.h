@@ -103,10 +103,14 @@ void Backend_Present(const uint16_t *frame, int width, int height);
 // Auto then skips drawing the next one).
 bool Backend_FrameLate(void);
 // Dual Core: runs fn(arg) on the second CPU core (or at once, if there is
-// none); Backend_WaitAsync waits for it to return.
+// none); Backend_WaitAsync waits for it to return. Jobs given while one is
+// running are done after it, in order (Backend_WaitAsync: all of them).
 void Backend_RunAsync(void (*fn)(void *), void *arg);
 void Backend_WaitAsync(void);
 bool Backend_AsyncDone(void);  // whether it has returned already (without waiting)
+// Music Style DS / Music Options (music.c): the DS music's next frame, made on
+// the second core (Backend_RunAsync) while the game runs, when Dual Core is on
+void Port_MusicRenderJob(void *unused);
 bool Backend_IsNew3DS(void); // (Dual Core's default)
 // Performance meter: the core marks where each frame's parts end (the
 // backend times them). skipped: Frame Skip left the frame undrawn.
@@ -121,7 +125,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version16_UpdateRepoIfMissing;
+extern const int Backend_Version17_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.

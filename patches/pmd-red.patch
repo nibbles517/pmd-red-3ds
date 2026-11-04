@@ -3464,7 +3464,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..f9036bca 100644
+index 86f582c2..e0c8e4b0 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -3950,7 +3950,7 @@ index 86f582c2..f9036bca 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,11 +652,762 @@ static void sub_801E0FC(void)
+@@ -282,11 +652,772 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -4129,7 +4129,14 @@ index 86f582c2..f9036bca 100644
 +        s32 y = GetMenuEntryYCoord(in, i);
 +        if (track == sMusicListPlaying)
 +            PrintStringOnWindow(8, y, sMusicStar, MUSIC_LIST_WIN, 0);
-+        MusicLabel(text, 34, Port_MusicLabel(track));
++        if (Port_MusicIsEffect(track)) { // sound effects: green, as in the NDS Music Player
++            text[0] = '#'; text[1] = 'C'; text[2] = '4';
++            MusicLabel(text + 3, 34, Port_MusicLabel(track));
++            strcat((char *)text, "#R");
++        }
++        else {
++            MusicLabel(text, 34, Port_MusicLabel(track));
++        }
 +        PrintStringOnWindow(20, y, text, MUSIC_LIST_WIN, 0);
 +    }
 +    sub_80073E0(MUSIC_LIST_WIN);
@@ -4314,7 +4321,10 @@ index 86f582c2..f9036bca 100644
 +        }
 +    }
 +    if (Port_MusicDone()) {
-+        AdvanceMusic(1, TRUE);
++        if (Port_MusicIsEffect(sMusicTrack))
++            Port_MusicStop(); // (an effect plays once: not on through hundreds of them)
++        else
++            AdvanceMusic(1, TRUE);
 +        info = TRUE;
 +    }
 +    if (Port_MusicPlaying() != sMusicListPlaying)
@@ -4608,7 +4618,7 @@ index 86f582c2..f9036bca 100644
 +        step = 10;
 +
 +    if (step != 0) { // another DS track for this song, played at once
-+        s32 count = Port_MusicCount(), track = Port_MusicMapGet(sMatchSongs[song].id);
++        s32 count = Port_MusicSongCount(), track = Port_MusicMapGet(sMatchSongs[song].id); // (music only)
 +        track = track < 0 ? (step > 0 ? step - 1 : count + step) : track + step;
 +        if (track < 0)
 +            track = 0;

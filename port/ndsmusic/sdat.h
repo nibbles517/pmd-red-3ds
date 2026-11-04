@@ -52,6 +52,19 @@ typedef struct {
 } SdatStrmInfo;
 
 typedef struct {
+    uint8_t present;
+    uint16_t file_id;
+} SdatSeqArcInfo;
+
+/* One sound effect (or jingle) inside a sequence archive (SSAR). */
+typedef struct {
+    uint8_t valid;   /* 0 for empty slots */
+    uint32_t offset; /* into the archive's shared sequence data */
+    uint16_t bank;
+    uint8_t vol, cpr, ppr, ply;
+} SdatSsarEntry;
+
+typedef struct {
     uint32_t offset; /* relative to SDAT start */
     uint32_t size;
 } SdatFatEntry;
@@ -59,8 +72,9 @@ typedef struct {
 typedef struct {
     DataSource src;
 
-    uint32_t num_seq, num_bank, num_wavearc, num_player, num_strm;
+    uint32_t num_seq, num_seqarc, num_bank, num_wavearc, num_player, num_strm;
     SdatSeqInfo *seq;
+    SdatSeqArcInfo *seqarc;
     SdatBankInfo *bank;
     SdatWaveArcInfo *wavearc;
     SdatPlayerInfo *player;
@@ -71,13 +85,18 @@ typedef struct {
 
     /* Symbol names (NULL entries if stripped). Point into symb_buf. */
     uint8_t *symb_buf;
+    uint32_t symb_size;
     const char **seq_name;
     const char **strm_name;
+    const char **seqarc_name;
+    uint32_t *seqarc_sub; /* SYMB offset of each archive's entry-name table (0 = none) */
 } Sdat;
 
 /* Everything the sequence player needs for one song. Buffers are malloc'd. */
 typedef struct {
     uint32_t seq_index;
+    uint32_t data_off;  /* where sequence data starts in sseq (offsets in commands are relative to it) */
+    uint32_t start_off; /* where track 0 starts in sseq */
     SdatSeqInfo info;
     SdatPlayerInfo player; /* present==0 if the SDAT has no player entry */
     uint8_t *sseq;
@@ -101,5 +120,14 @@ void sdat_free_seq(SdatSeqBundle *b);
 
 /* View of a STRM file for chunked streaming (size 0 if invalid). */
 DataSource sdat_strm_source(const Sdat *s, uint32_t strm_index);
+
+/* ---- sequence archives (SSAR: mostly sound effects) ---- */
+const char *sdat_ssar_name(const Sdat *s, uint32_t arc);                 /* may be NULL */
+const char *sdat_ssar_entry_name(const Sdat *s, uint32_t arc, uint32_t idx); /* may be NULL */
+/* Reads an archive's entry table. Returns the entry count (0 if none/invalid) and a
+ * malloc'd array in *out (free it). Empty slots have valid = 0. */
+uint32_t sdat_ssar_entries(const Sdat *s, uint32_t arc, SdatSsarEntry **out);
+/* Loads one archive entry the same way sdat_load_seq loads a sequence. */
+int sdat_load_ssar_seq(const Sdat *s, uint32_t arc, uint32_t idx, SdatSeqBundle *out);
 
 #endif

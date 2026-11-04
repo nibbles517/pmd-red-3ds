@@ -59,6 +59,10 @@ music: put your own dump of Pokémon Mystery Dungeon: Blue Rescue Team, named
 `pmd-blue.nds`, in that same folder (`SD:/3ds/pmd-red-3ds/`).
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
+The Music Player lists the ROM's sound effects after its music (in green);
+an effect plays once. (The game's own sound effects are not matched to them
+yet.) With Dual Core on, the DS music is made on the second CPU core while
+the game runs, a frame ahead.
 
 The matches are built in (port/core/music.c, sDefaultMap). Music Matching, the
 development aid they were made with, is hidden; a build with
@@ -71,7 +75,9 @@ Controls are the GBA's (A, B, L, R, START, SELECT, D-pad or Circle Pad).
 saving in the game.
 
 For a log, create an empty file `SD:/3ds/pmd-red-3ds/debug.txt`; the port then
-writes `port.log` next to it.
+writes `port.log` next to it. Every 5 seconds it has a line with the time each part
+of a frame took, what the second screen drew, and how busy the second core
+was (`core2`: all its work, and of that the DS music's, in ms per frame).
 
 ## Game half (Linux or WSL)
 
