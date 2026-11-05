@@ -629,10 +629,12 @@ static void GpuListUpload(const GpuList *l)
         c->gpuAny = 1;
     }
 
-    // While a fade has the screen black, nothing shows: a scene's new tiles
-    // are written a part a frame (spread over the black frames) instead of
-    // all at once
-    int budget = l->fadeOn && l->fade.mul == 0 && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]) ? 256 : 1 << 30;
+    // While a fade has the screen black (or nearly: under 10%), little shows:
+    // a scene's new tiles (which come with its new palette, on the first
+    // frame of its fade in) are written a part a frame instead of all at
+    // once; one not written yet shows its old tile at that brightness
+    int dark = l->fadeOn && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]);
+    int budget = dark && l->fade.mul == 0 ? 400 : dark && l->fade.mul < 26 ? 600 : 1 << 30;
     sGlLo = GL_TEX;
     sGlHi = 0;
     for (int b = 0; b < 4 && budget > 0; b++) {
