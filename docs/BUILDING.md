@@ -97,6 +97,11 @@ With GPU Drawing its `gpu:` part says whether it is on, how many of the
 frames drawn came from the drawing list (`list=listed/drawn`), how long
 writing its textures took (`up`), and why the other frames were drawn by the
 CPU (`window=`, `effect=`, `obj-semi=`, ...: docs/GPU.md).
+A frame that takes over 20 ms gets its own `slow frame` line (up to 20 every
+5 seconds): where its time went, its texture writing (`up`), and whether it
+was a GPU frame in a fade (`list fade`, with the fade), a palette change the
+GPU couldn't take as a fade (`list palette-change`) or a CPU frame
+(`cpu-picture`).
 
 Others > Graphics Options > **GPU Drawing** (On at first) has the GPU draw the
 main screen from the drawing list (docs/GPU.md); Off draws it on the CPU as

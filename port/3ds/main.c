@@ -1020,6 +1020,34 @@ static void MeterEndFrame(void)
     }
     sMeterFrames++;
     sMeterLate += sLate;
+    { // A slow frame (over 20 ms): logged with where its time went (a fade's
+      // hitch is lost in the 5-second lines)
+        static u64 lastNow, lastPart[T_COUNT], lastUp;
+        static int logged;
+        if (sMeterFrames == 1)
+            logged = 0;
+        double ms = 1000.0 / SYSCLOCK_ARM11, took = lastNow ? (now - lastNow) * ms : 0;
+        if (took > 20.0 && sLog != NULL && logged < 20) {
+            char line[256];
+            int n = snprintf(line, sizeof(line), "slow frame t=%.2fs %.1f ms:", (now - sMeterBoot) / (double)SYSCLOCK_ARM11, took);
+            for (int i = 0; i < T_COUNT && n < (int)sizeof(line); i++)
+                n += snprintf(line + n, sizeof(line) - n, " %s %.1f", sPartNames[i],
+                              (sPartTicks[i] >= lastPart[i] ? sPartTicks[i] - lastPart[i] : sPartTicks[i]) * ms); // (reset every 5 s)
+            if (n < (int)sizeof(line))
+                n += snprintf(line + n, sizeof(line) - n, " | up %.1f %s",
+                              (sGlUploadTicks >= lastUp ? sGlUploadTicks - lastUp : sGlUploadTicks) * ms,
+                              sGlList == NULL ? "cpu-picture" : sGlList->palette == GPU_PAL_FADE ? "list fade" :
+                              sGlList->palette == GPU_PAL_OTHER ? "list palette-change" : "list");
+            if (sGlList != NULL && sGlList->fadeOn && n < (int)sizeof(line))
+                snprintf(line + n, sizeof(line) - n, " (mul %d add %d,%d,%d)", sGlList->fade.mul,
+                         sGlList->fade.add[0], sGlList->fade.add[1], sGlList->fade.add[2]);
+            Backend_Log("%s", line);
+            logged++;
+        }
+        lastNow = now;
+        memcpy(lastPart, sPartTicks, sizeof(lastPart));
+        lastUp = sGlUploadTicks;
+    }
     if (now - sMeterStart < 5 * (u64)SYSCLOCK_ARM11)
         return;
     if (sLog != NULL) {
