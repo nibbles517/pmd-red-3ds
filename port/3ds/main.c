@@ -492,19 +492,25 @@ static void GlBgTile(BgCache *c, uint16_t *tex, int tx, int ty)
     int x0 = tx * 8, y0 = ty * 8;
     const uint16_t *px = &c->px[y0 * BGC_STRIDE + x0];
     const uint8_t *idx = &c->idx[y0 * BGC_STRIDE + x0];
-    for (int r = 0; r < 8; r++, px += BGC_STRIDE, idx += BGC_STRIDE)
-        for (int x = 0; x < 8; x++) {
-            uint16_t t;
-            if (px[x] & 0x8000)
-                t = 0;
-            else if (!c->indexOk)
-                t = To5551(px[x]);
-            else if (!c->color256 && idx[x] == 0x10)
-                t = 1; // (the wide map's black: opaque)
-            else
-                t = sGlLut[idx[x]];
-            *GlTexel(tex, x0 + x, y0 + r) = t;
+    // The tile's 64 texels are together in the texture (in Z order)
+    uint16_t *tile = tex + (((sGlFlip ? GL_TEX / 8 - 1 - ty : ty) * (GL_TEX / 8) + tx) << 6);
+    for (int r = 0; r < 8; r++, px += BGC_STRIDE, idx += BGC_STRIDE) {
+        const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
+        if (c->indexOk && !c->color256) {
+            for (int x = 0; x < 8; x++) {
+                uint8_t n = idx[x];
+                tile[m[x]] = (px[x] & 0x8000) ? 0 : n == 0x10 ? 1 : sGlLut[n]; // (0x10: the wide map's black)
+            }
         }
+        else if (c->indexOk) {
+            for (int x = 0; x < 8; x++)
+                tile[m[x]] = (px[x] & 0x8000) ? 0 : sGlLut[idx[x]];
+        }
+        else {
+            for (int x = 0; x < 8; x++)
+                tile[m[x]] = To5551(px[x]);
+        }
+    }
     GlTouch(y0, y0 + 8);
 }
 
@@ -537,9 +543,13 @@ static void GpuListUpload(const GpuList *l)
         c->gpuAny = 1;
     }
 
+    // While a fade has the screen black, nothing shows: a scene's new tiles
+    // are written a part a frame (spread over the black frames) instead of
+    // all at once
+    int budget = l->fadeOn && l->fade.mul == 0 && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]) ? 256 : 1 << 30;
     sGlLo = GL_TEX;
     sGlHi = 0;
-    for (int b = 0; b < 4; b++) {
+    for (int b = 0; b < 4 && budget > 0; b++) {
         BgCache *c = &gBgCache[b];
         if (!c->gpuAny)
             continue;
@@ -551,9 +561,10 @@ static void GpuListUpload(const GpuList *l)
             for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
                 for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++) {
                     uint32_t bit = 1u << (tx & 31);
-                    if (c->gpuDirty[ty][tx >> 5] & bit) {
+                    if ((c->gpuDirty[ty][tx >> 5] & bit) && budget > 0) {
                         c->gpuDirty[ty][tx >> 5] &= ~bit;
                         GlBgTile(c, tex, tx, ty);
+                        budget--;
                     }
                 }
         }
@@ -1020,30 +1031,35 @@ static void MeterEndFrame(void)
     }
     sMeterFrames++;
     sMeterLate += sLate;
-    { // A slow frame (over 20 ms): logged with where its time went (a fade's
-      // hitch is lost in the 5-second lines)
+    // A slow frame (over 20 ms): logged with where its time went (a fade's
+    // hitch is lost in the 5-second lines). Kept here and written with the
+    // 5-second line (writing to the SD card takes long enough to slow the
+    // next frame itself: that frame is marked "after log").
+    static char slowLines[20][224];
+    static int slowCount;
+    static bool afterLog;
+    {
         static u64 lastNow, lastPart[T_COUNT], lastUp;
-        static int logged;
-        if (sMeterFrames == 1)
-            logged = 0;
         double ms = 1000.0 / SYSCLOCK_ARM11, took = lastNow ? (now - lastNow) * ms : 0;
-        if (took > 20.0 && sLog != NULL && logged < 20) {
-            char line[256];
-            int n = snprintf(line, sizeof(line), "slow frame t=%.2fs %.1f ms:", (now - sMeterBoot) / (double)SYSCLOCK_ARM11, took);
-            for (int i = 0; i < T_COUNT && n < (int)sizeof(line); i++)
-                n += snprintf(line + n, sizeof(line) - n, " %s %.1f", sPartNames[i],
+        if (took > 20.0 && sLog != NULL && slowCount < 20) {
+            char *line = slowLines[slowCount];
+            const int lineSize = (int)sizeof(slowLines[0]);
+            int n = snprintf(line, lineSize, "slow frame t=%.2fs %.1f ms%s:", (now - sMeterBoot) / (double)SYSCLOCK_ARM11, took,
+                             afterLog ? " (after log)" : "");
+            for (int i = 0; i < T_COUNT && n < lineSize; i++)
+                n += snprintf(line + n, lineSize - n, " %s %.1f", sPartNames[i],
                               (sPartTicks[i] >= lastPart[i] ? sPartTicks[i] - lastPart[i] : sPartTicks[i]) * ms); // (reset every 5 s)
-            if (n < (int)sizeof(line))
-                n += snprintf(line + n, sizeof(line) - n, " | up %.1f %s",
+            if (n < lineSize)
+                n += snprintf(line + n, lineSize - n, " | up %.1f %s",
                               (sGlUploadTicks >= lastUp ? sGlUploadTicks - lastUp : sGlUploadTicks) * ms,
                               sGlList == NULL ? "cpu-picture" : sGlList->palette == GPU_PAL_FADE ? "list fade" :
                               sGlList->palette == GPU_PAL_OTHER ? "list palette-change" : "list");
-            if (sGlList != NULL && sGlList->fadeOn && n < (int)sizeof(line))
-                snprintf(line + n, sizeof(line) - n, " (mul %d add %d,%d,%d)", sGlList->fade.mul,
+            if (sGlList != NULL && sGlList->fadeOn && n < lineSize)
+                snprintf(line + n, lineSize - n, " (mul %d add %d,%d,%d)", sGlList->fade.mul,
                          sGlList->fade.add[0], sGlList->fade.add[1], sGlList->fade.add[2]);
-            Backend_Log("%s", line);
-            logged++;
+            slowCount++;
         }
+        afterLog = false;
         lastNow = now;
         memcpy(lastPart, sPartTicks, sizeof(lastPart));
         lastUp = sGlUploadTicks;
@@ -1051,6 +1067,10 @@ static void MeterEndFrame(void)
     if (now - sMeterStart < 5 * (u64)SYSCLOCK_ARM11)
         return;
     if (sLog != NULL) {
+        for (int i = 0; i < slowCount; i++)
+            Backend_Log("%s", slowLines[i]);
+        slowCount = 0;
+        afterLog = true; // (the next frame: slowed by these writes)
         char line[768];
         double ms = 1000.0 / SYSCLOCK_ARM11, secs = (now - sMeterStart) / (double)SYSCLOCK_ARM11;
         bool isNew = false;
