@@ -600,15 +600,25 @@ static void GlBgTile(BgCache *c, uint16_t *tex, int tx, int ty)
     GlTouch(y0, y0 + 8);
 }
 
+static int sGlFrameTiles; // (the slow frame lines: this frame's texture writing)
+static u64 sGlFrameBg, sGlFrameStrip, sGlFrameObj;
+
 static void GpuListUpload(const GpuList *l)
 {
     u64 start = svcGetSystemTick();
+    sGlFrameTiles = 0;
 
     // The base palette's colours; the BG and OBJ banks whose colours changed
+    // (and which BG colours: a palette animation changes a few of a bank's)
+    static uint8_t changedEntry[256];
+    static uint32_t palDirty[4][64][2]; // (tiles of a changed bank: written if shown and using a changed colour)
     unsigned changedBanks = 0, changedObj = 0;
     for (int i = 0; i < 512; i++) {
         uint16_t b = l->base[i];
-        if (!sGlLastBaseOk || b != sGlLastBase[i]) {
+        int changed = !sGlLastBaseOk || b != sGlLastBase[i];
+        if (i < 256)
+            changedEntry[i] = (uint8_t)changed;
+        if (changed) {
             if (i < 256)
                 changedBanks |= 1u << (i >> 4);
             else
@@ -625,7 +635,7 @@ static void GpuListUpload(const GpuList *l)
         for (int ty = 0; ty < c->tilesH; ty++)
             for (int tx = 0; tx < c->tilesW; tx++)
                 if (c->color256 || ((changedBanks >> (c->entry[ty * 64 + tx] >> 12)) & 1))
-                    c->gpuDirty[ty][tx >> 5] |= 1u << (tx & 31);
+                    palDirty[b][ty][tx >> 5] |= 1u << (tx & 31);
         c->gpuAny = 1;
     }
 
@@ -649,21 +659,47 @@ static void GpuListUpload(const GpuList *l)
             for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
                 for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++) {
                     uint32_t bit = 1u << (tx & 31);
+                    if (palDirty[b][ty][tx >> 5] & bit) { // (its bank changed: does it use a changed colour?)
+                        palDirty[b][ty][tx >> 5] &= ~bit;
+                        if (!(c->gpuDirty[ty][tx >> 5] & bit)) {
+                            const uint16_t *tpx = &c->px[ty * 8 * BGC_STRIDE + tx * 8];
+                            const uint8_t *tidx = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
+                            int uses = 0;
+                            for (int r = 0; r < 8 && !uses; r++, tpx += BGC_STRIDE, tidx += BGC_STRIDE)
+                                for (int x = 0; x < 8; x++)
+                                    if (!(tpx[x] & 0x8000) && changedEntry[tidx[x]])
+                                        uses = 1;
+                            if (uses)
+                                c->gpuDirty[ty][tx >> 5] |= bit;
+                        }
+                    }
                     if ((c->gpuDirty[ty][tx >> 5] & bit) && budget > 0) {
                         c->gpuDirty[ty][tx >> 5] &= ~bit;
                         GlBgTile(c, tex, tx, ty);
                         budget--;
+                        sGlFrameTiles++;
                     }
                 }
         }
         GlFlush(&sGlBg[b]);
     }
+    if (changedBanks) // the changed banks' tiles not shown (or not reached): written whole when they are
+        for (int b = 0; b < 4; b++)
+            for (int ty = 0; ty < 64; ty++)
+                for (int w = 0; w < 2; w++) {
+                    gBgCache[b].gpuDirty[ty][w] |= palDirty[b][ty][w];
+                    palDirty[b][ty][w] = 0;
+                }
+    u64 t1 = svcGetSystemTick();
+    sGlFrameBg = t1 - start;
     for (int i = 0; i < l->quadCount; i++) { // the strips: pixels
         const GpuQuad *q = &l->quads[i];
         if (q->tex == GTEX_STRIP)
             GlWriteRect((uint16_t *)sGlStrip.data, &gGpuStrip[q->sy][q->sx], GPU_STRIP_W, q->sx, q->sy, q->w, q->h);
     }
     GlFlush(&sGlStrip);
+    u64 t2 = svcGetSystemTick();
+    sGlFrameStrip = t2 - t1;
     // The sprites (colour numbers): the slots shown this frame that were made
     // again, or whose bank's base colours changed (those not shown: later)
     uint16_t *obj = (uint16_t *)sGlObj.data;
@@ -684,7 +720,9 @@ static void GpuListUpload(const GpuList *l)
         GlTouch(o->y, o->y + o->h);
     }
     GlFlush(&sGlObj);
-    sGlUploadTicks += svcGetSystemTick() - start;
+    u64 t3 = svcGetSystemTick();
+    sGlFrameObj = t3 - t2;
+    sGlUploadTicks += t3 - start;
 }
 
 // A texture coordinate: v at the top edge of image row y (v = 0: the top row,
@@ -789,7 +827,48 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
     for (int i = 0; i < l->quadCount; i++)
         order[start[1023 - (l->quads[i].key & 1023)]++] = (uint16_t)i;
 
-    int boundTex = -1;
+    // Batches: the rectangles in a row with the same texture and state go in
+    // one draw (as triangles); a first target's (two passes) only with its
+    // own layer's (the same key: they don't overlap, so each pass can take
+    // them all), as overlapping ones must be drawn in their order
+    typedef struct { float x0, y0, x1, y1, u0, v0, u1, v1; } GlRect;
+    static GlRect batch[128];
+    int bn = 0, bTex = -1, bFlags = 0, bKey = -1, boundTex = -1;
+#define GL_FLUSH_BATCH() do { \
+        if (bn) { \
+            if (bTex != boundTex) { C3D_TexBind(0, texs[bTex]); boundTex = bTex; } \
+            int prefaded = (bFlags & GQ_PREFADED) ? 1 : 0; \
+            if (prefaded != prefadedNow) { \
+                C3D_TexEnvColor(env, prefaded ? 0xFFFFFFFF : fadeMul); \
+                C3D_TexEnvColor(env1, prefaded ? 0xFF000000 : fadeAdd); \
+                C3D_DirtyTexEnv(env); \
+                C3D_DirtyTexEnv(env1); \
+                prefadedNow = prefaded; \
+            } \
+            int passes = (bFlags & GQ_BLEND) ? 2 : 1; \
+            for (int pass = 0; pass < passes; pass++) { \
+                if (passes == 1) /* covers; the flag: whether it is a second target */ \
+                    GlSetBlend(false, (bFlags & GQ_SECOND) ? 1 : 0, GPU_ALWAYS, GPU_STENCIL_REPLACE); \
+                else if (pass == 0) /* a first target over what isn't a second one: as it is */ \
+                    GlSetBlend(false, 0, GPU_EQUAL, GPU_STENCIL_KEEP); \
+                else /* ... over a second target: blended, and the flag cleared */ \
+                    GlSetBlend(true, 1, GPU_EQUAL, GPU_STENCIL_ZERO); \
+                C3D_ImmDrawBegin(GPU_TRIANGLES); \
+                for (int k = 0; k < bn; k++) { \
+                    const GlRect *r = &batch[k]; \
+                    C3D_ImmSendAttrib(r->x0, r->y0, 0.5f, 0.0f); C3D_ImmSendAttrib(r->u0, r->v0, 0.0f, 0.0f); \
+                    C3D_ImmSendAttrib(r->x1, r->y0, 0.5f, 0.0f); C3D_ImmSendAttrib(r->u1, r->v0, 0.0f, 0.0f); \
+                    C3D_ImmSendAttrib(r->x0, r->y1, 0.5f, 0.0f); C3D_ImmSendAttrib(r->u0, r->v1, 0.0f, 0.0f); \
+                    C3D_ImmSendAttrib(r->x1, r->y0, 0.5f, 0.0f); C3D_ImmSendAttrib(r->u1, r->v0, 0.0f, 0.0f); \
+                    C3D_ImmSendAttrib(r->x1, r->y1, 0.5f, 0.0f); C3D_ImmSendAttrib(r->u1, r->v1, 0.0f, 0.0f); \
+                    C3D_ImmSendAttrib(r->x0, r->y1, 0.5f, 0.0f); C3D_ImmSendAttrib(r->u0, r->v1, 0.0f, 0.0f); \
+                } \
+                C3D_ImmDrawEnd(); \
+            } \
+            bn = 0; \
+        } \
+    } while (0)
+
     for (int n = 0; n < l->quadCount; n++) {
         const GpuQuad *q = &l->quads[order[n]];
         // Cut to the list's area (sprites can reach past it)
@@ -804,37 +883,19 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
         else                     { u0 = q->sx + (cx0 - dx0); u1 = q->sx + (cx1 - dx0); }
         if (q->flags & GQ_VFLIP) { t0 = q->sy + (dy1 - cy0); t1 = q->sy + (dy1 - cy1); }
         else                     { t0 = q->sy + (cy0 - dy0); t1 = q->sy + (cy1 - dy0); }
-        float fu0 = (float)u0 / GL_TEX, fu1 = (float)u1 / GL_TEX, fv0 = GlV(t0), fv1 = GlV(t1);
-        float x0 = px + cx0 * sx, y0 = py + cy0 * sy, x1 = px + cx1 * sx, y1 = py + cy1 * sy;
-
-        if (q->tex != boundTex) {
-            C3D_TexBind(0, texs[q->tex]);
-            boundTex = q->tex;
-        }
-        int prefaded = (q->flags & GQ_PREFADED) ? 1 : 0;
-        if (prefaded != prefadedNow) {
-            C3D_TexEnvColor(env, prefaded ? 0xFFFFFFFF : fadeMul);
-            C3D_TexEnvColor(env1, prefaded ? 0xFF000000 : fadeAdd);
-            C3D_DirtyTexEnv(env);
-            C3D_DirtyTexEnv(env1);
-            prefadedNow = prefaded;
-        }
-        int passes = (q->flags & GQ_BLEND) ? 2 : 1;
-        for (int pass = 0; pass < passes; pass++) {
-            if (passes == 1) // covers; the flag: whether it is a second target
-                GlSetBlend(false, (q->flags & GQ_SECOND) ? 1 : 0, GPU_ALWAYS, GPU_STENCIL_REPLACE);
-            else if (pass == 0) // a first target over what isn't a second one: as it is
-                GlSetBlend(false, 0, GPU_EQUAL, GPU_STENCIL_KEEP);
-            else // ... over a second target: blended, and the flag cleared
-                GlSetBlend(true, 1, GPU_EQUAL, GPU_STENCIL_ZERO);
-            C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
-            C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(fu0, fv0, 0.0f, 0.0f);
-            C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(fu1, fv0, 0.0f, 0.0f);
-            C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(fu0, fv1, 0.0f, 0.0f);
-            C3D_ImmSendAttrib(x1, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(fu1, fv1, 0.0f, 0.0f);
-            C3D_ImmDrawEnd();
-        }
+        int flags = q->flags & (GQ_BLEND | GQ_SECOND | GQ_PREFADED);
+        if (bn && (q->tex != bTex || flags != bFlags || ((flags & GQ_BLEND) && q->key != bKey)
+                   || bn == (int)(sizeof(batch) / sizeof(batch[0]))))
+            GL_FLUSH_BATCH();
+        bTex = q->tex;
+        bFlags = flags;
+        bKey = q->key;
+        GlRect *r = &batch[bn++];
+        r->x0 = px + cx0 * sx; r->y0 = py + cy0 * sy; r->x1 = px + cx1 * sx; r->y1 = py + cy1 * sy;
+        r->u0 = (float)u0 / GL_TEX; r->u1 = (float)u1 / GL_TEX; r->v0 = GlV(t0); r->v1 = GlV(t1);
     }
+    GL_FLUSH_BATCH();
+#undef GL_FLUSH_BATCH
 
     // Back to how the pictures are drawn
     C3D_TexEnvInit(C3D_GetTexEnv(1));
@@ -1122,7 +1183,7 @@ static void MeterEndFrame(void)
     // A slow frame (over 20 ms): logged with where its time went (a fade's
     // hitch is lost in the 5-second lines); up to 20 every 5 seconds, kept
     // here and handed to the log's thread with the 5-second line.
-    static char slowLines[20][224];
+    static char slowLines[20][320];
     static int slowCount;
     {
         static u64 lastNow, lastPart[T_COUNT], lastUp;
@@ -1140,8 +1201,11 @@ static void MeterEndFrame(void)
                               sGlList == NULL ? "cpu-picture" : sGlList->palette == GPU_PAL_FADE ? "list fade" :
                               sGlList->palette == GPU_PAL_OTHER ? "list palette-change" : "list");
             if (sGlList != NULL && sGlList->fadeOn && n < lineSize)
-                snprintf(line + n, lineSize - n, " (mul %d add %d,%d,%d)", sGlList->fade.mul,
-                         sGlList->fade.add[0], sGlList->fade.add[1], sGlList->fade.add[2]);
+                n += snprintf(line + n, lineSize - n, " (mul %d add %d,%d,%d)", sGlList->fade.mul,
+                              sGlList->fade.add[0], sGlList->fade.add[1], sGlList->fade.add[2]);
+            if (sGlList != NULL && n < lineSize)
+                snprintf(line + n, lineSize - n, " | quads %d tiles %d: bg %.1f strips %.1f obj %.1f",
+                         sGlList->quadCount, sGlFrameTiles, sGlFrameBg * ms, sGlFrameStrip * ms, sGlFrameObj * ms);
             slowCount++;
         }
         lastNow = now;
