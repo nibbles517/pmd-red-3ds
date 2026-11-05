@@ -59,6 +59,92 @@ static inline uint16_t ToRgb565(uint16_t c)
 static int sScaled;
 static int sBottom; // picture on the bottom screen
 static FILE *sLog;
+
+// port.log's lines are written by a thread of their own (one priority below
+// the game's, on its core: it runs while the game waits for the screen), so
+// the SD card's writes don't hold up a frame; LogLine hands it a line.
+#define LOG_RING (32 * 1024)
+static char sLogRing[LOG_RING];
+static size_t sLogHead, sLogTail; // (written up to / taken up to; wrap at LOG_RING)
+static LightLock sLogLock;
+static LightEvent sLogEvent;
+static Thread sLogThread;
+static volatile bool sLogQuit;
+
+// What the ring holds, to the file (the thread; or, once it has stopped, a
+// fatal error or the end)
+static void LogDrain(void)
+{
+    char chunk[1024];
+    for (;;) {
+        LightLock_Lock(&sLogLock);
+        size_t n = 0;
+        while (sLogTail != sLogHead && n < sizeof(chunk)) {
+            chunk[n++] = sLogRing[sLogTail];
+            sLogTail = (sLogTail + 1) % LOG_RING;
+        }
+        LightLock_Unlock(&sLogLock);
+        if (n == 0)
+            break;
+        fwrite(chunk, 1, n, sLog);
+    }
+    fflush(sLog);
+}
+
+static void LogMain(void *arg)
+{
+    (void)arg;
+    while (!sLogQuit) {
+        LightEvent_Wait(&sLogEvent);
+        LogDrain();
+    }
+}
+
+static void LogLine(const char *text)
+{
+    if (sLog == NULL)
+        return;
+    if (sLogThread == NULL) { // (no thread: as it was)
+        fprintf(sLog, "%s\n", text);
+        fflush(sLog);
+        return;
+    }
+    LightLock_Lock(&sLogLock);
+    for (const char *c = text;; c++) {
+        size_t next = (sLogHead + 1) % LOG_RING;
+        if (next == sLogTail)
+            break; // (full: the rest is lost)
+        sLogRing[sLogHead] = *c ? *c : '\n';
+        sLogHead = next;
+        if (!*c)
+            break;
+    }
+    LightLock_Unlock(&sLogLock);
+    LightEvent_Signal(&sLogEvent);
+}
+
+static void LogStart(void)
+{
+    s32 prio = 0x30;
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    LightLock_Init(&sLogLock);
+    LightEvent_Init(&sLogEvent, RESET_ONESHOT);
+    sLogThread = threadCreate(LogMain, NULL, 16 * 1024, prio + 1, -2, false);
+}
+
+// Before a fatal error's message or the end: the thread's lines, then
+// straight to the file
+static void LogStop(void)
+{
+    if (sLogThread != NULL) {
+        sLogQuit = true;
+        LightEvent_Signal(&sLogEvent);
+        threadJoin(sLogThread, U64_MAX);
+        threadFree(sLogThread);
+        sLogThread = NULL;
+        LogDrain();
+    }
+}
 static bool sLate; // the last frame missed its VBlank (see Pacing)
 static PrintConsole sConsole;
 static int sAudioOn;
@@ -1032,20 +1118,17 @@ static void MeterEndFrame(void)
     sMeterFrames++;
     sMeterLate += sLate;
     // A slow frame (over 20 ms): logged with where its time went (a fade's
-    // hitch is lost in the 5-second lines). Kept here and written with the
-    // 5-second line (writing to the SD card takes long enough to slow the
-    // next frame itself: that frame is marked "after log").
+    // hitch is lost in the 5-second lines); up to 20 every 5 seconds, kept
+    // here and handed to the log's thread with the 5-second line.
     static char slowLines[20][224];
     static int slowCount;
-    static bool afterLog;
     {
         static u64 lastNow, lastPart[T_COUNT], lastUp;
         double ms = 1000.0 / SYSCLOCK_ARM11, took = lastNow ? (now - lastNow) * ms : 0;
         if (took > 20.0 && sLog != NULL && slowCount < 20) {
             char *line = slowLines[slowCount];
             const int lineSize = (int)sizeof(slowLines[0]);
-            int n = snprintf(line, lineSize, "slow frame t=%.2fs %.1f ms%s:", (now - sMeterBoot) / (double)SYSCLOCK_ARM11, took,
-                             afterLog ? " (after log)" : "");
+            int n = snprintf(line, lineSize, "slow frame t=%.2fs %.1f ms:", (now - sMeterBoot) / (double)SYSCLOCK_ARM11, took);
             for (int i = 0; i < T_COUNT && n < lineSize; i++)
                 n += snprintf(line + n, lineSize - n, " %s %.1f", sPartNames[i],
                               (sPartTicks[i] >= lastPart[i] ? sPartTicks[i] - lastPart[i] : sPartTicks[i]) * ms); // (reset every 5 s)
@@ -1059,7 +1142,6 @@ static void MeterEndFrame(void)
                          sGlList->fade.add[0], sGlList->fade.add[1], sGlList->fade.add[2]);
             slowCount++;
         }
-        afterLog = false;
         lastNow = now;
         memcpy(lastPart, sPartTicks, sizeof(lastPart));
         lastUp = sGlUploadTicks;
@@ -1070,7 +1152,6 @@ static void MeterEndFrame(void)
         for (int i = 0; i < slowCount; i++)
             Backend_Log("%s", slowLines[i]);
         slowCount = 0;
-        afterLog = true; // (the next frame: slowed by these writes)
         char line[768];
         double ms = 1000.0 / SYSCLOCK_ARM11, secs = (now - sMeterStart) / (double)SYSCLOCK_ARM11;
         bool isNew = false;
@@ -1104,8 +1185,7 @@ static void MeterEndFrame(void)
             memcpy(sGlLastWhy, why, sizeof(why));
             sGlUploadTicks = 0;
         }
-        fprintf(sLog, "%s\n", line);
-        fflush(sLog);
+        LogLine(line);
     }
     memset(sPartTicks, 0, sizeof(sPartTicks));
     sMeterFrames = sMeterSkipped = sMeterLate = 0;
@@ -1636,6 +1716,7 @@ static void Shutdown(void)
     StopWorker();
     FlushSave();
     if (sAudioOn) { ndspExit(); linearFree(sWaveData); }
+    LogStop();
     if (sLog) fclose(sLog);
     if (sGpu) C3D_Fini();
     gfxExit();
@@ -1691,11 +1772,12 @@ void Backend_Log(const char *fmt, ...)
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     svcOutputDebugString(buf, (s32)strlen(buf));
-    if (sLog) { fprintf(sLog, "%s\n", buf); fflush(sLog); }
+    LogLine(buf);
 }
 
 void Backend_Fatal(const char *msg)
 {
+    LogStop(); // (the message straight to the file)
     Backend_Log("FATAL: %s", msg);
     if (sSubMode != SUB_TEXT)
         consoleInit(sBottom ? GFX_TOP : GFX_BOTTOM, &sConsole);
@@ -1721,7 +1803,12 @@ int main(void)
     mkdir("sdmc:/3ds", 0777);
     mkdir(DATA_DIR, 0777);
     FILE *flag = fopen(DEBUG_FLAG, "r");
-    if (flag) { fclose(flag); sLog = fopen(LOG_PATH, "w"); }
+    if (flag) {
+        fclose(flag);
+        sLog = fopen(LOG_PATH, "w");
+        if (sLog != NULL)
+            LogStart();
+    }
 
     BuildLut();
     BuildMaps();
