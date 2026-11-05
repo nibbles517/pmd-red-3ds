@@ -11,7 +11,9 @@
 //     side tiles, the full-screen tiled effects, lines decoded the slow way)
 //     as line strips: those lines' pixels, copied into the strip texture;
 //   - each sprite as one rectangle of the sprite texture, which holds its
-//     pixels' colour numbers (flips are the rectangle's).
+//     pixels' colour numbers (flips are the rectangle's). A sprite keeps its
+//     place in the texture from frame to frame (gGpuObjSlots) while its tiles
+//     don't change, so it isn't made again (nor sent to the GPU again).
 // Colours: the backgrounds' textures (from their caches' colour numbers),
 // the sprites' and the backdrop are coloured from the list's base palette;
 // the strips (and the backgrounds whose cache has no colour numbers) are
@@ -81,7 +83,7 @@ typedef struct {
     int quadCount;
     GpuQuad quads[GPU_MAX_QUADS];
     int stripRows;
-    int objX, objY, objRowH; // the sprite texture's next free place (rows of rectangles)
+    uint32_t frame;    // (counts the listed frames: the sprite slots' ages)
     int full;          // something didn't fit: the list can't be used
     int fallback;      // why the renderer couldn't describe the frame (GPU_WHY_*), 0: it could
 } GpuList;
@@ -110,9 +112,37 @@ void Port_GpuListCounts(uint32_t *listed, uint32_t why[GPU_WHY_COUNT]); // (fram
 void GpuList_BgLine(int line, int bg, uint16_t key, int flags, int y, int x0, int wPx, int xa, int xb);
 // ... or its pixels (px: the line's, screen x 0 on), xa..xb-1 of them
 void GpuList_StripLine(int line, int bg, uint16_t key, int flags, const uint16_t *px, int xa, int xb);
-// A sprite: its w x h pixels go to the returned place (GPU_OBJ_W a row;
-// NULL: no room, gGpuList.full set). flags: GQ_*
-uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key);
+// A sprite at (x, y), w x h, whose look is `look` (its tiles, size, colours,
+// palette bank: GpuObjLook): its rectangle, on its slot of the sprite texture.
+// Returns where its pixels go (GPU_OBJ_W a row) if they must be made (a new
+// slot, or its tiles changed since: changed, the frame they last did), else
+// NULL with *made set; NULL with gGpuList.full set: no room. bank: its
+// palette bank (0xFFFF: 256 colours).
+uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key, uint32_t look, uint32_t changed,
+                      uint16_t bank, int *made);
+// The OBJ tiles (sprite VRAM, 1024 of 32 bytes): the frame each last changed
+// (GpuList_ObjTiles compares them with a copy: once a frame, before the sprites)
+extern uint32_t gGpuObjTileChanged[1024];
+void GpuList_ObjTiles(const uint8_t *objVram);
+static inline uint32_t GpuObjLook(unsigned tile, int shape, int size, int color256, unsigned bank, int oneD)
+{
+    return 0x80000000u | (tile & 0x3FF) | ((unsigned)shape << 10) | ((unsigned)size << 12) | ((unsigned)color256 << 14)
+         | ((bank & 15) << 15) | ((unsigned)oneD << 19);
+}
+
+// The sprite texture's slots: four size classes (64, 32, 16, 8 pixels), a
+// quarter of the texture each
+#define GPU_OBJ_SLOTS (16 + 64 + 256 + 1024)
+typedef struct {
+    uint32_t look;     // (0: free)
+    uint32_t used;     // the frame it was last shown
+    uint32_t built;    // the frame its pixels were made
+    uint16_t x, y;     // its place in the sprite texture
+    uint16_t w, h;
+    uint16_t bank;     // its palette bank (0xFFFF: 256 colours)
+    uint8_t gpuDirty;  // made since the GPU's texture last had it
+} GpuObjSlot;
+extern GpuObjSlot gGpuObjSlots[GPU_OBJ_SLOTS];
 
 // Draws the list in software: dst holds the picture (stride pixels a row)
 void GpuList_Draw(const GpuList *l, uint16_t *dst, int stride);

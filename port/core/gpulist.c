@@ -32,7 +32,7 @@ void GpuList_Begin(int w, int h)
     l->evb = 0;
     l->quadCount = 0;
     l->stripRows = 0;
-    l->objX = l->objY = l->objRowH = 0;
+    l->frame++;
     l->full = 0;
     l->fallback = 0;
     l->fadeOn = 0;
@@ -135,18 +135,101 @@ void GpuList_StripLine(int line, int bg, uint16_t key, int flags, const uint16_t
     Add(line, bg, GTEX_STRIP, key, flags, xa, xb - xa, xa, row);
 }
 
-uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key)
+// The sprite slots: class c (64, 32, 16, 8 pixels) takes a quarter of the
+// texture: (0,0), (256,0), (0,256), (256,256); its slots in rows of 256 / size.
+GpuObjSlot gGpuObjSlots[GPU_OBJ_SLOTS];
+static const int sClassFirst[4] = { 0, 16, 80, 336 }, sClassCount[4] = { 16, 64, 256, 1024 };
+static const int sClassSize[4] = { 64, 32, 16, 8 }, sClassX[4] = { 0, 256, 0, 256 }, sClassY[4] = { 0, 0, 256, 256 };
+// A hash of looks to slots (index + 1; stale ones are skipped by comparing
+// the look); made again when too full of stale ones
+#define OBJ_HASH 4096
+static uint16_t sObjHash[OBJ_HASH];
+static int sObjHashAdds;
+
+static unsigned ObjHashOf(uint32_t look)
+{
+    return (look * 2654435761u) >> 20; // (12 bits)
+}
+
+static void ObjHashAdd(uint32_t look, int slot)
+{
+    if (++sObjHashAdds > OBJ_HASH / 2) { // remade from the slots
+        memset(sObjHash, 0, sizeof(sObjHash));
+        sObjHashAdds = 1;
+        for (int i = 0; i < GPU_OBJ_SLOTS; i++)
+            if (gGpuObjSlots[i].look && i != slot) {
+                unsigned h = ObjHashOf(gGpuObjSlots[i].look);
+                while (sObjHash[h]) h = (h + 1) & (OBJ_HASH - 1);
+                sObjHash[h] = (uint16_t)(i + 1);
+                sObjHashAdds++;
+            }
+    }
+    unsigned h = ObjHashOf(look);
+    while (sObjHash[h]) h = (h + 1) & (OBJ_HASH - 1);
+    sObjHash[h] = (uint16_t)(slot + 1);
+}
+
+static int ObjFind(uint32_t look)
+{
+    for (unsigned h = ObjHashOf(look); sObjHash[h]; h = (h + 1) & (OBJ_HASH - 1)) {
+        int i = sObjHash[h] - 1;
+        if (gGpuObjSlots[i].look == look)
+            return i;
+    }
+    return -1;
+}
+
+uint32_t gGpuObjTileChanged[1024];
+static uint32_t sObjVram[1024][8]; // (the copy)
+
+void GpuList_ObjTiles(const uint8_t *objVram)
+{
+    const uint32_t *v = (const uint32_t *)objVram;
+    for (int t = 0; t < 1024; t++, v += 8) {
+        uint32_t *c = sObjVram[t];
+        if (c[0] != v[0] || c[1] != v[1] || c[2] != v[2] || c[3] != v[3]
+            || c[4] != v[4] || c[5] != v[5] || c[6] != v[6] || c[7] != v[7]) {
+            memcpy(c, v, 32);
+            gGpuObjTileChanged[t] = gGpuList.frame;
+        }
+    }
+}
+
+uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key, uint32_t look, uint32_t changed,
+                      uint16_t bank, int *made)
 {
     GpuList *l = &gGpuList;
-    if (l->objX + w > GPU_OBJ_W) { // the next row of rectangles
-        l->objY += l->objRowH;
-        l->objX = 0;
-        l->objRowH = 0;
-    }
-    if (l->objY + h > GPU_OBJ_H || l->quadCount >= GPU_MAX_QUADS) {
+    *made = 0;
+    if (l->quadCount >= GPU_MAX_QUADS) {
         l->full = 1;
         return NULL;
     }
+    int slot = ObjFind(look);
+    int build = slot < 0 || changed > gGpuObjSlots[slot].built;
+    if (slot < 0) { // a slot of its class: a free one, else the one shown longest ago (not this frame)
+        int big = w > h ? w : h, c = big > 32 ? 0 : big > 16 ? 1 : big > 8 ? 2 : 3;
+        uint32_t oldest = 0xFFFFFFFF;
+        for (int i = sClassFirst[c]; i < sClassFirst[c] + sClassCount[c]; i++) {
+            GpuObjSlot *s = &gGpuObjSlots[i];
+            if (!s->look) { slot = i; break; }
+            if (s->used != l->frame && s->used < oldest) { oldest = s->used; slot = i; }
+        }
+        if (slot < 0) {
+            l->full = 1;
+            return NULL;
+        }
+        GpuObjSlot *s = &gGpuObjSlots[slot];
+        int k = slot - sClassFirst[c], perRow = 256 / sClassSize[c];
+        s->look = look;
+        s->x = (uint16_t)(sClassX[c] + (k % perRow) * sClassSize[c]);
+        s->y = (uint16_t)(sClassY[c] + (k / perRow) * sClassSize[c]);
+        ObjHashAdd(look, slot);
+    }
+    GpuObjSlot *s = &gGpuObjSlots[slot];
+    s->used = l->frame;
+    s->w = (uint16_t)w;
+    s->h = (uint16_t)h;
+    s->bank = bank;
     GpuQuad *q = &l->quads[l->quadCount++];
     q->tex = GTEX_OBJ;
     q->flags = (uint8_t)flags;
@@ -155,13 +238,15 @@ uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key)
     q->dy = (int16_t)y;
     q->w = (int16_t)w;
     q->h = (int16_t)h;
-    q->sx = (int16_t)l->objX;
-    q->sy = (int16_t)l->objY;
-    uint16_t *place = &gGpuObj[l->objY][l->objX];
-    l->objX += w;
-    if (h > l->objRowH)
-        l->objRowH = h;
-    return place;
+    q->sx = (int16_t)s->x;
+    q->sy = (int16_t)s->y;
+    if (!build) {
+        *made = 1;
+        return NULL;
+    }
+    s->built = l->frame;
+    s->gpuDirty = 1;
+    return &gGpuObj[s->y][s->x];
 }
 
 // The base palette and the fade: every entry the frame shows (the palette
@@ -183,13 +268,65 @@ static unsigned BgBanksUsed(const GpuList *l)
         if (q->tex > GTEX_BG3)
             continue;
         const BgCache *c = &gBgCache[q->tex];
-        if (c->color256 || !c->indexOk)
+        if (!c->indexOk)
+            continue; // (drawn as they are: GQ_PREFADED)
+        if (c->color256)
             return 0xFFFF;
         for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
-            for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++)
-                banks |= 1u << (c->entry[ty * 64 + tx] >> 12);
+            for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++) {
+                unsigned bank = c->entry[ty * 64 + tx] >> 12, w = tx >> 5;
+                uint32_t bit = 1u << (tx & 31);
+                if ((banks >> bank) & 1)
+                    continue;
+                for (int r = 0; r < 8; r++) // (a tile with no opaque pixel shows no colour)
+                    if (c->any[ty * 8 + r][w] & bit) {
+                        banks |= 1u << bank;
+                        break;
+                    }
+            }
     }
     return banks;
+}
+
+static int SameFade(const PortPalFade *a, const PortPalFade *b)
+{
+    return a->mul == b->mul && a->add[0] == b->add[0] && a->add[1] == b->add[1] && a->add[2] == b->add[2];
+}
+
+// Whether the frame shows a pixel of an odd entry: the backdrop, a shown
+// background tile's opaque pixels (of the banks with odd entries), a sprite's
+static int OddShown(const GpuList *l, const uint8_t *odd, uint32_t oddBanks)
+{
+    if (odd[0])
+        return 1;
+    for (int i = 0; i < l->quadCount; i++) {
+        const GpuQuad *q = &l->quads[i];
+        if (q->tex <= GTEX_BG3) {
+            const BgCache *c = &gBgCache[q->tex];
+            if (!c->indexOk)
+                continue; // (drawn as they are: GQ_PREFADED)
+            for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
+                for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++) {
+                    if (!c->color256 && !((oddBanks >> (c->entry[ty * 64 + tx] >> 12)) & 1))
+                        continue;
+                    const uint16_t *px = &c->px[ty * 8 * BGC_STRIDE + tx * 8];
+                    const uint8_t *idx = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
+                    for (int r = 0; r < 8; r++, px += BGC_STRIDE, idx += BGC_STRIDE)
+                        for (int x = 0; x < 8; x++)
+                            if (!(px[x] & 0x8000) && odd[idx[x]] && (c->color256 || idx[x] != 0x10))
+                                return 1;
+                }
+        }
+        else if (q->tex == GTEX_OBJ && (oddBanks >> 16)) {
+            for (int j = 0; j < q->h; j++)
+                for (int x = 0; x < q->w; x++) {
+                    uint16_t n = gGpuObj[q->sy + j][q->sx + x];
+                    if (!(n & 0x8000) && odd[256 + n])
+                        return 1;
+                }
+        }
+    }
+    return 0;
 }
 
 void GpuList_Palette(void)
@@ -210,32 +347,54 @@ void GpuList_Palette(void)
     if (!changed)
         return;
 
+    // The fade: the one most of the shown entries have
     uint32_t used = BgBanksUsed(l) | ((uint32_t)l->objBanks << 16);
-    int have = 0, uniform = 1, black = 0;
-    PortPalFade f = sNoFade;
-    for (int i = 0; i < 512 && uniform; i++) {
+    PortPalFade cand[8];
+    int candN = 0, candC[8] = { 0 };
+    for (int i = 0; i < 512; i++) {
         if (!((used >> (i >> 4)) & 1) || ((i & 15) == 0 && i != 0))
             continue; // (a bank not shown, or a clear colour)
         uint16_t v = pal[i] & 0x7FFF;
         const PortPalFade *fd = gPortPalValue[i] == v ? &gPortPalFade[i] : &sNoFade;
-        if (IsNoFade(fd)) {
-            if (v != 0)
-                uniform = 0; // (shown as it is: only black, which a darkening keeps)
-            black = 1;
+        if (IsNoFade(fd))
             continue;
-        }
-        if (!have) {
-            f = *fd;
-            have = 1;
-        }
-        else if (fd->mul != f.mul || fd->add[0] != f.add[0] || fd->add[1] != f.add[1] || fd->add[2] != f.add[2])
-            uniform = 0;
+        int k;
+        for (k = 0; k < candN; k++)
+            if (SameFade(&cand[k], fd))
+                break;
+        if (k == candN && candN < 8)
+            cand[candN++] = *fd;
+        if (k < 8)
+            candC[k]++;
     }
-    if (have && uniform && !(black && (f.add[0] | f.add[1] | f.add[2]))) {
-        l->fade = f;
-        l->fadeOn = 1;
-        l->palette = GPU_PAL_FADE;
-        return;
+    if (candN > 0) {
+        int best = 0;
+        for (int k = 1; k < candN; k++)
+            if (candC[k] > candC[best])
+                best = k;
+        PortPalFade f = cand[best];
+        int addsColour = f.add[0] | f.add[1] | f.add[2];
+        // The shown entries that don't follow it (black staying black under a
+        // darkening does): are any of them on the screen?
+        static uint8_t odd[512];
+        uint32_t oddBanks = 0;
+        for (int i = 0; i < 512; i++) {
+            odd[i] = 0;
+            if (!((used >> (i >> 4)) & 1) || ((i & 15) == 0 && i != 0))
+                continue;
+            uint16_t v = pal[i] & 0x7FFF;
+            const PortPalFade *fd = gPortPalValue[i] == v ? &gPortPalFade[i] : &sNoFade;
+            if (SameFade(fd, &f) || (IsNoFade(fd) && v == 0 && !addsColour))
+                continue;
+            odd[i] = 1;
+            oddBanks |= 1u << (i >> 4);
+        }
+        if (!oddBanks || !OddShown(l, odd, oddBanks)) {
+            l->fade = f;
+            l->fadeOn = 1;
+            l->palette = GPU_PAL_FADE;
+            return;
+        }
     }
     for (int i = 0; i < 512; i++) // (the palettes as they are)
         l->base[i] = pal[i] & 0x7FFF;

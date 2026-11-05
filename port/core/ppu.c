@@ -1508,6 +1508,7 @@ int Ppu_ListObjects(int lines)
     uint16_t mosaic = R16(0x4C);
     uint16_t bldcnt = R16(0x50);
     int objFlags = ((((bldcnt >> 6) & 3) == 1 && (bldcnt & 0x10)) ? GQ_BLEND : 0) | ((bldcnt & 0x1000) ? GQ_SECOND : 0);
+    GpuList_ObjTiles(&gPortVram[0x10000]); // (which tiles changed: the sprites made again)
 
     for (int k = 0; k < sObjCount; k++) {
         int n = sObjList[k];
@@ -1551,10 +1552,26 @@ int Ppu_ListObjects(int lines)
         unsigned rowStride = oneD ? (unsigned)(w >> 3) * (color256 ? 2 : 1) : 32;
         unsigned tileStep = color256 ? 2 : 1;
         int flags = objFlags | (((a1 >> 12) & 1) ? GQ_HFLIP : 0) | (((a1 >> 13) & 1) ? GQ_VFLIP : 0);
-        uint16_t *dst = GpuList_Obj(x, y, w, h, flags, GpuKeyObj(prio, n));
+        // The last frame its tiles changed (its slot's pixels are made again after it)
+        uint32_t changed = 0;
+        for (int ty = 0; ty < h; ty += 8)
+            for (int tx = 0; tx < w; tx += 8) {
+                unsigned t = (tileNum + (ty >> 3) * rowStride + (tx >> 3) * tileStep) & 0x3FF;
+                uint32_t c = gGpuObjTileChanged[t];
+                if (color256 && gGpuObjTileChanged[(t + 1) & 0x3FF] > c)
+                    c = gGpuObjTileChanged[(t + 1) & 0x3FF];
+                if (c > changed)
+                    changed = c;
+            }
+        int made;
+        uint16_t *dst = GpuList_Obj(x, y, w, h, flags, GpuKeyObj(prio, n),
+                                    GpuObjLook(tileNum, shape, size, color256, palBank, oneD), changed,
+                                    color256 ? 0xFFFF : (uint16_t)palBank, &made);
+        l->objBanks |= color256 ? 0xFFFF : (uint16_t)(1u << palBank);
+        if (made)
+            continue; // (its slot has it)
         if (dst == NULL) { l->fallback = l->quadCount >= GPU_MAX_QUADS ? GPU_WHY_FULL : GPU_WHY_OBJ_FULL; return 0; }
         unsigned bankBase = color256 ? 0 : palBank * 16; // (colour numbers: the list colours them)
-        l->objBanks |= color256 ? 0xFFFF : (uint16_t)(1u << palBank);
         for (int ty = 0; ty < h; ty++, dst += GPU_OBJ_W) {
             unsigned rowTile = tileNum + (ty >> 3) * rowStride;
             for (int tx = 0; tx < w; tx++) {

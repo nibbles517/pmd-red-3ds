@@ -512,13 +512,15 @@ static void GpuListUpload(const GpuList *l)
 {
     u64 start = svcGetSystemTick();
 
-    // The base palette's colours; the BG banks whose colours changed
-    unsigned changedBanks = 0;
+    // The base palette's colours; the BG and OBJ banks whose colours changed
+    unsigned changedBanks = 0, changedObj = 0;
     for (int i = 0; i < 512; i++) {
         uint16_t b = l->base[i];
         if (!sGlLastBaseOk || b != sGlLastBase[i]) {
             if (i < 256)
                 changedBanks |= 1u << (i >> 4);
+            else
+                changedObj |= 1u << ((i - 256) >> 4);
             sGlLastBase[i] = b;
         }
         sGlLut[i] = (uint16_t)(To5551(b) | 1);
@@ -563,17 +565,24 @@ static void GpuListUpload(const GpuList *l)
             GlWriteRect((uint16_t *)sGlStrip.data, &gGpuStrip[q->sy][q->sx], GPU_STRIP_W, q->sx, q->sy, q->w, q->h);
     }
     GlFlush(&sGlStrip);
+    // The sprites (colour numbers): the slots shown this frame that were made
+    // again, or whose bank's base colours changed (those not shown: later)
     uint16_t *obj = (uint16_t *)sGlObj.data;
-    for (int i = 0; i < l->quadCount; i++) { // the sprites: colour numbers
-        const GpuQuad *q = &l->quads[i];
-        if (q->tex != GTEX_OBJ)
+    for (int i = 0; i < GPU_OBJ_SLOTS; i++) {
+        GpuObjSlot *o = &gGpuObjSlots[i];
+        if (!o->look)
             continue;
-        for (int j = 0; j < q->h; j++) {
-            const uint16_t *src = &gGpuObj[q->sy + j][q->sx];
-            for (int x = 0; x < q->w; x++)
-                *GlTexel(obj, q->sx + x, q->sy + j) = (src[x] & 0x8000) ? 0 : sGlLut[256 + src[x]];
+        if (changedObj && (o->bank == 0xFFFF || ((changedObj >> o->bank) & 1)))
+            o->gpuDirty = 1;
+        if (!o->gpuDirty || o->used != l->frame)
+            continue;
+        o->gpuDirty = 0;
+        for (int j = 0; j < o->h; j++) {
+            const uint16_t *src = &gGpuObj[o->y + j][o->x];
+            for (int x = 0; x < o->w; x++)
+                *GlTexel(obj, o->x + x, o->y + j) = (src[x] & 0x8000) ? 0 : sGlLut[256 + src[x]];
         }
-        GlTouch(q->sy, q->sy + q->h);
+        GlTouch(o->y, o->y + o->h);
     }
     GlFlush(&sGlObj);
     sGlUploadTicks += svcGetSystemTick() - start;
