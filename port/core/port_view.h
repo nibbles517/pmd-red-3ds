@@ -71,4 +71,19 @@ extern uint8_t gPortHudLeft;
 #define PORT_HUD_BAR_MAX 160
 extern uint32_t gPortHudBar[PORT_HUD_BAR_MAX];
 
+// GPU Drawing's fades (docs/GPU.md): for each palette entry as it is in
+// palette memory, the colour it was made from (its base) and the fade that
+// made it: each channel base * mul / 256 + add (add: 0-255, on the 8-bit
+// scale; mul 256 and add 0: no fade). Kept by the game's palette buffer
+// (bg_palette_buffer.c) and copied when the buffer is (value: the colour then;
+// an entry whose palette memory differs was written some other way).
+typedef struct {
+    uint16_t mul;
+    uint8_t add[3];
+    uint8_t pad[3]; // (8 bytes: the game's code makes every structure's size a multiple of 4)
+} PortPalFade;
+_Static_assert(sizeof(PortPalFade) == 8, "PortPalFade: the game's size and the core's must match");
+extern uint16_t gPortPalBase[512], gPortPalValue[512];
+extern PortPalFade gPortPalFade[512];
+
 #endif

@@ -335,6 +335,95 @@ index 9e8438d2..abd8d911 100644
  
  extern const u32 gUnknown_80B853C[16];
  extern const unkShiftData gCharMasksOffsets[8];
+diff --git a/src/bg_palette_buffer.c b/src/bg_palette_buffer.c
+index 9388b0d7..c4de46bc 100644
+--- a/src/bg_palette_buffer.c
++++ b/src/bg_palette_buffer.c
+@@ -9,6 +9,33 @@
+ static EWRAM_DATA bool8 sBGPaletteRowDirty[BG_PALETTE_BUFFER_SIZE / BG_PALETTE_ROW_SIZE] = {0};
+ static EWRAM_DATA u16 sBGPaletteBuffer[BG_PALETTE_BUFFER_SIZE] = {0};
+ 
++#ifdef PLATFORM_3DS
++#include <string.h>
++#include "port_game.h"
++// GPU Drawing's fades (port_view.h): each entry's base and fade, as buffered
++// (sPal*) and as in palette memory (gPortPal*: copied with the buffer).
++// Writes inside the palette fades (palette_fade_util.c) say their fade
++// (Port_PalFadeContext); the dungeon's brightness is its own.
++static u16 sPalBase[BG_PALETTE_BUFFER_SIZE];
++static PortPalFade sPalFade[BG_PALETTE_BUFFER_SIZE];
++u16 gPortPalBase[BG_PALETTE_BUFFER_SIZE], gPortPalValue[BG_PALETTE_BUFFER_SIZE];
++PortPalFade gPortPalFade[BG_PALETTE_BUFFER_SIZE];
++static const PortPalFade sNoFade = { 256, { 0, 0, 0 }, { 0, 0, 0 } };
++static const PortPalFade *sFadeContext; // (palette_fade_util.c: the fade being applied, else NULL)
++u16 Port_PaletteColor(u16 index); // (palette_fade_util.c: an entry's colour before its fade)
++
++void Port_PalFadeContext(const PortPalFade *fade)
++{
++    sFadeContext = fade;
++}
++
++static void PalShadow(s32 index, u16 base, const PortPalFade *fade)
++{
++    sPalBase[index] = base;
++    sPalFade[index] = *fade;
++}
++#endif
++
+ void InitBGPaletteBuffer(void)
+ {
+     s32 i;
+@@ -44,6 +71,15 @@ void SetBGPaletteBufferColorRGB(s32 index, const RGB_Struct *color, s32 brightne
+             ramp[color->r].r * brightness / 256 & 0x1F,
+             ramp[color->g].g * brightness / 256 & 0x1F,
+             ramp[color->b].b * brightness / 256 & 0x1F);
++#ifdef PLATFORM_3DS
++    { // the base: at full brightness (31); the fade: brightness / 31
++        PortPalFade fade = { (u16)((brightness * 256 + 15) / 31), { 0, 0, 0 }, { 0, 0, 0 } };
++        u16 base = ramp == NULL
++            ? RGB2(color->r * 31 / 256 & 0x1F, color->g * 31 / 256 & 0x1F, color->b * 31 / 256 & 0x1F)
++            : RGB2(ramp[color->r].r * 31 / 256 & 0x1F, ramp[color->g].g * 31 / 256 & 0x1F, ramp[color->b].b * 31 / 256 & 0x1F);
++        PalShadow(index, base, brightness >= 31 ? &sNoFade : &fade);
++    }
++#endif
+ }
+ 
+ // arm9.bin::02001130
+@@ -51,6 +87,9 @@ void SetBGPaletteBufferColorArray(s32 index, const RGB_Struct *color32)
+ {
+     sBGPaletteRowDirty[index / BG_PALETTE_ROW_SIZE] = TRUE;
+     sBGPaletteBuffer[index] = RGB2(color32->r >> 3, color32->g >> 3, color32->b >> 3);
++#ifdef PLATFORM_3DS
++    PalShadow(index, sBGPaletteBuffer[index], &sNoFade);
++#endif
+ }
+ 
+ // arm9.bin::020010EC
+@@ -58,6 +97,12 @@ void SetBGPaletteBufferColor(s32 index, u16 *color)
+ {
+     sBGPaletteRowDirty[index / BG_PALETTE_ROW_SIZE] = TRUE;
+     sBGPaletteBuffer[index] = *color;
++#ifdef PLATFORM_3DS
++    if (sFadeContext != NULL)
++        PalShadow(index, Port_PaletteColor(index) & 0x7FFF, sFadeContext);
++    else
++        PalShadow(index, *color, &sNoFade);
++#endif
+ }
+ 
+ // arm9.bin::02000FC8
+@@ -92,6 +137,11 @@ void TransferBGPaletteBuffer(void)
+         {
+             sBGPaletteRowDirty[i] = 0;
+             CpuCopy(dest, &sBGPaletteBuffer[paletteBufferIndex], sizeof(u16) * BG_PALETTE_ROW_SIZE);
++#ifdef PLATFORM_3DS
++            memcpy(&gPortPalBase[paletteBufferIndex], &sPalBase[paletteBufferIndex], sizeof(u16) * BG_PALETTE_ROW_SIZE);
++            memcpy(&gPortPalValue[paletteBufferIndex], &sBGPaletteBuffer[paletteBufferIndex], sizeof(u16) * BG_PALETTE_ROW_SIZE);
++            memcpy(&gPortPalFade[paletteBufferIndex], &sPalFade[paletteBufferIndex], sizeof(PortPalFade) * BG_PALETTE_ROW_SIZE);
++#endif
+         }
+         ++i;
+         dest += BG_PALETTE_ROW_SIZE;
 diff --git a/src/code_800D090.c b/src/code_800D090.c
 index 002fa3c7..406bee8e 100644
 --- a/src/code_800D090.c
@@ -5050,10 +5139,20 @@ index 03531690..0d6913a0 100644
      sub_80073E0(sUnknown_203B260->unk44);
  }
 diff --git a/src/palette_fade_util.c b/src/palette_fade_util.c
-index a1a9bcb2..04ddcdde 100644
+index a1a9bcb2..5a047eab 100644
 --- a/src/palette_fade_util.c
 +++ b/src/palette_fade_util.c
-@@ -176,6 +176,16 @@ void SetPaletteFade_Modulate(u16 idx, s32 fadeAmount, RGB_Array param_3)
+@@ -3,6 +3,9 @@
+ #include "palette_fade_util.h"
+ #include "bg_palette_buffer.h"
+ #include "gba_color_util.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ 
+ static IWRAM_INIT bool8 sUpdatePaletteFade = FALSE;
+ static IWRAM_INIT u16 sUnusedPaletteUpdateFlags = 0;
+@@ -176,6 +179,16 @@ void SetPaletteFade_Modulate(u16 idx, s32 fadeAmount, RGB_Array param_3)
      sUpdatePaletteFade = TRUE;
  }
  
@@ -5070,6 +5169,76 @@ index a1a9bcb2..04ddcdde 100644
  void sub_8003810(u16 idx, RGB_Array param_2)
  {
      PaletteFadeEntry *a = &sPaletteFadeTable[idx / 16];
+@@ -262,9 +275,41 @@ static UNUSED void sub_80039A4(u16 idx)
+     sUnusedPaletteUpdateFlags |= idx;
+ }
+ 
++#ifdef PLATFORM_3DS
++// GPU Drawing's fades (port_view.h, bg_palette_buffer.c): the fade an entry's
++// apply function makes, as base * mul / 256 + add; NULL for those that aren't
++// one of the palette's own colours faded that way (to a colour of their own,
++// desaturated, modulated: their colours are taken as they are)
++void Port_PalFadeContext(const PortPalFade *fade); // (bg_palette_buffer.c)
++
++static const PortPalFade *PortFadeOf(const PaletteFadeEntry *e, PortPalFade *out)
++{
++    u16 amount = e->fadeAmount >= MAX_FADE_AMOUNT ? MAX_FADE_AMOUNT : e->fadeAmount;
++    if (e->applyFadeToRow == ApplyRowPalette || e->applyFadeToSingle == ApplySinglePalette)
++        amount = MAX_FADE_AMOUNT;
++    else if (e->applyFadeToRow == ApplyRowPaletteBrightness || e->applyFadeToSingle == ApplySinglePaletteBrightness)
++        ;
++    else if (e->applyFadeToRow == BlendRowPalette || e->applyFadeToSingle == BlendSinglePalette) {
++        out->mul = amount;
++        out->add[0] = (u8)(e->fadeColor.c[RGB_R] * (MAX_FADE_AMOUNT - amount) / 256);
++        out->add[1] = (u8)(e->fadeColor.c[RGB_G] * (MAX_FADE_AMOUNT - amount) / 256);
++        out->add[2] = (u8)(e->fadeColor.c[RGB_B] * (MAX_FADE_AMOUNT - amount) / 256);
++        return out;
++    }
++    else
++        return NULL;
++    out->mul = amount;
++    out->add[0] = out->add[1] = out->add[2] = 0;
++    return out;
++}
++#endif
++
+ void RunPaletteFadeFunctions(void)
+ {
+     s32 i;
++#ifdef PLATFORM_3DS
++    PortPalFade fade;
++#endif
+ 
+     if (sUpdatePaletteFade) {
+         PaletteFadeEntry* ptr1 = sPaletteFadeTable;
+@@ -274,7 +319,13 @@ void RunPaletteFadeFunctions(void)
+ 
+         for (i = 0; i < PALETTE_FADE_ENTRY_COUNT - 1; i++, ptr1++) {
+             if (ptr1->active) {
++#ifdef PLATFORM_3DS
++                Port_PalFadeContext(PortFadeOf(ptr1, &fade));
++#endif
+                 ptr1->applyFadeToRow(i);
++#ifdef PLATFORM_3DS
++                Port_PalFadeContext(NULL);
++#endif
+                 ptr1->active = FALSE;
+             }
+         }
+@@ -282,7 +333,13 @@ void RunPaletteFadeFunctions(void)
+         if (sPaletteFadeTable[PALETTE_FADE_ENTRY_COUNT - 1].active) {
+             PaletteFadeEntry *ptr2 = &sPaletteFadeTable[PALETTE_FADE_ENTRY_COUNT - 1];
+             // here ptr2 == ptr1
++#ifdef PLATFORM_3DS
++            Port_PalFadeContext(PortFadeOf(ptr1, &fade));
++#endif
+             ptr1->applyFadeToSingle(0x20, 0xf0);
++#ifdef PLATFORM_3DS
++            Port_PalFadeContext(NULL);
++#endif
+             ptr2->active = FALSE;
+         }
+ 
 diff --git a/src/palette_util.c b/src/palette_util.c
 index 926d28d1..684b3d20 100644
 --- a/src/palette_util.c

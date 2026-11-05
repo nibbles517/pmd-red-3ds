@@ -477,11 +477,64 @@ static void GlWriteRect(uint16_t *tex, const uint16_t *src, int srcStride, int x
     GlTouch(y, y + h);
 }
 
-// The list's textures: the background caches' changed tiles, then the strips
-// and the sprites the rectangles read
+// The list's textures. Colours come from the list's base palette (as
+// RGBA5551: sGlLut), so during a fade (only its amount changes) nothing is
+// written again. Backgrounds: their tiles that the frame's rectangles show
+// and that changed: decoded again (gpuDirty, the cache's) or using a palette
+// bank whose base colours changed (added to gpuDirty here); the others stay
+// marked until they're shown. Then the strips (pixels) and the sprites
+// (colour numbers) where the rectangles read.
+static uint16_t sGlLut[512], sGlLastBase[512];
+static bool sGlLastBaseOk;
+
+static void GlBgTile(BgCache *c, uint16_t *tex, int tx, int ty)
+{
+    int x0 = tx * 8, y0 = ty * 8;
+    const uint16_t *px = &c->px[y0 * BGC_STRIDE + x0];
+    const uint8_t *idx = &c->idx[y0 * BGC_STRIDE + x0];
+    for (int r = 0; r < 8; r++, px += BGC_STRIDE, idx += BGC_STRIDE)
+        for (int x = 0; x < 8; x++) {
+            uint16_t t;
+            if (px[x] & 0x8000)
+                t = 0;
+            else if (!c->indexOk)
+                t = To5551(px[x]);
+            else if (!c->color256 && idx[x] == 0x10)
+                t = 1; // (the wide map's black: opaque)
+            else
+                t = sGlLut[idx[x]];
+            *GlTexel(tex, x0 + x, y0 + r) = t;
+        }
+    GlTouch(y0, y0 + 8);
+}
+
 static void GpuListUpload(const GpuList *l)
 {
     u64 start = svcGetSystemTick();
+
+    // The base palette's colours; the BG banks whose colours changed
+    unsigned changedBanks = 0;
+    for (int i = 0; i < 512; i++) {
+        uint16_t b = l->base[i];
+        if (!sGlLastBaseOk || b != sGlLastBase[i]) {
+            if (i < 256)
+                changedBanks |= 1u << (i >> 4);
+            sGlLastBase[i] = b;
+        }
+        sGlLut[i] = (uint16_t)(To5551(b) | 1);
+    }
+    sGlLastBaseOk = true;
+    for (int b = 0; changedBanks && b < 4; b++) {
+        BgCache *c = &gBgCache[b];
+        if (!c->valid || !c->indexOk)
+            continue; // (no colour numbers: their pixels, marked by the cache)
+        for (int ty = 0; ty < c->tilesH; ty++)
+            for (int tx = 0; tx < c->tilesW; tx++)
+                if (c->color256 || ((changedBanks >> (c->entry[ty * 64 + tx] >> 12)) & 1))
+                    c->gpuDirty[ty][tx >> 5] |= 1u << (tx & 31);
+        c->gpuAny = 1;
+    }
+
     sGlLo = GL_TEX;
     sGlHi = 0;
     for (int b = 0; b < 4; b++) {
@@ -489,33 +542,40 @@ static void GpuListUpload(const GpuList *l)
         if (!c->gpuAny)
             continue;
         uint16_t *tex = (uint16_t *)sGlBg[b].data;
-        for (int ty = 0; ty < 64; ty++)
-            for (int w = 0; w < 2; w++) {
-                uint32_t bits = c->gpuDirty[ty][w];
-                if (!bits)
-                    continue;
-                c->gpuDirty[ty][w] = 0;
-                while (bits) {
-                    int tx = w * 32 + __builtin_ctz(bits);
-                    bits &= bits - 1;
-                    GlWriteRect(tex, &c->px[ty * 8 * BGC_STRIDE + tx * 8], BGC_STRIDE, tx * 8, ty * 8, 8, 8);
-                }
-            }
-        c->gpuAny = 0;
-        GlFlush(&sGlBg[b]);
-    }
-    for (int pass = 0; pass < 2; pass++) {
-        int which = pass ? GTEX_OBJ : GTEX_STRIP;
-        C3D_Tex *t = pass ? &sGlObj : &sGlStrip;
         for (int i = 0; i < l->quadCount; i++) {
             const GpuQuad *q = &l->quads[i];
-            if (q->tex != which)
+            if (q->tex != b)
                 continue;
-            const uint16_t *src = pass ? &gGpuObj[q->sy][q->sx] : &gGpuStrip[q->sy][q->sx];
-            GlWriteRect((uint16_t *)t->data, src, pass ? GPU_OBJ_W : GPU_STRIP_W, q->sx, q->sy, q->w, q->h);
+            for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
+                for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++) {
+                    uint32_t bit = 1u << (tx & 31);
+                    if (c->gpuDirty[ty][tx >> 5] & bit) {
+                        c->gpuDirty[ty][tx >> 5] &= ~bit;
+                        GlBgTile(c, tex, tx, ty);
+                    }
+                }
         }
-        GlFlush(t);
+        GlFlush(&sGlBg[b]);
     }
+    for (int i = 0; i < l->quadCount; i++) { // the strips: pixels
+        const GpuQuad *q = &l->quads[i];
+        if (q->tex == GTEX_STRIP)
+            GlWriteRect((uint16_t *)sGlStrip.data, &gGpuStrip[q->sy][q->sx], GPU_STRIP_W, q->sx, q->sy, q->w, q->h);
+    }
+    GlFlush(&sGlStrip);
+    uint16_t *obj = (uint16_t *)sGlObj.data;
+    for (int i = 0; i < l->quadCount; i++) { // the sprites: colour numbers
+        const GpuQuad *q = &l->quads[i];
+        if (q->tex != GTEX_OBJ)
+            continue;
+        for (int j = 0; j < q->h; j++) {
+            const uint16_t *src = &gGpuObj[q->sy + j][q->sx];
+            for (int x = 0; x < q->w; x++)
+                *GlTexel(obj, q->sx + x, q->sy + j) = (src[x] & 0x8000) ? 0 : sGlLut[256 + src[x]];
+        }
+        GlTouch(q->sy, q->sy + q->h);
+    }
+    GlFlush(&sGlObj);
     sGlUploadTicks += svcGetSystemTick() - start;
 }
 
@@ -554,9 +614,16 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, sProjLoc, proj);
     C3D_DepthTest(true, GPU_ALWAYS, GPU_WRITE_COLOR); // (no depth: the stencil's ops on "pass")
 
-    // The backdrop: the list's area in its colour (as it fades)
+    // The backdrop: the list's area in its colour (base entry 0, faded, and
+    // as the screen change fades)
     C3D_TexEnv *env = C3D_GetTexEnv(0);
-    unsigned r = (l->backdrop & 31) * level / 31, g = ((l->backdrop >> 5) & 31) * level / 31, b = ((l->backdrop >> 10) & 31) * level / 31;
+    unsigned rgb[3];
+    for (int k = 0; k < 3; k++) {
+        unsigned c8 = ((l->base[0] >> (5 * k)) & 31) * 255 / 31;
+        unsigned f = c8 * l->fade.mul / 256 + l->fade.add[k];
+        rgb[k] = (f > 255 ? 255 : f) * level / 255;
+    }
+    unsigned r = rgb[0], g = rgb[1], b = rgb[2];
     C3D_TexEnvInit(env);
     C3D_TexEnvSrc(env, C3D_Both, GPU_CONSTANT, GPU_CONSTANT, GPU_CONSTANT);
     C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
@@ -574,13 +641,29 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
         C3D_ImmDrawEnd();
     }
 
-    // The rectangles: texels times the fade's grey, transparent ones left out
+    // The rectangles: texel * mul + add (the list's fade: stages 0 and 1; not
+    // for those already coloured, GQ_PREFADED), times the screen change
+    // fade's grey (stage 2); transparent texels left out
     env = C3D_GetTexEnv(0);
     C3D_TexEnvInit(env);
     C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_CONSTANT, GPU_PRIMARY_COLOR);
     C3D_TexEnvFunc(env, C3D_RGB, GPU_MODULATE);
     C3D_TexEnvFunc(env, C3D_Alpha, GPU_REPLACE);
-    C3D_TexEnvColor(env, 0xFF000000 | (level << 16) | (level << 8) | level);
+    C3D_TexEnv *env1 = C3D_GetTexEnv(1);
+    C3D_TexEnvInit(env1);
+    C3D_TexEnvSrc(env1, C3D_Both, GPU_PREVIOUS, GPU_CONSTANT, GPU_PRIMARY_COLOR);
+    C3D_TexEnvFunc(env1, C3D_RGB, GPU_ADD);
+    C3D_TexEnvFunc(env1, C3D_Alpha, GPU_REPLACE);
+    C3D_TexEnv *env2 = C3D_GetTexEnv(2);
+    C3D_TexEnvInit(env2);
+    C3D_TexEnvSrc(env2, C3D_Both, GPU_PREVIOUS, GPU_CONSTANT, GPU_PRIMARY_COLOR);
+    C3D_TexEnvFunc(env2, C3D_RGB, GPU_MODULATE);
+    C3D_TexEnvFunc(env2, C3D_Alpha, GPU_REPLACE);
+    C3D_TexEnvColor(env2, 0xFF000000 | (level << 16) | (level << 8) | level);
+    unsigned mul = l->fade.mul >= 256 ? 255 : l->fade.mul;
+    const u32 fadeMul = 0xFF000000 | (mul << 16) | (mul << 8) | mul;
+    const u32 fadeAdd = 0xFF000000 | ((u32)l->fade.add[2] << 16) | ((u32)l->fade.add[1] << 8) | l->fade.add[0];
+    int prefadedNow = -1;
     C3D_AlphaTest(true, GPU_GREATER, 0);
     sGlState = -1;
     unsigned eva = l->eva * 255 / 16, evb = l->evb * 255 / 16;
@@ -620,6 +703,14 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
             C3D_TexBind(0, texs[q->tex]);
             boundTex = q->tex;
         }
+        int prefaded = (q->flags & GQ_PREFADED) ? 1 : 0;
+        if (prefaded != prefadedNow) {
+            C3D_TexEnvColor(env, prefaded ? 0xFFFFFFFF : fadeMul);
+            C3D_TexEnvColor(env1, prefaded ? 0xFF000000 : fadeAdd);
+            C3D_DirtyTexEnv(env);
+            C3D_DirtyTexEnv(env1);
+            prefadedNow = prefaded;
+        }
         int passes = (q->flags & GQ_BLEND) ? 2 : 1;
         for (int pass = 0; pass < passes; pass++) {
             if (passes == 1) // covers; the flag: whether it is a second target
@@ -638,6 +729,8 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
     }
 
     // Back to how the pictures are drawn
+    C3D_TexEnvInit(C3D_GetTexEnv(1));
+    C3D_TexEnvInit(C3D_GetTexEnv(2));
     C3D_AlphaTest(false, GPU_ALWAYS, 0);
     C3D_StencilTest(false, GPU_ALWAYS, 0, 0, 0);
     C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);

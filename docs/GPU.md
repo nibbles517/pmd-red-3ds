@@ -76,15 +76,29 @@ it, and the GPU draws it in `GpuDrawFrame`:
 
 - **Textures** in linear memory, RGBA5551 (alpha 0: transparent), written by
   the CPU straight in the GPU's layout (8x8 tiles, each in Z order): one
-  512x512 per background cache, of which only the tiles the cache marked
-  changed (`gpuDirty`, set by `BgCache_Decode` and `BgCache_Recolor`) are
-  written; the strip and sprite textures, only where the frame's rectangles
-  read. Written after `C3D_FrameBegin` (the GPU is done with the last frame).
+  512x512 per background cache, coloured from the cache's colour numbers
+  and the list's base palette; the strip texture (pixels) and the sprite
+  texture (colour numbers, coloured from the base palette), only where the
+  frame's rectangles read. A background tile is written when the frame shows
+  it and it changed since: decoded again (`gpuDirty`, set by
+  `BgCache_Decode`), or its palette bank's base colours changed. Written
+  after `C3D_FrameBegin` (the GPU is done with the last frame).
+- **Fades** (gpulist.c `GpuList_Palette`): the game's palette buffer keeps,
+  for every entry, the colour it was made from and the fade that made it
+  (`gPortPalBase`, `gPortPalFade`: copied to palette memory with the colours;
+  the town's palette fades say theirs, the dungeon's brightness is its own).
+  When every entry the frame shows (the palette banks its background tiles
+  and sprites use) is the same fade of its own colour, the base palette is
+  those colours and the GPU does the fade (each texel * mul + add): the
+  textures don't change during a fade, and nothing becomes strips. Otherwise
+  the base palette is the palettes as they are, and what changed is written
+  again (only where shown).
 - **Drawing** straight onto the screen at the picture's place and scale (the
   same as the CPU picture's: Size and Scale settings): the target cleared
   black, a backdrop rectangle, then the rectangles back to front, cut to the
-  list's area, transparent texels left out by the alpha test. The screen
-  change fade multiplies everything by a grey, as for the CPU picture.
+  list's area, transparent texels left out by the alpha test. Three texture
+  stages: the fade's multiply, its added colour (not for strips: their
+  pixels are already coloured), and the screen change fade's grey.
 - **Blending**: the screens' render targets have a stencil buffer, cleared to
   whether the backdrop is a second target. A rectangle that isn't a first
   target replaces the stencil with whether it is a second target; one that
@@ -105,10 +119,6 @@ the time writing textures takes, and why the others weren't listed.
    list, its textures and the GPU taking; the strips and sprites written in
    the GPU's format by the core instead of converted.
 3. **Fewer strips.** The HUD row from BG0's cache, and the other strips
-   that remain (about 45 rows a frame).
-4. **Fades on the GPU.** The game fades by changing every palette; the
-   caches' colours are then looked up line by line (and go into strips).
-   With the un-faded colours in the textures and the fade amount known, the
-   GPU would darken the picture instead.
-5. **More effects**: brighten/darken, semi-transparent sprites, the object
+   that remain (a few rows a frame, now that fading lines aren't strips).
+4. **More effects**: brighten/darken, semi-transparent sprites, the object
    window, where they turn out to matter.

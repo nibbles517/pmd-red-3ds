@@ -118,8 +118,10 @@ void BgCache_Recolor(BgCache *c, int tx, int ty)
         for (int i = 0; i < 8; i++)
             dst[i] = table[src[i]];
     c->recolor[ty][tx >> 5] &= ~(1u << (tx & 31));
-    c->gpuDirty[ty][tx >> 5] |= 1u << (tx & 31);
-    c->gpuAny = 1;
+    if (!c->indexOk) { // (the GPU's textures: from the colour numbers, but for these)
+        c->gpuDirty[ty][tx >> 5] |= 1u << (tx & 31);
+        c->gpuAny = 1;
+    }
 }
 
 // The colour of each colour number, from the palettes as they are now

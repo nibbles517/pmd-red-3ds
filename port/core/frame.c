@@ -59,6 +59,7 @@ static uint8_t sStartRegs[REG_COPY] __attribute__((aligned(4)));
 static struct {
     uint32_t frames, listed, bad, why[GPU_WHY_COUNT];
     uint32_t quads, strips;
+    uint32_t pal[3]; // listed frames by GPU_PAL_*
 } sListStats;
 
 // The frame drawn the usual way, from the registers' copies
@@ -87,9 +88,11 @@ static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, in
     GpuList *l = &gGpuList;
     sListStats.frames++;
     if (listOk) {
+        GpuList_Palette();
         sListStats.listed++;
         sListStats.quads += l->quadCount;
         sListStats.strips += l->stripRows;
+        sListStats.pal[l->palette]++;
         if (listMode == 3)
             return; // (the backend draws it: Backend_PresentList)
         GpuList_Draw(l, dst, stride);
@@ -120,10 +123,11 @@ static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, in
         for (int i = 1; i < GPU_WHY_COUNT && n < (int)sizeof(why) - 24; i++)
             if (sListStats.why[i])
                 n += snprintf(why + n, sizeof(why) - n, " %s %lu", gGpuWhy[i], (unsigned long)sListStats.why[i]);
-        Backend_Log("gpu-list: %lu frames, %lu listed (%lu differ), %lu quads and %lu strip rows a frame; others:%s",
+        Backend_Log("gpu-list: %lu frames, %lu listed (%lu differ), %lu quads and %lu strip rows a frame; palettes: fade %lu other %lu; others:%s",
                     (unsigned long)sListStats.frames, (unsigned long)sListStats.listed, (unsigned long)sListStats.bad,
                     (unsigned long)(sListStats.listed ? sListStats.quads / sListStats.listed : 0),
-                    (unsigned long)(sListStats.listed ? sListStats.strips / sListStats.listed : 0), why);
+                    (unsigned long)(sListStats.listed ? sListStats.strips / sListStats.listed : 0),
+                    (unsigned long)sListStats.pal[GPU_PAL_FADE], (unsigned long)sListStats.pal[GPU_PAL_OTHER], why);
     }
 }
 enum { VIEW_GBA, VIEW_FRAMED, VIEW_WIDE };

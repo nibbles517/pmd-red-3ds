@@ -33,7 +33,7 @@ CORE_SRCS   := port/core/frame.c port/core/ppu.c port/core/gpulist.c port/core/b
 CORE_OBJ    := $(BUILD)/core
 
 $(CORE_OBJ)/ppu.o $(CORE_OBJ)/frame.o $(CORE_OBJ)/bgcache.o $(CORE_OBJ)/gpulist.o: port/core/bgcache.h port/core/gpulist.h
-$(CORE_OBJ)/%.o: port/core/%.c port/core/port.h
+$(CORE_OBJ)/%.o: port/core/%.c port/core/port.h port/core/port_view.h
 	@mkdir -p $(dir $@)
 	@$(GAME_CC) $(CORE_CFLAGS) -c $< -o $@
 	@echo "  CC   $<"

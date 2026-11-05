@@ -10,8 +10,17 @@
 //   - what can't be read from a map that way (the wide view's HUD row, BG1's
 //     side tiles, the full-screen tiled effects, lines decoded the slow way)
 //     as line strips: those lines' pixels, copied into the strip texture;
-//   - each sprite as one rectangle of the sprite texture, into which its
-//     pixels are coloured (flips are the rectangle's).
+//   - each sprite as one rectangle of the sprite texture, which holds its
+//     pixels' colour numbers (flips are the rectangle's).
+// Colours: the backgrounds' textures (from their caches' colour numbers),
+// the sprites' and the backdrop are coloured from the list's base palette;
+// the strips (and the backgrounds whose cache has no colour numbers) are
+// pixels, already coloured (GQ_PREFADED). Fades: when every palette entry is
+// the same fade of a colour of its own (port_view.h: gPortPalFade), the base
+// palette is those colours and the fade is the list's (the GPU does it: the
+// textures don't change during a fade); otherwise the base palette is the
+// palettes as they are (no fade). Drawn in software, every colour is the
+// palettes' as they are (the renderer's).
 // Each rectangle has a key: what is in front of what (smaller: in front).
 // Drawn back to front over the backdrop colour, with transparent texels
 // (bit 15) left out, the rectangles make the picture the renderer would.
@@ -45,7 +54,7 @@ enum {
 #define GPU_OBJ_H 512
 #define GPU_MAX_QUADS 4096
 
-enum { GQ_HFLIP = 1, GQ_VFLIP = 2, GQ_BLEND = 4, GQ_SECOND = 8 };
+enum { GQ_HFLIP = 1, GQ_VFLIP = 2, GQ_BLEND = 4, GQ_SECOND = 8, GQ_PREFADED = 16 };
 
 typedef struct {
     uint8_t tex, flags; // GQ_*
@@ -64,6 +73,11 @@ typedef struct {
     uint16_t backdrop; // BGR555
     uint8_t bdSecond;  // the backdrop is a second target
     uint8_t eva, evb;  // alpha blending's amounts (0-16)
+    uint16_t base[512];// the base palette (BGR555): what the textures are coloured from
+    PortPalFade fade;  // ... and the fade on it (mul 256, add 0: none)
+    int fadeOn;        // (the fade isn't none)
+    int palette;       // GPU_PAL_* (the meter)
+    uint16_t objBanks; // the OBJ palette banks the sprites use (bit n: bank n)
     int quadCount;
     GpuQuad quads[GPU_MAX_QUADS];
     int stripRows;
@@ -78,11 +92,16 @@ enum {
 };
 extern const char *const gGpuWhy[GPU_WHY_COUNT];
 
+enum { GPU_PAL_STEADY, GPU_PAL_FADE, GPU_PAL_OTHER }; // the palettes: as their base; a fade of it; neither
+
 extern GpuList gGpuList;
 extern uint16_t gGpuStrip[GPU_STRIP_ROWS][GPU_STRIP_W];
-extern uint16_t gGpuObj[GPU_OBJ_H][GPU_OBJ_W];
+extern uint16_t gGpuObj[GPU_OBJ_H][GPU_OBJ_W]; // OBJ colour numbers (0-255), 0x8000: transparent
 
 void GpuList_Begin(int w, int h);
+// The base palette and the fade (once the frame is listed: from the palette
+// banks it uses; the palettes don't change during a frame)
+void GpuList_Palette(void);
 void Port_GpuListCounts(uint32_t *listed, uint32_t why[GPU_WHY_COUNT]); // (frame.c)
 
 // A background's line (ppu.c): screen x xa..xb-1 read from cache layer bg's

@@ -350,9 +350,11 @@ static int RenderCachedLine(BgCache *c, int y, int x, uint16_t *out)
     uint64_t any = CacheRowBits(c->any[y], c->tilesW, tx0) & cols;
     uint64_t full = CacheRowBits(c->full[y], c->tilesW, tx0) & cols;
 
-    if (sListMode && !(c->byIndex && (CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols))) {
-        // described, not copied (its colours made first where they are stale)
-        uint64_t stale = CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols;
+    if (sListMode) {
+        // described, not copied: the list's textures are coloured from the
+        // colour numbers (so stale colours don't matter), but for a cache
+        // without them (its colours made first where they are stale)
+        uint64_t stale = c->indexOk ? 0 : CacheRowBits(c->recolor[ty], c->tilesW, tx0) & cols;
         while (stale) {
             uint32_t lo32 = (uint32_t)stale;
             int i = lo32 ? __builtin_ctz(lo32) : 32 + __builtin_ctz((uint32_t)(stale >> 32));
@@ -1468,23 +1470,24 @@ int Ppu_ListLine(int line)
             if (!(v & (1u << b)))
                 continue;
             int flags = (((first >> b) & 1) && (v & 0x20) ? GQ_BLEND : 0) | ((second >> b) & 1 ? GQ_SECOND : 0);
+            int cacheFlags = flags | ((sDesc.have && !sDesc.c->indexOk) ? GQ_PREFADED : 0);
             for (int k = 0; k < pn; k++) {
                 int a = pa[k] > runX[r] ? pa[k] : runX[r];
                 int e = pb[k] < runX[r + 1] ? pb[k] : runX[r + 1];
                 if (a >= e)
                     continue;
                 if (k == descAt)
-                    GpuList_BgLine(line, b, key, flags, sDesc.y, (sDesc.x + a) & (wPx - 1), wPx, a, e);
+                    GpuList_BgLine(line, b, key, cacheFlags, sDesc.y, (sDesc.x + a) & (wPx - 1), wPx, a, e);
                 else if (sideAt >= 0 && k >= sideAt) {
                     for (int x = a; x < e;) { // (a piece of the tile, then whole tiles)
                         int t = (x + sListSidePhase) & 7, n = 8 - t;
                         if (n > e - x) n = e - x;
-                        GpuList_BgLine(line, b, key, flags, sDesc.y, sListSideX + t, wPx, x, x + n);
+                        GpuList_BgLine(line, b, key, cacheFlags, sDesc.y, sListSideX + t, wPx, x, x + n);
                         x += n;
                     }
                 }
                 else
-                    GpuList_StripLine(line, b, key, flags, sBg[b], a, e);
+                    GpuList_StripLine(line, b, key, flags | GQ_PREFADED, sBg[b], a, e);
             }
         }
     }
@@ -1550,12 +1553,13 @@ int Ppu_ListObjects(int lines)
         int flags = objFlags | (((a1 >> 12) & 1) ? GQ_HFLIP : 0) | (((a1 >> 13) & 1) ? GQ_VFLIP : 0);
         uint16_t *dst = GpuList_Obj(x, y, w, h, flags, GpuKeyObj(prio, n));
         if (dst == NULL) { l->fallback = l->quadCount >= GPU_MAX_QUADS ? GPU_WHY_FULL : GPU_WHY_OBJ_FULL; return 0; }
-        const uint16_t *pal = &PAL16[256 + (color256 ? 0 : palBank * 16)];
+        unsigned bankBase = color256 ? 0 : palBank * 16; // (colour numbers: the list colours them)
+        l->objBanks |= color256 ? 0xFFFF : (uint16_t)(1u << palBank);
         for (int ty = 0; ty < h; ty++, dst += GPU_OBJ_W) {
             unsigned rowTile = tileNum + (ty >> 3) * rowStride;
             for (int tx = 0; tx < w; tx++) {
                 unsigned idx = ObjTexel(rowTile + (tx >> 3) * tileStep, tx, ty, color256);
-                dst[tx] = idx ? (pal[idx] & 0x7FFF) : TRANSPARENT;
+                dst[tx] = idx ? (uint16_t)(bankBase + idx) : TRANSPARENT;
             }
         }
     }

@@ -1,6 +1,7 @@
 // Drawing list (gpulist.h): building it, and drawing it in software.
 
 #include <string.h>
+#include <stdio.h>
 #include "gpulist.h"
 #include "bgcache.h"
 
@@ -34,6 +35,9 @@ void GpuList_Begin(int w, int h)
     l->objX = l->objY = l->objRowH = 0;
     l->full = 0;
     l->fallback = 0;
+    l->fadeOn = 0;
+    l->palette = GPU_PAL_STEADY;
+    l->objBanks = 0;
     for (int b = 0; b < 4; b++) {
         sLastCount[b] = sNowCount[b] = 0;
         sLastLine[b] = -2;
@@ -160,6 +164,84 @@ uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key)
     return place;
 }
 
+// The base palette and the fade: every entry the frame shows (the palette
+// banks its background tiles and sprites use, and the backdrop) the same fade
+// of its own colour, or black staying black under a darkening
+static const PortPalFade sNoFade = { 256, { 0, 0, 0 }, { 0, 0, 0 } };
+
+static int IsNoFade(const PortPalFade *f)
+{
+    return f->mul >= 256 && !f->add[0] && !f->add[1] && !f->add[2];
+}
+
+// The BG palette banks the frame's background rectangles show
+static unsigned BgBanksUsed(const GpuList *l)
+{
+    unsigned banks = 1; // (the backdrop: entry 0)
+    for (int i = 0; i < l->quadCount && banks != 0xFFFF; i++) {
+        const GpuQuad *q = &l->quads[i];
+        if (q->tex > GTEX_BG3)
+            continue;
+        const BgCache *c = &gBgCache[q->tex];
+        if (c->color256 || !c->indexOk)
+            return 0xFFFF;
+        for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
+            for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++)
+                banks |= 1u << (c->entry[ty * 64 + tx] >> 12);
+    }
+    return banks;
+}
+
+void GpuList_Palette(void)
+{
+    GpuList *l = &gGpuList;
+    const uint16_t *pal = (const uint16_t *)gPortPltt;
+    int changed = 0;
+    for (int i = 0; i < 512; i++) {
+        uint16_t v = pal[i] & 0x7FFF, base = v;
+        if (gPortPalValue[i] == v) // (as the palette buffer made it)
+            base = gPortPalBase[i] & 0x7FFF;
+        l->base[i] = base;
+        changed |= base != v;
+    }
+    l->fade = sNoFade;
+    l->fadeOn = 0;
+    l->palette = GPU_PAL_STEADY;
+    if (!changed)
+        return;
+
+    uint32_t used = BgBanksUsed(l) | ((uint32_t)l->objBanks << 16);
+    int have = 0, uniform = 1, black = 0;
+    PortPalFade f = sNoFade;
+    for (int i = 0; i < 512 && uniform; i++) {
+        if (!((used >> (i >> 4)) & 1) || ((i & 15) == 0 && i != 0))
+            continue; // (a bank not shown, or a clear colour)
+        uint16_t v = pal[i] & 0x7FFF;
+        const PortPalFade *fd = gPortPalValue[i] == v ? &gPortPalFade[i] : &sNoFade;
+        if (IsNoFade(fd)) {
+            if (v != 0)
+                uniform = 0; // (shown as it is: only black, which a darkening keeps)
+            black = 1;
+            continue;
+        }
+        if (!have) {
+            f = *fd;
+            have = 1;
+        }
+        else if (fd->mul != f.mul || fd->add[0] != f.add[0] || fd->add[1] != f.add[1] || fd->add[2] != f.add[2])
+            uniform = 0;
+    }
+    if (have && uniform && !(black && (f.add[0] | f.add[1] | f.add[2]))) {
+        l->fade = f;
+        l->fadeOn = 1;
+        l->palette = GPU_PAL_FADE;
+        return;
+    }
+    for (int i = 0; i < 512; i++) // (the palettes as they are)
+        l->base[i] = pal[i] & 0x7FFF;
+    l->palette = GPU_PAL_OTHER;
+}
+
 // --- Drawing in software ---------------------------------------------------------
 
 // As the GBA (ppu.c): each channel (a * eva + b * evb) / 16, at most 31
@@ -174,18 +256,22 @@ static uint16_t Blend(uint16_t a, uint16_t b, int eva, int evb)
     return (uint16_t)(r | (g << 5) | (bl << 10));
 }
 
-static const uint16_t *Texel0(int tex, int *stride)
+// A texel as drawn: the palettes' colours as they are (the renderer's)
+static inline uint16_t Texel(int tex, int x, int y)
 {
-    if (tex <= GTEX_BG3) {
-        *stride = BGC_STRIDE;
-        return gBgCache[tex].px;
+    const uint16_t *pal = (const uint16_t *)gPortPltt;
+    if (tex <= GTEX_BG3) { // (from its colour number, as the GPU's)
+        const BgCache *c = &gBgCache[tex];
+        uint16_t t = c->px[y * BGC_STRIDE + x];
+        if ((t & 0x8000) || !c->indexOk)
+            return t;
+        uint8_t n = c->idx[y * BGC_STRIDE + x];
+        return (!c->color256 && n == 0x10) ? 0 : (pal[n] & 0x7FFF);
     }
-    if (tex == GTEX_STRIP) {
-        *stride = GPU_STRIP_W;
-        return &gGpuStrip[0][0];
-    }
-    *stride = GPU_OBJ_W;
-    return &gGpuObj[0][0];
+    if (tex == GTEX_STRIP)
+        return gGpuStrip[y][x];
+    uint16_t n = gGpuObj[y][x];
+    return (n & 0x8000) ? 0x8000 : (pal[256 + n] & 0x7FFF);
 }
 
 void GpuList_Draw(const GpuList *l, uint16_t *dst, int stride)
@@ -211,14 +297,11 @@ void GpuList_Draw(const GpuList *l, uint16_t *dst, int stride)
 
     for (int n = 0; n < l->quadCount; n++) {
         const GpuQuad *q = &l->quads[order[n]];
-        int ts;
-        const uint16_t *tex = Texel0(q->tex, &ts);
         for (int j = 0; j < q->h; j++) {
             int y = q->dy + j;
             if (y < 0 || y >= l->h)
                 continue;
             int ty = q->sy + ((q->flags & GQ_VFLIP) ? q->h - 1 - j : j);
-            const uint16_t *row = tex + ty * ts;
             uint16_t *d = dst + y * stride;
             uint8_t *sec = second + y * l->w;
             uint8_t mark = (q->flags & GQ_SECOND) ? 1 : 0;
@@ -226,7 +309,7 @@ void GpuList_Draw(const GpuList *l, uint16_t *dst, int stride)
                 int x = q->dx + i;
                 if (x < 0 || x >= l->w)
                     continue;
-                uint16_t t = row[q->sx + ((q->flags & GQ_HFLIP) ? q->w - 1 - i : i)];
+                uint16_t t = Texel(q->tex, q->sx + ((q->flags & GQ_HFLIP) ? q->w - 1 - i : i), ty);
                 if (t & 0x8000)
                     continue;
                 d[x] = (q->flags & GQ_BLEND) && sec[x] ? Blend(t, d[x], l->eva, l->evb) : t;
