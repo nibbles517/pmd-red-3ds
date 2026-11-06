@@ -36,12 +36,15 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
     uint8_t *dsti = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
     const uint16_t *table = c->table;
     unsigned rows = 0; // 2 bits per row: 0 clear, 1 some, 2 opaque
+    unsigned dPx = 0, dIdx = 0; // (whether the tile's pixels, colour numbers changed: the GPU's texture)
 
     if (e < 0 || (c->wideMap && e == PORT_WIDE_BLACK)) {
         uint16_t v = e < 0 ? TRANSPARENT : 0; // (the wide map's black: opaque)
         uint8_t n = e < 0 ? 0 : 0x10;
         for (int r = 0; r < 8; r++)
             for (int i = 0; i < 8; i++) {
+                dPx |= dst[r * BGC_STRIDE + i] ^ v;
+                dIdx |= dsti[r * BGC_STRIDE + i] ^ n;
                 dst[r * BGC_STRIDE + i] = v;
                 dsti[r * BGC_STRIDE + i] = n;
             }
@@ -68,6 +71,8 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
                 for (int i = 0; i < 8; i++) {
                     unsigned n = (i < 4) ? (lo >> (8 * i)) & 0xFF : (hi >> (8 * (i - 4))) & 0xFF;
                     int at = hflip ? 7 - i : i;
+                    dIdx |= pi[at] ^ n;
+                    dPx |= px[at] ^ table[n];
                     pi[at] = (uint8_t)n;
                     px[at] = table[n];
                 }
@@ -82,6 +87,8 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
                     unsigned n = (row >> (4 * i)) & 0xF;
                     unsigned v = n ? bank | n : 0;
                     int at = hflip ? 7 - i : i;
+                    dIdx |= pi[at] ^ v;
+                    dPx |= px[at] ^ table[v];
                     pi[at] = (uint8_t)v;
                     px[at] = table[v];
                 }
@@ -105,8 +112,13 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
     c->entry[ty * 64 + tx] = (uint16_t)e;
     c->recolor[ty][w] &= ~bit;
     c->todo[ty][w] &= ~bit;
-    c->gpuDirty[ty][w] |= bit;
-    c->gpuAny = 1;
+    // The GPU's texture: made from the colour numbers (indexOk), else the
+    // pixels; a tile decoded again as it was (an animation rewriting the
+    // tiles or map with what's there) isn't sent again
+    if (c->indexOk ? dIdx : dPx) {
+        c->gpuDirty[ty][w] |= bit;
+        c->gpuAny = 1;
+    }
 }
 
 void BgCache_Recolor(BgCache *c, int tx, int ty)
@@ -228,6 +240,8 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
                 BuildTable(c);
                 memset(c->todo, 0xFF, sizeof(c->todo));
                 memset(c->recolor, 0, sizeof(c->recolor));
+                memset(c->gpuDirty, 0xFF, sizeof(c->gpuDirty)); // (whatever Decode finds)
+                c->gpuAny = 1;
                 continue;
             }
         }

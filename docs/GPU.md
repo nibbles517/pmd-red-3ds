@@ -81,8 +81,13 @@ it, and the GPU draws it in `GpuDrawFrame`:
   texture (colour numbers, coloured from the base palette), only where the
   frame's rectangles read. A background tile is written when the frame shows
   it and it changed since: decoded again (`gpuDirty`, set by
-  `BgCache_Decode`), or its palette bank's base colours changed. Written
-  after `C3D_FrameBegin` (the GPU is done with the last frame).
+  `BgCache_Decode`, only if what it decoded differs from what was there), or
+  it uses a colour of the base palette that changed (a palette animation).
+  A tile's 64 texels are made in a buffer and copied in one go: scattered
+  2-byte writes to texture memory (not in the cache) cost the first builds
+  about 9 microseconds a tile, which a palette animation re-colouring 800
+  tiles every 6 frames (the world map) turned into a stutter. Written after
+  `C3D_FrameBegin` (the GPU is done with the last frame).
 - **Fades** (gpulist.c `GpuList_Palette`): the game's palette buffer keeps,
   for every entry, the colour it was made from and the fade that made it
   (`gPortPalBase`, `gPortPalFade`: copied to palette memory with the colours;

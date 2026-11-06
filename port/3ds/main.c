@@ -573,30 +573,41 @@ static void GlWriteRect(uint16_t *tex, const uint16_t *src, int srcStride, int x
 static uint16_t sGlLut[512], sGlLastBase[512];
 static bool sGlLastBaseOk;
 
+// The colour of each colour number as a background tile's texel: sGlLut
+// with colour 0 clear (and, 16 colours a bank, the wide map's black: 0x10)
+static uint16_t sGlLut16[256], sGlLut256[256];
+
+// A tile's 64 texels are together in the texture, in Z order. They're made
+// in a buffer first and copied whole: the texture's memory isn't in the
+// cache, and 64 scattered 2-byte writes to it cost far more than one copy.
+static inline uint16_t *GlTile(uint16_t *tex, int tx, int ty)
+{
+    return tex + (((sGlFlip ? GL_TEX / 8 - 1 - ty : ty) * (GL_TEX / 8) + tx) << 6);
+}
+
 static void GlBgTile(BgCache *c, uint16_t *tex, int tx, int ty)
 {
+    uint32_t buf32[32];
+    uint16_t *buf = (uint16_t *)buf32;
     int x0 = tx * 8, y0 = ty * 8;
-    const uint16_t *px = &c->px[y0 * BGC_STRIDE + x0];
-    const uint8_t *idx = &c->idx[y0 * BGC_STRIDE + x0];
-    // The tile's 64 texels are together in the texture (in Z order)
-    uint16_t *tile = tex + (((sGlFlip ? GL_TEX / 8 - 1 - ty : ty) * (GL_TEX / 8) + tx) << 6);
-    for (int r = 0; r < 8; r++, px += BGC_STRIDE, idx += BGC_STRIDE) {
-        const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
-        if (c->indexOk && !c->color256) {
-            for (int x = 0; x < 8; x++) {
-                uint8_t n = idx[x];
-                tile[m[x]] = (px[x] & 0x8000) ? 0 : n == 0x10 ? 1 : sGlLut[n]; // (0x10: the wide map's black)
-            }
-        }
-        else if (c->indexOk) {
+    if (c->indexOk) { // (colour numbers: 0 is clear, as their pixels say)
+        const uint8_t *idx = &c->idx[y0 * BGC_STRIDE + x0];
+        const uint16_t *lut = c->color256 ? sGlLut256 : sGlLut16;
+        for (int r = 0; r < 8; r++, idx += BGC_STRIDE) {
+            const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
             for (int x = 0; x < 8; x++)
-                tile[m[x]] = (px[x] & 0x8000) ? 0 : sGlLut[idx[x]];
-        }
-        else {
-            for (int x = 0; x < 8; x++)
-                tile[m[x]] = To5551(px[x]);
+                buf[m[x]] = lut[idx[x]];
         }
     }
+    else {
+        const uint16_t *px = &c->px[y0 * BGC_STRIDE + x0];
+        for (int r = 0; r < 8; r++, px += BGC_STRIDE) {
+            const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
+            for (int x = 0; x < 8; x++)
+                buf[m[x]] = To5551(px[x]);
+        }
+    }
+    memcpy(GlTile(tex, tx, ty), buf32, sizeof(buf32));
     GlTouch(y0, y0 + 8);
 }
 
@@ -628,6 +639,17 @@ static void GpuListUpload(const GpuList *l)
         sGlLut[i] = (uint16_t)(To5551(b) | 1);
     }
     sGlLastBaseOk = true;
+    // (which colour numbers changed, as a tile's texels: not 0, clear)
+    static uint8_t changed16[256], changed256[256];
+    memcpy(changed16, changedEntry, 256);
+    memcpy(changed256, changedEntry, 256);
+    changed256[0] = 0;
+    for (int i = 0; i < 256; i += 16)
+        changed16[i] = 0;
+    memcpy(sGlLut16, sGlLut, sizeof(sGlLut16));
+    memcpy(sGlLut256, sGlLut, sizeof(sGlLut256));
+    sGlLut16[0] = sGlLut256[0] = 0;
+    sGlLut16[0x10] = 1; // (the wide map's black)
     for (int b = 0; changedBanks && b < 4; b++) {
         BgCache *c = &gBgCache[b];
         if (!c->valid || !c->indexOk)
@@ -662,13 +684,12 @@ static void GpuListUpload(const GpuList *l)
                     if (palDirty[b][ty][tx >> 5] & bit) { // (its bank changed: does it use a changed colour?)
                         palDirty[b][ty][tx >> 5] &= ~bit;
                         if (!(c->gpuDirty[ty][tx >> 5] & bit)) {
-                            const uint16_t *tpx = &c->px[ty * 8 * BGC_STRIDE + tx * 8];
                             const uint8_t *tidx = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
-                            int uses = 0;
-                            for (int r = 0; r < 8 && !uses; r++, tpx += BGC_STRIDE, tidx += BGC_STRIDE)
+                            const uint8_t *ch = c->color256 ? changed256 : changed16;
+                            unsigned uses = 0;
+                            for (int r = 0; r < 8 && !uses; r++, tidx += BGC_STRIDE)
                                 for (int x = 0; x < 8; x++)
-                                    if (!(tpx[x] & 0x8000) && changedEntry[tidx[x]])
-                                        uses = 1;
+                                    uses |= ch[tidx[x]];
                             if (uses)
                                 c->gpuDirty[ty][tx >> 5] |= bit;
                         }
@@ -712,11 +733,18 @@ static void GpuListUpload(const GpuList *l)
         if (!o->gpuDirty || o->used != l->frame)
             continue;
         o->gpuDirty = 0;
-        for (int j = 0; j < o->h; j++) {
-            const uint16_t *src = &gGpuObj[o->y + j][o->x];
-            for (int x = 0; x < o->w; x++)
-                *GlTexel(obj, o->x + x, o->y + j) = (src[x] & 0x8000) ? 0 : sGlLut[256 + src[x]];
-        }
+        for (int ty = o->y >> 3; ty < (o->y + o->h) >> 3; ty++) // (slots are whole tiles)
+            for (int tx = o->x >> 3; tx < (o->x + o->w) >> 3; tx++) {
+                uint32_t buf32[32];
+                uint16_t *buf = (uint16_t *)buf32;
+                for (int r = 0; r < 8; r++) {
+                    const uint16_t *src = &gGpuObj[ty * 8 + r][tx * 8];
+                    const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
+                    for (int x = 0; x < 8; x++)
+                        buf[m[x]] = (src[x] & 0x8000) ? 0 : sGlLut[256 + (src[x] & 0xFF)];
+                }
+                memcpy(GlTile(obj, tx, ty), buf32, sizeof(buf32));
+            }
         GlTouch(o->y, o->y + o->h);
     }
     GlFlush(&sGlObj);
