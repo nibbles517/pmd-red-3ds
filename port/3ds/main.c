@@ -39,6 +39,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 #define DEBUG_FLAG DATA_DIR "/debug.txt"
 #define CPU_VIDEO_FLAG DATA_DIR "/cpu-video.txt" // the pictures copied by the CPU, as before the GPU did it
 #define GPU_NOFLIP_FLAG DATA_DIR "/gpu-noflip.txt" // GPU Drawing: the textures' rows top first (see GpuListInit)
+#define GPU_GSPFLUSH_FLAG DATA_DIR "/gpu-gspflush.txt" // GPU Drawing: flush its textures through GSP (see GlFlushRange)
 
 void AgbMain(void);
 
@@ -411,6 +412,18 @@ static void GpuConvert(uint16_t *dst, const uint16_t *src, int w, int y0, int y1
     }
 }
 
+// The CPU's writes to linear memory, out of its cache for the GPU. Through
+// the kernel, on this core: GSPGPU_FlushDataCache asks the GSP service, on
+// the system core, where it waits while the DS music's worker (Dual Core)
+// has the core, up to the 2 ms its frame's music takes. gpu-gspflush.txt:
+// through GSP again.
+static bool sGspFlush;
+static void GlFlushRange(const void *p, u32 size)
+{
+    if (sGspFlush || R_FAILED(svcFlushProcessDataCache(CUR_PROCESS_HANDLE, (u32)p, size)))
+        GSPGPU_FlushDataCache(p, size);
+}
+
 // A picture into its texture, to be shown at (x, y), w x h on its screen.
 // Only its rows y0 .. y1 - 1 changed since the last time (the rest of the
 // converted picture is kept); all of it: 0, frameH.
@@ -420,7 +433,7 @@ static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int fram
     if (frameW != p->srcW || frameH != p->srcH)
         y0 = 0, y1 = frameH; // (a new size: none of it kept)
     GpuConvert(p->stage, frame, frameW, y0, y1);
-    GSPGPU_FlushDataCache(p->stage + y0 * TEX_W, TEX_W * (y1 - y0) * 2);
+    GlFlushRange(p->stage + y0 * TEX_W, TEX_W * (y1 - y0) * 2);
     C3D_SyncDisplayTransfer((u32 *)p->stage, GX_BUFFER_DIM(TEX_W, TEX_H), (u32 *)p->tex.data,
                             GX_BUFFER_DIM(TEX_W, TEX_H), TEX_TRANSFER_FLAGS);
     p->shown = true;
@@ -497,6 +510,11 @@ static void GpuListInit(void)
         fclose(flag);
         sGlFlip = false;
     }
+    flag = fopen(GPU_GSPFLUSH_FLAG, "r");
+    if (flag != NULL) {
+        fclose(flag);
+        sGspFlush = true;
+    }
     C3D_Tex *all[6] = { &sGlBg[0], &sGlBg[1], &sGlBg[2], &sGlBg[3], &sGlStrip, &sGlObj };
     for (int i = 0; i < 6; i++) {
         if (!C3D_TexInit(all[i], GL_TEX, GL_TEX, GPU_RGBA5551)) { // (linear memory)
@@ -509,7 +527,8 @@ static void GpuListInit(void)
         C3D_TexSetWrap(all[i], GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     }
     sGlReady = true;
-    Backend_Log("gpu drawing: ready%s", sGlFlip ? "" : " (rows top first: gpu-noflip.txt)");
+    Backend_Log("gpu drawing: ready%s%s", sGlFlip ? "" : " (rows top first: gpu-noflip.txt)",
+                sGspFlush ? " (flushes through GSP: gpu-gspflush.txt)" : "");
 }
 
 int Backend_GpuListMode(void)
@@ -546,22 +565,11 @@ static void GlTouch(int y0, int y1) // (image rows y0 .. y1 - 1)
 static void GlFlush(C3D_Tex *t)
 {
     if (sGlHi > sGlLo)
-        GSPGPU_FlushDataCache((uint16_t *)t->data + sGlLo * GL_TEX, (sGlHi - sGlLo) * GL_TEX * 2);
+        GlFlushRange((uint16_t *)t->data + sGlLo * GL_TEX, (sGlHi - sGlLo) * GL_TEX * 2);
     sGlLo = GL_TEX;
     sGlHi = 0;
 }
 
-// A rectangle of pixels (BGR555, srcStride a row) into a list texture at (x, y)
-static void GlWriteRect(uint16_t *tex, const uint16_t *src, int srcStride, int x, int y, int w, int h)
-{
-    for (int j = 0; j < h; j++) {
-        const uint16_t *s = src + j * srcStride;
-        int ty = y + j;
-        for (int i = 0; i < w; i++)
-            *GlTexel(tex, x + i, ty) = To5551(s[i]);
-    }
-    GlTouch(y, y + h);
-}
 
 // The list's textures. Colours come from the list's base palette (as
 // RGBA5551: sGlLut), so during a fade (only its amount changes) nothing is
@@ -585,7 +593,13 @@ static inline uint16_t *GlTile(uint16_t *tex, int tx, int ty)
     return tex + (((sGlFlip ? GL_TEX / 8 - 1 - ty : ty) * (GL_TEX / 8) + tx) << 6);
 }
 
-static void GlBgTile(BgCache *c, uint16_t *tex, int tx, int ty)
+// The colours each background tile in the GPU's textures uses (made when
+// it is written): 16 colours a bank, bit n: colour n of its bank (not 0);
+// 256 colours, bit n: one of colours 16n..16n+15 (not 0). A palette change
+// writes again only the tiles using a changed colour, without reading them.
+static uint16_t sGlTileUse[4][64][64];
+
+static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
 {
     uint32_t buf32[32];
     uint16_t *buf = (uint16_t *)buf32;
@@ -593,11 +607,19 @@ static void GlBgTile(BgCache *c, uint16_t *tex, int tx, int ty)
     if (c->indexOk) { // (colour numbers: 0 is clear, as their pixels say)
         const uint8_t *idx = &c->idx[y0 * BGC_STRIDE + x0];
         const uint16_t *lut = c->color256 ? sGlLut256 : sGlLut16;
+        int shift = c->color256 ? 4 : 0;
+        unsigned use = 0;
         for (int r = 0; r < 8; r++, idx += BGC_STRIDE) {
             const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
-            for (int x = 0; x < 8; x++)
-                buf[m[x]] = lut[idx[x]];
+            for (int x = 0; x < 8; x++) {
+                unsigned n = idx[x];
+                buf[m[x]] = lut[n];
+                use |= (1u << ((n >> shift) & 15)) & -(n != 0);
+            }
         }
+        if (!c->color256)
+            use &= ~1u; // (colour 0 of a bank: the wide map's black, 0x10)
+        sGlTileUse[layer][ty][tx] = (uint16_t)use;
     }
     else {
         const uint16_t *px = &c->px[y0 * BGC_STRIDE + x0];
@@ -622,7 +644,6 @@ static void GpuListUpload(const GpuList *l)
     // The base palette's colours; the BG and OBJ banks whose colours changed
     // (and which BG colours: a palette animation changes a few of a bank's)
     static uint8_t changedEntry[256];
-    static uint32_t palDirty[4][64][2]; // (tiles of a changed bank: written if shown and using a changed colour)
     unsigned changedBanks = 0, changedObj = 0;
     for (int i = 0; i < 512; i++) {
         uint16_t b = l->base[i];
@@ -639,26 +660,40 @@ static void GpuListUpload(const GpuList *l)
         sGlLut[i] = (uint16_t)(To5551(b) | 1);
     }
     sGlLastBaseOk = true;
-    // (which colour numbers changed, as a tile's texels: not 0, clear)
-    static uint8_t changed16[256], changed256[256];
-    memcpy(changed16, changedEntry, 256);
-    memcpy(changed256, changedEntry, 256);
-    changed256[0] = 0;
-    for (int i = 0; i < 256; i += 16)
-        changed16[i] = 0;
+    // Which colours changed, as sGlTileUse has them: 16 colours a bank (each
+    // bank's colours 1-15), 256 colours (the groups of 16)
+    uint16_t changed16[16] = { 0 }, changed256 = 0;
+    for (int i = 0; i < 256; i++)
+        if (changedEntry[i]) {
+            if (i & 15)
+                changed16[i >> 4] |= (uint16_t)(1u << (i & 15));
+            if (i)
+                changed256 |= (uint16_t)(1u << (i >> 4));
+        }
     memcpy(sGlLut16, sGlLut, sizeof(sGlLut16));
     memcpy(sGlLut256, sGlLut, sizeof(sGlLut256));
     sGlLut16[0] = sGlLut256[0] = 0;
     sGlLut16[0x10] = 1; // (the wide map's black)
+    // The tiles using a changed colour: written again when shown (a tile
+    // already marked will be written anyway, and its sGlTileUse is old)
     for (int b = 0; changedBanks && b < 4; b++) {
         BgCache *c = &gBgCache[b];
         if (!c->valid || !c->indexOk)
             continue; // (no colour numbers: their pixels, marked by the cache)
-        for (int ty = 0; ty < c->tilesH; ty++)
-            for (int tx = 0; tx < c->tilesW; tx++)
-                if (c->color256 || ((changedBanks >> (c->entry[ty * 64 + tx] >> 12)) & 1))
-                    palDirty[b][ty][tx >> 5] |= 1u << (tx & 31);
-        c->gpuAny = 1;
+        int any = 0;
+        for (int ty = 0; ty < c->tilesH; ty++) {
+            const uint16_t *use = sGlTileUse[b][ty];
+            uint32_t *dirty = c->gpuDirty[ty];
+            for (int tx = 0; tx < c->tilesW; tx++) {
+                unsigned ch = c->color256 ? changed256 : changed16[c->entry[ty * 64 + tx] >> 12];
+                if (use[tx] & ch) {
+                    dirty[tx >> 5] |= 1u << (tx & 31);
+                    any = 1;
+                }
+            }
+        }
+        if (any)
+            c->gpuAny = 1;
     }
 
     // While a fade has the screen black (or nearly: under 10%), little shows:
@@ -681,22 +716,9 @@ static void GpuListUpload(const GpuList *l)
             for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
                 for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++) {
                     uint32_t bit = 1u << (tx & 31);
-                    if (palDirty[b][ty][tx >> 5] & bit) { // (its bank changed: does it use a changed colour?)
-                        palDirty[b][ty][tx >> 5] &= ~bit;
-                        if (!(c->gpuDirty[ty][tx >> 5] & bit)) {
-                            const uint8_t *tidx = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
-                            const uint8_t *ch = c->color256 ? changed256 : changed16;
-                            unsigned uses = 0;
-                            for (int r = 0; r < 8 && !uses; r++, tidx += BGC_STRIDE)
-                                for (int x = 0; x < 8; x++)
-                                    uses |= ch[tidx[x]];
-                            if (uses)
-                                c->gpuDirty[ty][tx >> 5] |= bit;
-                        }
-                    }
                     if ((c->gpuDirty[ty][tx >> 5] & bit) && budget > 0) {
                         c->gpuDirty[ty][tx >> 5] &= ~bit;
-                        GlBgTile(c, tex, tx, ty);
+                        GlBgTile(c, b, tex, tx, ty);
                         budget--;
                         sGlFrameTiles++;
                     }
@@ -704,19 +726,41 @@ static void GpuListUpload(const GpuList *l)
         }
         GlFlush(&sGlBg[b]);
     }
-    if (changedBanks) // the changed banks' tiles not shown (or not reached): written whole when they are
-        for (int b = 0; b < 4; b++)
-            for (int ty = 0; ty < 64; ty++)
-                for (int w = 0; w < 2; w++) {
-                    gBgCache[b].gpuDirty[ty][w] |= palDirty[b][ty][w];
-                    palDirty[b][ty][w] = 0;
-                }
     u64 t1 = svcGetSystemTick();
     sGlFrameBg = t1 - start;
-    for (int i = 0; i < l->quadCount; i++) { // the strips: pixels
+    // The strips (pixels): the tiles their rectangles read, each once and
+    // whole (gGpuStrip has this frame's rows; texels of a tile no rectangle
+    // reads are never shown)
+    static uint32_t stripTiles[GL_TEX / 8][GL_TEX / 8 / 32];
+    int stripTy0 = GL_TEX / 8, stripTy1 = 0;
+    for (int i = 0; i < l->quadCount; i++) {
         const GpuQuad *q = &l->quads[i];
-        if (q->tex == GTEX_STRIP)
-            GlWriteRect((uint16_t *)sGlStrip.data, &gGpuStrip[q->sy][q->sx], GPU_STRIP_W, q->sx, q->sy, q->w, q->h);
+        if (q->tex != GTEX_STRIP || q->w <= 0 || q->h <= 0)
+            continue;
+        int ty0 = q->sy >> 3, ty1 = (q->sy + q->h - 1) >> 3;
+        for (int ty = ty0; ty <= ty1; ty++)
+            for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++)
+                stripTiles[ty][tx >> 5] |= 1u << (tx & 31);
+        if (ty0 < stripTy0) stripTy0 = ty0;
+        if (ty1 + 1 > stripTy1) stripTy1 = ty1 + 1;
+    }
+    uint16_t *strip = (uint16_t *)sGlStrip.data;
+    for (int ty = stripTy0; ty < stripTy1; ty++) {
+        for (int w = 0; w < GL_TEX / 8 / 32; w++)
+            for (uint32_t bits = stripTiles[ty][w]; bits; bits &= bits - 1) {
+                int tx = w * 32 + __builtin_ctz(bits);
+                uint32_t buf32[32];
+                uint16_t *buf = (uint16_t *)buf32;
+                for (int r = 0; r < 8; r++) {
+                    const uint16_t *src = &gGpuStrip[ty * 8 + r][tx * 8];
+                    const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
+                    for (int x = 0; x < 8; x++)
+                        buf[m[x]] = To5551(src[x]);
+                }
+                memcpy(GlTile(strip, tx, ty), buf32, sizeof(buf32));
+            }
+        memset(stripTiles[ty], 0, sizeof(stripTiles[ty]));
+        GlTouch(ty * 8, ty * 8 + 8);
     }
     GlFlush(&sGlStrip);
     u64 t2 = svcGetSystemTick();
@@ -952,6 +996,14 @@ static void GpuWaitForSwap(gfxScreen_t screen)
             || gspIsPresentPending(screen))
            && svcGetSystemTick() < giveUp)
         gspWaitForAnyEvent();
+    if (svcGetSystemTick() >= giveUp) {
+        static int sLogged;
+        if (sLogged++ < 20)
+            Backend_Log("swap wait gave up: %s screen, %s%s", screen == GFX_TOP ? "top" : "bottom",
+                        gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL) == sGpuCopiedTo[screen]
+                            ? "drawing buffer still the one last drawn" : "drawing buffer changed",
+                        gspIsPresentPending(screen) ? ", present still pending" : "");
+    }
     sGpuCopiedTo[screen] = NULL;
 }
 
@@ -1418,7 +1470,11 @@ static void StartWorker(void)
     if (!isNew)
         APT_SetAppCpuTimeLimit(CPU_LIMIT_ON);
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
-    sWorker = threadCreate(WorkerMain, NULL, 32 * 1024, prio - 1, isNew ? 2 : 1, false);
+    // The lowest priority: on the system core, the system's services (GSP,
+    // which this core asks to send the GPU its work and copy pictures) come
+    // first instead of waiting for the frame's DS music (up to 2 ms)
+    (void)prio;
+    sWorker = threadCreate(WorkerMain, NULL, 32 * 1024, 0x3F, isNew ? 2 : 1, false);
     SetCpuLimit();
     Backend_Log("dual core: %s (core %d)", sWorker ? "started" : "not available", isNew ? 2 : 1);
 }

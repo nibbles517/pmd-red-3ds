@@ -114,6 +114,18 @@ it, and the GPU draws it in `GpuDrawFrame`:
   (the first build on hardware wrote them top first: the pieces read the
   wrong end of their textures, mostly empty, and came out missing or
   upside down). `gpu-noflip.txt` writes them top first again.
+- **Strips** are written a whole tile at a time too (each tile the frame's
+  strip rectangles read, once), and a palette change finds the tiles to
+  write again from the colours each tile was written with (`sGlTileUse`),
+  without reading the tiles.
+- **The system core**: the GSP service, which flushed the textures and
+  takes the GPU's work and the screen copies, runs on the system core, where
+  Dual Core's worker makes the DS music. With the worker above it, every
+  request the main core made during the frame's music (about 2 ms) waited
+  for it: port.log showed the parts of slow frames in steps of 2 ms, gone
+  with Dual Core off. The worker now has the lowest priority, and the
+  textures are flushed by the kernel instead (`gpu-gspflush.txt`: through
+  GSP).
 
 port.log's `gpu:` part: on/off, frames from the list out of those drawn,
 the time writing textures takes, and why the others weren't listed.

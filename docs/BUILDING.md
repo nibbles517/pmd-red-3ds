@@ -108,7 +108,10 @@ main screen from the drawing list (docs/GPU.md); Off draws it on the CPU as
 before. The GPU reads its textures' rows bottom row first, so they are
 written that way; an empty `gpu-noflip.txt` in `SD:/3ds/pmd-red-3ds/` writes
 them top row first (the first stage 2 build did, and every piece came out
-upside down or missing).
+upside down or missing). Its textures are flushed from the CPU's cache by the
+kernel, on the main core; an empty `gpu-gspflush.txt` there flushes them
+through the GSP service instead, as before (which, with Dual Core on, waited
+for the DS music's worker on the system core).
 
 ## Game half (Linux or WSL)
 
