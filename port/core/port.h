@@ -108,6 +108,8 @@ int Backend_GpuListMode(void);
 // list (struct GpuList, gpulist.h) is the picture, frameW x frameH (black
 // around it: the list's own w x h at ox, oy), in place of Backend_Present
 void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int oy);
+// ... or only its textures sent (the screen keeps what it shows: frame.c, coming out of black)
+void Backend_UploadList(const void *list);
 // Dual Core: runs fn(arg) on the second CPU core (or at once, if there is
 // none); Backend_WaitAsync waits for it to return. Jobs given while one is
 // running are done after it, in order (Backend_WaitAsync: all of them).

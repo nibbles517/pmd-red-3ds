@@ -708,6 +708,7 @@ static void GlBench(void)
                 (t[4] - t[3]) * us / 2048);
 }
 
+static bool sGlNoBudget;
 static int sGlFramePalTiles; // (... of which a palette animation's)
 static int sGlFrameTiles; // (the slow frame lines: this frame's texture writing)
 static u64 sGlFrameBg, sGlFrameStrip, sGlFrameObj;
@@ -799,6 +800,8 @@ static void GpuListUpload(const GpuList *l)
     int dark = l->fadeOn && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]);
     int budget = dark && l->fade.mul == 0 ? 400 : dark && l->fade.mul < 26 ? 600 : 1 << 30;
     int palBudget = 250;
+    if (sGlNoBudget) // (Backend_UploadList: the screen is black, nothing to keep on time)
+        budget = palBudget = 1 << 30;
     sGlLo = GL_TEX;
     sGlHi = 0;
     for (int b = 0; b < 4; b++) {
@@ -1499,6 +1502,18 @@ void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int o
         GpuDrawFrame();
     Part(T_OUT);
     PresentSub(); // (times T_SUB and T_SUBOUT)
+}
+
+// Coming out of black (frame.c): the list's textures sent, all of them, but
+// not drawn (the screen stays black). The GPU isn't reading them: what it
+// draws now is the empty black list.
+void Backend_UploadList(const void *list)
+{
+    if (!sGlReady || !sGpu)
+        return;
+    sGlNoBudget = true;
+    GpuListUpload((const GpuList *)list);
+    sGlNoBudget = false;
 }
 
 // --- Dual Core ------------------------------------------------------------------

@@ -48,7 +48,6 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
     int e = MapEntry(c, tx, ty);
     uint16_t *dst = &c->px[ty * 8 * BGC_STRIDE + tx * 8];
     uint8_t *dsti = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
-    const uint16_t *table = c->table;
     unsigned rows = 0; // 2 bits per row: 0 clear, 1 some, 2 opaque
     unsigned dPx = 0, dIdx = 0; // (whether the tile's pixels, colour numbers changed: the GPU's texture)
 

@@ -276,6 +276,7 @@ static void LoadWide(const WideState *w)
 // show is not known before they are described, so at most 3 frames in a row
 // are taken as black this way.
 static int sLastListed, sBlackRun;
+static int sShowingBlack, sHeld; // the screen shows black; frames held black since (RunFrame)
 static int PictureBlack(void)
 {
     if (!sLastListed || sBlackRun >= 3)
@@ -416,17 +417,60 @@ static void RunFrame(void)
         sShown = sFrame;
         sFrame = t;
     }
+    // Coming out of black (a fade in, a new map: its tiles decoded and sent
+    // to the GPU on its first frames, 20-30 ms each on an Old 3DS), the
+    // first 2 frames are described and their textures sent, but the screen
+    // stays black: the fade then starts from frames that are ready instead
+    // of on late ones.
+    int hold = 0;
     if (black) {
-        GpuList_Begin(wide ? SCREEN_W : GBA_W, lines); // (no rectangles: the backdrop, faded to black)
-        gGpuList.fadeOn = 1;
-        gGpuList.fade.mul = 0;
-        memset(gGpuList.fade.add, 0, sizeof(gGpuList.fade.add));
+        static GpuList sBlack; // (an empty list faded to black: no rectangles, the backdrop)
+        sBlack.w = wide ? SCREEN_W : GBA_W;
+        sBlack.h = lines;
+        sBlack.backdrop = 0;
+        sBlack.bdSecond = 0;
+        sBlack.eva = 16;
+        sBlack.evb = 0;
+        memcpy(sBlack.base, gGpuList.base, sizeof(sBlack.base)); // (the textures' colours stay)
+        sBlack.fadeOn = 1;
+        sBlack.fade.mul = 0;
+        memset(sBlack.fade.add, 0, sizeof(sBlack.fade.add));
+        sBlack.palette = GPU_PAL_STEADY;
+        sBlack.objBanks = 0;
+        sBlack.quadCount = 0;
+        sBlack.stripRows = 0;
+        sBlack.frame = gGpuList.frame;
+        sBlack.full = sBlack.fallback = 0;
+        sShowingBlack = 1;
+        sHeld = 0;
         if (mode == VIEW_GBA)
-            Backend_PresentList(&gGpuList, GBA_W, GBA_H, 0, 0);
+            Backend_PresentList(&sBlack, GBA_W, GBA_H, 0, 0);
         else if (wide)
-            Backend_PresentList(&gGpuList, SCREEN_W, SCREEN_H, 0, 0);
+            Backend_PresentList(&sBlack, SCREEN_W, SCREEN_H, 0, 0);
         else
-            Backend_PresentList(&gGpuList, SCREEN_W, SCREEN_H, NARROW_OX, NARROW_OY);
+            Backend_PresentList(&sBlack, SCREEN_W, SCREEN_H, NARROW_OX, NARROW_OY);
+    }
+    else if (listMode == 3 && listOk) {
+        const GpuList *l = &gGpuList;
+        int nowBlack = l->fadeOn && l->fade.mul == 0 && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]);
+        if (nowBlack)
+            sHeld = 0;
+        hold = sShowingBlack && !nowBlack && sHeld < 2;
+        if (hold) {
+            sHeld++;
+            Backend_UploadList(l);
+        }
+        else
+            sShowingBlack = nowBlack;
+    }
+    else if (!skip) {
+        sShowingBlack = 0;
+    }
+    if (black) {
+        // (shown above)
+    }
+    else if (hold) {
+        Backend_Present(NULL, mode == VIEW_GBA ? GBA_W : SCREEN_W, mode == VIEW_GBA ? GBA_H : SCREEN_H); // (the screen stays black)
     }
     else if (listMode == 3 && listOk) { // the backend draws the list (on the GPU)
         if (mode == VIEW_GBA)
