@@ -1405,7 +1405,22 @@ int Ppu_ListLine(int line)
     }
     else
         key.wide = (uint16_t)(sWide | (sW << 1));
-    if (line == 0 || memcmp(&key, &sWinKey, sizeof(key)) != 0) {
+    // The same registers as the line before and the same windows: the line
+    // before again, a row further down (its rectangles a line taller;
+    // describing each line took most of the main core's time on a frame)
+    static uint8_t sPrevRegs[0x56];
+    static int sPrevLine = -2, sPrevEmpty; // (sPrevEmpty: a layer was clear all along the line before: maybe not this one)
+    int sameWin = line > 0 && memcmp(&key, &sWinKey, sizeof(key)) == 0;
+    // (not DISPSTAT, VCOUNT: they change every line, and the picture doesn't follow them)
+    if (sameWin && sPrevLine == line - 1 && !sPrevEmpty && memcmp(sPrevRegs, gPortRegs, 4) == 0
+        && memcmp(sPrevRegs + 8, gPortRegs + 8, sizeof(sPrevRegs) - 8) == 0 && GpuList_RepeatLine(line)) {
+        sPrevLine = line;
+        return 1;
+    }
+    memcpy(sPrevRegs, gPortRegs, sizeof(sPrevRegs));
+    sPrevLine = line;
+    sPrevEmpty = 0;
+    if (!sameWin) {
         memcpy(&sWinKey, &key, sizeof(key));
         uint8_t winout6;
         unsigned wmAll = WindowMask(line, dispcnt, wm, &winout6);
@@ -1445,8 +1460,10 @@ int Ppu_ListLine(int line)
         sWantPtr = 0;
         int any = RenderTextBg(b, line, sBg[b]);
         sListMode = 0;
-        if (!any)
+        if (!any) {
+            sPrevEmpty = 1;
             continue;
+        }
         // What the layer's line is made of: a piece of its cache, pixels
         int pa[5], pb[5], pn = 0, descAt = -1, sideAt = -1;
         if (sDesc.have) {

@@ -13,13 +13,29 @@ const char *const gGpuWhy[GPU_WHY_COUNT] = {
     "none", "blank", "mode", "window", "effect", "obj-change", "obj-affine", "obj-semi", "obj-mosaic", "full", "obj-window", "obj-full", "strip-full",
 };
 
-// The rectangles each layer added on the line before (to be made a line
-// taller when this line continues them)
-#define LAST_MAX 32
-static int16_t sLast[4][LAST_MAX];
-static int sLastCount[4], sLastLine[4];
-static int16_t sNow[4][LAST_MAX]; // ... and this line's, so far
-static int sNowCount[4], sNowLine[4];
+// Each layer's strip row for its line (the line: sStripLine)
+static int sStripRow[4], sStripLine[4];
+// The rectangles the last line described added to or made taller (its
+// line: sRecLine), for GpuList_RepeatLine
+#define REC_MAX 1024
+static uint16_t sRec[REC_MAX];
+static int sRecN, sRecLine, sRecOver;
+static inline void Record(int line, int quad)
+{
+    if (line != sRecLine) {
+        sRecLine = line;
+        sRecN = 0;
+        sRecOver = 0;
+    }
+    if (sRecN < REC_MAX)
+        sRec[sRecN++] = (uint16_t)quad;
+    else
+        sRecOver = 1;
+}
+// Each layer's rectangles by where they start on the screen (x): the one
+// whose last line it is (stamp: the frame << 10 | that line)
+static uint16_t sDxQuad[4][512];
+static uint32_t sDxStamp[4][512];
 
 void GpuList_Begin(int w, int h)
 {
@@ -38,27 +54,28 @@ void GpuList_Begin(int w, int h)
     l->fadeOn = 0;
     l->palette = GPU_PAL_STEADY;
     l->objBanks = 0;
-    for (int b = 0; b < 4; b++) {
-        sLastCount[b] = sNowCount[b] = 0;
-        sLastLine[b] = -2;
-        sNowLine[b] = -1;
-    }
+    for (int b = 0; b < 4; b++)
+        sStripLine[b] = -1;
+    sRecLine = -2;
 }
 
 // Adds a rectangle one line tall, or makes one of the line before's taller
 static void Add(int line, int bg, int tex, uint16_t key, int flags, int dx, int w, int sx, int sy)
 {
     GpuList *l = &gGpuList;
-    if (sLastLine[bg] == line - 1) {
-        for (int i = 0; i < sLastCount[bg]; i++) {
-            GpuQuad *q = &l->quads[sLast[bg][i]];
-            if (q->tex == tex && q->key == key && q->flags == flags && q->dx == dx && q->w == w && q->sx == sx
-                && q->dy + q->h == line && q->sy + q->h == sy) {
-                q->h++;
-                if (sNowCount[bg] < LAST_MAX)
-                    sNow[bg][sNowCount[bg]++] = sLast[bg][i];
-                return;
-            }
+    // The rectangle of the line before at the same screen x (a piece can
+    // only continue one that starts where it starts): one look, instead of
+    // searching the line before's (a dungeon's lines, cut in many pieces by
+    // the light's window and most not continuing one, took a fifth of the
+    // time describing a frame, searching)
+    if (dx >= 0 && dx < 512 && sDxStamp[bg][dx] == (l->frame << 10 | (uint32_t)(line - 1))) {
+        GpuQuad *q = &l->quads[sDxQuad[bg][dx]];
+        if (q->sx == sx && q->w == w && q->tex == tex && q->key == key && q->flags == flags && q->dy + q->h == line
+            && q->sy + q->h == sy) {
+            q->h++;
+            sDxStamp[bg][dx] = l->frame << 10 | (uint32_t)line;
+            Record(line, sDxQuad[bg][dx]);
+            return;
         }
     }
     if (l->quadCount >= GPU_MAX_QUADS) {
@@ -75,30 +92,38 @@ static void Add(int line, int bg, int tex, uint16_t key, int flags, int dx, int 
     q->h = 1;
     q->sx = (int16_t)sx;
     q->sy = (int16_t)sy;
-    if (sNowCount[bg] < LAST_MAX)
-        sNow[bg][sNowCount[bg]++] = (int16_t)l->quadCount;
+    if (dx >= 0 && dx < 512) {
+        sDxQuad[bg][dx] = (uint16_t)l->quadCount;
+        sDxStamp[bg][dx] = l->frame << 10 | (uint32_t)line;
+    }
+    Record(line, l->quadCount);
     l->quadCount++;
 }
 
-// A layer's first piece on a line: the rectangles it added on its last line
-// become the ones to continue (sNow: this line's, so far)
-static void StartLine(int line, int bg)
+int GpuList_RepeatLine(int line)
 {
-    if (sNowLine[bg] != line) {
-        // a new line for this layer: the last one's rectangles are the ones to continue
-        if (sNowLine[bg] >= 0) {
-            memcpy(sLast[bg], sNow[bg], sizeof(sNow[bg]));
-            sLastCount[bg] = sNowCount[bg];
-            sLastLine[bg] = sNowLine[bg];
-        }
-        sNowLine[bg] = line;
-        sNowCount[bg] = 0;
+    GpuList *l = &gGpuList;
+    if (sRecLine != line - 1 || sRecOver)
+        return 0;
+    // Each must be a background's piece ending on the line before, whose
+    // next row is in the same row of tiles (decoded with the one before)
+    for (int i = 0; i < sRecN; i++) {
+        const GpuQuad *q = &l->quads[sRec[i]];
+        if (q->tex > GTEX_BG3 || q->dy + q->h != line || ((q->sy + q->h) & 7) == 0)
+            return 0;
     }
+    for (int i = 0; i < sRecN; i++) {
+        GpuQuad *q = &l->quads[sRec[i]];
+        q->h++;
+        if (q->dx >= 0 && q->dx < 512 && sDxQuad[q->tex - GTEX_BG0][q->dx] == sRec[i])
+            sDxStamp[q->tex - GTEX_BG0][q->dx] = l->frame << 10 | (uint32_t)line;
+    }
+    sRecLine = line;
+    return 1;
 }
 
 void GpuList_BgLine(int line, int bg, uint16_t key, int flags, int y, int x0, int wPx, int xa, int xb)
 {
-    StartLine(line, bg);
     int x = x0;
     for (int sx = xa; sx < xb;) {
         int n = wPx - x;
@@ -112,24 +137,18 @@ void GpuList_BgLine(int line, int bg, uint16_t key, int flags, int y, int x0, in
 void GpuList_StripLine(int line, int bg, uint16_t key, int flags, const uint16_t *px, int xa, int xb)
 {
     GpuList *l = &gGpuList;
-    StartLine(line, bg);
     if (xb <= xa)
         return;
     // One strip row per layer and line (each of its pieces at its own x)
-    int row = -1;
-    for (int i = 0; i < sNowCount[bg]; i++) {
-        const GpuQuad *q = &l->quads[sNow[bg][i]];
-        if (q->tex == GTEX_STRIP && q->dy + q->h - 1 == line) {
-            row = q->sy + q->h - 1;
-            break;
-        }
-    }
+    int row = sStripLine[bg] == line ? sStripRow[bg] : -1;
     if (row < 0) {
         if (l->stripRows >= GPU_STRIP_ROWS) {
             l->full = 2;
             return;
         }
         row = l->stripRows++;
+        sStripLine[bg] = line;
+        sStripRow[bg] = row;
     }
     memcpy(&gGpuStrip[row][xa], &px[xa], (xb - xa) * sizeof(uint16_t));
     Add(line, bg, GTEX_STRIP, key, flags, xa, xb - xa, xa, row);

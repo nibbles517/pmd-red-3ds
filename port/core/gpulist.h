@@ -111,6 +111,10 @@ void Port_GpuListCounts(uint32_t *listed, uint32_t why[GPU_WHY_COUNT]); // (fram
 // row y, from column x0 at screen x xa (wrapping at the map's width wPx);
 // key: its place in front; flags: GQ_BLEND, GQ_SECOND.
 void GpuList_BgLine(int line, int bg, uint16_t key, int flags, int y, int x0, int wPx, int xa, int xb);
+// Line `line` is the line before's again, a row further down each
+// background (frame.c: its registers and windows the same): the line
+// before's rectangles made a line taller. 0: not possible (described anew).
+int GpuList_RepeatLine(int line);
 // ... or its pixels (px: the line's, screen x 0 on), xa..xb-1 of them
 void GpuList_StripLine(int line, int bg, uint16_t key, int flags, const uint16_t *px, int xa, int xb);
 // A sprite at (x, y), w x h, whose look is `look` (its tiles, size, colours,
