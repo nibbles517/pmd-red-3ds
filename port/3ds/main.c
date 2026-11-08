@@ -1113,17 +1113,17 @@ static void GpuWaitForSwap(gfxScreen_t screen)
     if (sGpuCopiedTo[screen] == NULL)
         return;
     u64 giveUp = svcGetSystemTick() + SYSCLOCK_ARM11 / 30; // (2 frames: a swap asked for comes at the next VBlank, or not at all)
-    while ((gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL) == sGpuCopiedTo[screen]
-            || gspIsPresentPending(screen))
-           && svcGetSystemTick() < giveUp)
+    // (C3D_FrameBegin waited for the last frame's copies, and citro3d asks
+    // for each copied screen's swap as its copy ends: only a swap still
+    // pending is waited for. Waiting for the buffer to change too waited the
+    // whole time at one change of map every run, the second screen's swap
+    // never asked for.)
+    while (gspIsPresentPending(screen) && svcGetSystemTick() < giveUp)
         gspWaitForAnyEvent();
     if (svcGetSystemTick() >= giveUp) {
         static int sLogged;
         if (sLogged++ < 20)
-            Backend_Log("swap wait gave up: %s screen, %s%s", screen == GFX_TOP ? "top" : "bottom",
-                        gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL) == sGpuCopiedTo[screen]
-                            ? "drawing buffer still the one last drawn" : "drawing buffer changed",
-                        gspIsPresentPending(screen) ? ", present still pending" : "");
+            Backend_Log("swap wait gave up: %s screen", screen == GFX_TOP ? "top" : "bottom");
     }
     sGpuCopiedTo[screen] = NULL;
 }
@@ -1490,6 +1490,13 @@ void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int o
     sGpuMain.dirty = true;
     sGpuMain.x = x; sGpuMain.y = y; sGpuMain.w = w; sGpuMain.h = h;
     sGpuMain.srcW = 0; // (the picture texture no longer holds what is shown)
+    // The end of a fade out (frame.c: an empty list faded to black): on the
+    // screen now, before the second screen's picture (a new map's can take
+    // 50 ms) and whatever loading the game does next, so the fade doesn't
+    // hang on its last dim frame
+    const GpuList *l = sGlList;
+    if (l->quadCount == 0 && l->fadeOn && l->fade.mul == 0 && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]))
+        GpuDrawFrame();
     Part(T_OUT);
     PresentSub(); // (times T_SUB and T_SUBOUT)
 }

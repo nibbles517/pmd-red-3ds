@@ -268,6 +268,30 @@ static void LoadWide(const WideState *w)
 // Drawing the visible lines here, when the game next waits, keeps that
 // ordering; drawing them before returning would delay those writes by a frame
 // while palettes and OAM (copied in the VBlank handler) stay on time.
+
+// The picture is black: every palette entry the last listed frame showed
+// is (the end of a fade out: the game leaves a few entries it doesn't fade,
+// the text box's, unshown), the backdrop too, and no brightening (blending
+// black with black stays black); not forced blank. What the next frames
+// show is not known before they are described, so at most 3 frames in a row
+// are taken as black this way.
+static int sLastListed, sBlackRun;
+static int PictureBlack(void)
+{
+    if (!sLastListed || sBlackRun >= 3)
+        return 0;
+    if (R16(0x00) & 0x80)
+        return 0;
+    if (((R16(0x50) >> 6) & 3) == 2)
+        return 0;
+    const uint16_t *p = (const uint16_t *)gPortPltt;
+    uint32_t used = gGpuList.usedBanks | 1; // (the backdrop: entry 0)
+    for (int i = 0; i < 512; i++)
+        if (p[i] && ((used >> (i >> 4)) & 1) && ((i & 15) || i == 0))
+            return 0;
+    return 1;
+}
+
 static void RunFrame(void)
 {
     Backend_Mark(PORT_MARK_FRAME_START, 0);
@@ -312,6 +336,15 @@ static void RunFrame(void)
     if (mode != sViewMode || SCREEN_W != sViewW)
         skip = 0; // a new view is drawn at once
     sSkipped = skip ? sSkipped + 1 : 0;
+    // A black picture (the end of a fade out: every palette entry black,
+    // no brightening): with the GPU drawing, an empty list faded to black,
+    // drawn at once (Backend_PresentList), instead of describing a frame
+    // nothing of which shows (the next map's tiles, loaded while the screen
+    // is black, are decoded when it fades in)
+    int black = !skip && mode == sViewMode && SCREEN_W == sViewW && PictureBlack() && Backend_GpuListMode() == 3;
+    sBlackRun = black ? sBlackRun + 1 : 0;
+    if (black)
+        skip = 1; // (not drawn: below)
 
     sInFrame = 1;
     if (mode != sViewMode || SCREEN_W != sViewW) {
@@ -362,6 +395,8 @@ static void RunFrame(void)
         }
         Dma_HBlank();
     }
+    if (listMode)
+        sLastListed = listMode == 3 && listOk;
     if (listMode) {
         if (mode == VIEW_GBA)
             ListFrameDone(listMode, listOk, lines, sFrame, GBA_W);
@@ -370,7 +405,7 @@ static void RunFrame(void)
         else
             ListFrameDone(listMode, listOk, lines, &sFrame[NARROW_OY * SCREEN_W + NARROW_OX], SCREEN_W);
     }
-    Backend_Mark(PORT_MARK_DRAWN, skip);
+    Backend_Mark(PORT_MARK_DRAWN, skip && !black);
     LoadWide(&live); // the game's again
     sLatched = live;
     sLatchValid = 1;
@@ -381,7 +416,19 @@ static void RunFrame(void)
         sShown = sFrame;
         sFrame = t;
     }
-    if (listMode == 3 && listOk) { // the backend draws the list (on the GPU)
+    if (black) {
+        GpuList_Begin(wide ? SCREEN_W : GBA_W, lines); // (no rectangles: the backdrop, faded to black)
+        gGpuList.fadeOn = 1;
+        gGpuList.fade.mul = 0;
+        memset(gGpuList.fade.add, 0, sizeof(gGpuList.fade.add));
+        if (mode == VIEW_GBA)
+            Backend_PresentList(&gGpuList, GBA_W, GBA_H, 0, 0);
+        else if (wide)
+            Backend_PresentList(&gGpuList, SCREEN_W, SCREEN_H, 0, 0);
+        else
+            Backend_PresentList(&gGpuList, SCREEN_W, SCREEN_H, NARROW_OX, NARROW_OY);
+    }
+    else if (listMode == 3 && listOk) { // the backend draws the list (on the GPU)
         if (mode == VIEW_GBA)
             Backend_PresentList(&gGpuList, GBA_W, GBA_H, 0, 0);
         else if (wide)
@@ -393,7 +440,7 @@ static void RunFrame(void)
         Backend_Present(skip ? NULL : sShown, GBA_W, GBA_H);
     else
         Backend_Present(skip ? NULL : sShown, SCREEN_W, SCREEN_H);
-    Backend_Mark(PORT_MARK_PRESENTED, skip);
+    Backend_Mark(PORT_MARK_PRESENTED, skip && !black);
 
     // Lines 160-227: VBlank.
     SetLine(160);
@@ -406,7 +453,7 @@ static void RunFrame(void)
     sInFrame = 0;
     sVirtualLine = 160; // the game resumes at the start of the next VBlank
     Sound_EndFrame();
-    Backend_Mark(PORT_MARK_VBLANK_DONE, skip);
+    Backend_Mark(PORT_MARK_VBLANK_DONE, skip && !black);
     Backend_EndFrame();
     UpdateKeys();
     sFrames++;

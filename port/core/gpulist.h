@@ -80,6 +80,7 @@ typedef struct {
     int fadeOn;        // (the fade isn't none)
     int palette;       // GPU_PAL_* (the meter)
     uint16_t objBanks; // the OBJ palette banks the sprites use (bit n: bank n)
+    uint32_t usedBanks;// the palette banks the frame shows (bits 0-15 BG, 16-31 OBJ: GpuList_Palette, when the palettes changed)
     int quadCount;
     GpuQuad quads[GPU_MAX_QUADS];
     int stripRows;
