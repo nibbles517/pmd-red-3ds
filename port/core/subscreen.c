@@ -1700,6 +1700,12 @@ static s32 TitleQuickSaveDungeon(void)
 
 static bool8 sWorldMapChanged;
 
+// The world map made for a new place while the second screen was black
+// (not shown yet: out still holds the old one); the screen coming back from
+// black (a map still being made is finished at once: not shown half made,
+// nor the old place's)
+static bool8 sMapNewPicture, sMapFinishNow;
+
 static bool8 DrawWorldMap(void)
 {
     // The map only changes with the place, so it is drawn once per place;
@@ -1778,7 +1784,7 @@ static bool8 DrawWorldMap(void)
         sWaterBox[0] = W; sWaterBox[1] = H; sWaterBox[2] = 0; sWaterBox[3] = 0;
     }
     if (sStep >= 0) {
-        int all = !wasShown, scanEnd = H + 1 + (H + SCAN_STEP_ROWS - 1) / SCAN_STEP_ROWS;
+        int all = !wasShown || sMapFinishNow, scanEnd = H + 1 + (H + SCAN_STEP_ROWS - 1) / SCAN_STEP_ROWS;
         sOut = sCache;
         do {
             if (sStep < H) { // the map's rows
@@ -1816,6 +1822,7 @@ static bool8 DrawWorldMap(void)
         sCachedArea = sStepArea;
         sCachedW = sStepW;
         sWorldMapChanged = TRUE;
+        sMapNewPicture = TRUE; // (until out has it)
     }
     if (sWorldMapChanged) { // all of it (the marker does not move)
         sStats.map++;
@@ -2076,6 +2083,22 @@ bool Port_RenderSubScreen(u16 *out)
         brightness = (brightness < 0 ? 0x100 : brightness) * enabled >> 8;
     if (brightness < 0 || brightness > 0x100)
         brightness = 0x100;
+    // While black, a new place's world map is made (a part a frame); coming
+    // back, what's left of it at once
+    static bool8 sWasBlack;
+    if (brightness == 0) {
+        if (gDungeon == NULL) {
+            sMapFinishNow = FALSE;
+            u16 *saved = sOut;
+            DrawWorldMap();
+            sOut = saved;
+        }
+        sWasBlack = TRUE;
+    }
+    else {
+        sMapFinishNow = sWasBlack;
+        sWasBlack = FALSE;
+    }
     if (sFadeByBackend) { // dimmed by the backend: drawn at full brightness (not at all while black)
         sShownBrightness = brightness;
         if (brightness == 0 && sOutBrightness == 0x100)
@@ -2111,6 +2134,11 @@ bool Port_RenderSubScreen(u16 *out)
             return FALSE;
         }
         drawn = sWorldMapChanged; // (it marks what it drew)
+        if (sMapNewPicture) { // (made while black: all of it to out)
+            drawn = TRUE;
+            DirtyAll();
+        }
+        sMapNewPicture = FALSE;
     }
     if (!drawn && brightness == sOutBrightness)
         return TRUE; // out still holds this picture
