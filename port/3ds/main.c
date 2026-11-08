@@ -315,10 +315,6 @@ static void PresentDs(const uint16_t *frame, int frameW, int frameH, uint16_t *f
 
 #define TEX_W 512 // the textures: wide and high enough for 320x240
 #define TEX_H 256
-#define TEX_TRANSFER_FLAGS                                                                  \
-    (GX_TRANSFER_FLIP_VERT(1) | GX_TRANSFER_OUT_TILED(1) | GX_TRANSFER_RAW_COPY(0) |        \
-     GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB565) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) | \
-     GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO))
 #define SCREEN_TRANSFER_FLAGS                                                               \
     (GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(0) | GX_TRANSFER_RAW_COPY(0) |        \
      GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGBA8) | GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) | \
@@ -326,7 +322,6 @@ static void PresentDs(const uint16_t *frame, int frameW, int frameH, uint16_t *f
 
 typedef struct {
     C3D_Tex tex;
-    uint16_t *stage; // the converted picture, TEX_W pixels a row (linear memory)
     bool shown;      // on its screen
     bool dirty;      // changed since it was last drawn (new picture, place or setting)
     unsigned level;  // the fade level it was last drawn with
@@ -345,12 +340,21 @@ static bool sSubModeIsPicture(void);
 static void GpuListInit(void);
 static void GlBench(void);
 
+// Texels x, x + 1 of a row of an 8x8 tile, in Z order: their place (32-bit words)
+static uint8_t sPicPair[8][4];
+
 static bool GpuPictureInit(GpuPicture *p)
 {
-    p->stage = linearAlloc(TEX_W * TEX_H * 2);
-    if (p->stage == NULL || !C3D_TexInitVRAM(&p->tex, TEX_W, TEX_H, GPU_RGB565))
+    for (int y = 0; y < 8; y++)
+        for (int k = 0; k < 4; k++) {
+            int x = 2 * k;
+            sPicPair[y][k] = (uint8_t)((((x & 1) | ((y & 1) << 1) | ((x & 2) << 1) | ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3))) >> 1);
+        }
+    // (in linear memory: the CPU writes it in the GPU's layout, GpuWriteTiled)
+    if (!C3D_TexInit(&p->tex, TEX_W, TEX_H, GPU_RGB565))
         return false;
-    memset(p->stage, 0, TEX_W * TEX_H * 2);
+    memset(p->tex.data, 0, TEX_W * TEX_H * 2);
+    GSPGPU_FlushDataCache(p->tex.data, TEX_W * TEX_H * 2);
     C3D_TexSetFilter(&p->tex, GPU_NEAREST, GPU_NEAREST); // (as the CPU scaled: whole pixels)
     C3D_TexSetWrap(&p->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     return true;
@@ -400,18 +404,6 @@ static void GpuInit(void)
     Backend_Log("video: GPU");
 }
 
-// GBA BGR555 to RGB565, two pixels at a time (as ToRgb565)
-static void GpuConvert(uint16_t *dst, const uint16_t *src, int w, int y0, int y1)
-{
-    for (int y = y0; y < y1; y++) {
-        const uint32_t *s = (const uint32_t *)(src + y * w);
-        uint32_t *d = (uint32_t *)(dst + y * TEX_W);
-        for (int x = 0; x < w / 2; x++) {
-            uint32_t c = s[x];
-            d[x] = ((c & 0x001F001F) << 11) | ((c & 0x03E003E0) << 1) | ((c >> 4) & 0x00200020) | ((c >> 10) & 0x001F001F);
-        }
-    }
-}
 
 // The CPU's writes to linear memory, out of its cache for the GPU. Through
 // the kernel, on this core: GSPGPU_FlushDataCache asks the GSP service, on
@@ -426,6 +418,41 @@ static void GlFlushRange(const void *p, u32 size)
         GSPGPU_FlushDataCache(p, size);
 }
 
+// Rows y0 .. y1 - 1 of a picture (BGR555, w pixels a row, h rows) into its
+// texture, written by the CPU straight in the GPU's layout: 8x8 tiles in Z
+// order, the image's first row at the texture's last (v = 0 at the top, as
+// the display transfer that did this before, with its vertical flip). Whole
+// tile rows (rows past the picture: black); then out of the CPU's cache.
+static void GpuWriteTiled(GpuPicture *p, const uint16_t *src, int w, int h, int y0, int y1)
+{
+    uint16_t *tex = (uint16_t *)p->tex.data;
+    int ty0 = y0 >> 3, ty1 = (y1 + 7) >> 3, tw = w >> 3;
+    for (int ty = ty0; ty < ty1; ty++) {
+        uint16_t *band = tex + (TEX_H / 8 - 1 - ty) * (TEX_W / 8) * 64;
+        for (int tx = 0; tx < tw; tx++) {
+            uint32_t buf[32];
+            for (int r = 0; r < 8; r++) {
+                int y = ty * 8 + r;
+                const uint8_t *m = sPicPair[7 - r];
+                if (y >= h) {
+                    for (int k = 0; k < 4; k++)
+                        buf[m[k]] = 0;
+                    continue;
+                }
+                const uint16_t *s2 = src + y * w + tx * 8;
+                for (int k = 0; k < 4; k++) {
+                    uint32_t c = s2[2 * k] | ((uint32_t)s2[2 * k + 1] << 16);
+                    buf[m[k]] = ((c & 0x001F001F) << 11) | ((c & 0x03E003E0) << 1) | ((c >> 4) & 0x00200020) | ((c >> 10) & 0x001F001F);
+                }
+            }
+            memcpy(band + tx * 64, buf, sizeof(buf));
+        }
+    }
+    // (memory order: the image's rows bottom first)
+    uint16_t *lo = tex + (TEX_H / 8 - ty1) * (TEX_W / 8) * 64;
+    GlFlushRange(lo, (u32)(ty1 - ty0) * (TEX_W / 8) * 64 * 2);
+}
+
 // A picture into its texture, to be shown at (x, y), w x h on its screen.
 // Only its rows y0 .. y1 - 1 changed since the last time (the rest of the
 // converted picture is kept); all of it: 0, frameH.
@@ -434,10 +461,9 @@ static void GpuUpload(GpuPicture *p, const uint16_t *frame, int frameW, int fram
 {
     if (frameW != p->srcW || frameH != p->srcH)
         y0 = 0, y1 = frameH; // (a new size: none of it kept)
-    GpuConvert(p->stage, frame, frameW, y0, y1);
-    GlFlushRange(p->stage + y0 * TEX_W, TEX_W * (y1 - y0) * 2);
-    C3D_SyncDisplayTransfer((u32 *)p->stage, GX_BUFFER_DIM(TEX_W, TEX_H), (u32 *)p->tex.data,
-                            GX_BUFFER_DIM(TEX_W, TEX_H), TEX_TRANSFER_FLAGS);
+    if (frameW != p->srcW) // (a narrower picture: the columns past it cleared)
+        memset(p->tex.data, 0, TEX_W * TEX_H * 2);
+    GpuWriteTiled(p, frame, frameW, frameH, y0, y1);
     p->shown = true;
     p->dirty = true;
     p->x = x; p->y = y; p->w = w; p->h = h;
