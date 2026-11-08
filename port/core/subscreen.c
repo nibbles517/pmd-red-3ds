@@ -1704,7 +1704,7 @@ static bool8 sWorldMapChanged;
 // (not shown yet: out still holds the old one); the screen coming back from
 // black (a map still being made is finished at once: not shown half made,
 // nor the old place's)
-static bool8 sMapNewPicture, sMapFinishNow;
+static bool8 sMapNewPicture, sMapFinishNow, sMapBuilding;
 
 static bool8 DrawWorldMap(void)
 {
@@ -1728,8 +1728,10 @@ static bool8 DrawWorldMap(void)
     DungeonPos areaPos;
     u8 name[128];
 
-    if (dungeon < 0)
+    if (dungeon < 0) {
+        sMapBuilding = FALSE;
         return FALSE;
+    }
     // Inside a friend area: that area, where the friend areas map shows it.
     if (quickSave < 0 && place == GROUND_PLACE_FRIEND_AREAS) {
         area = MapIdToFriendAreaId(GetScriptVarValue(NULL, GROUND_ENTER));
@@ -1815,6 +1817,7 @@ static bool8 DrawWorldMap(void)
             }
         } while (all && sStep < scanEnd);
         sOut = sOutFrame;
+        sMapBuilding = sStep < scanEnd;
         if (sStep < scanEnd)
             return TRUE; // (out keeps the old place's map: nothing new yet)
         sStep = -1;
@@ -1894,6 +1897,21 @@ static s32 PlaceDungeon(s32 place);
 static s32 TitleQuickSaveDungeon(void);
 static bool8 PlaceOnMap(void) { return TitleQuickSaveDungeon() >= 0 || PlaceDungeon(GetScriptVarValue(NULL, GROUND_PLACE)) >= 0; }
 
+// Where the world map shows the player: the ground place, and in a friend
+// area that area (as DrawWorldMap tells them apart)
+static s32 PlaceKey(void)
+{
+    s32 place = GetScriptVarValue(NULL, GROUND_PLACE), area = FRIEND_AREA_NONE;
+    if (place == GROUND_PLACE_FRIEND_AREAS)
+        area = MapIdToFriendAreaId(GetScriptVarValue(NULL, GROUND_ENTER));
+    return place * 1024 + area;
+}
+// A change of place: where the player was when it began (the second screen
+// stays black coming back until the place is another and its map is made,
+// or the ground has faded all the way in); the map being made (DrawWorldMap)
+static s32 sTransKey;
+static bool8 sTransKeyValid;
+
 // Set by the game (main_loops.c) for the port: the ground is running; the
 // title menu is up.
 bool8 gPortGroundRunning, gPortTitleMenu;
@@ -1913,6 +1931,10 @@ static int TransitionBrightness(void)
 
     switch (sTransition) {
         case TR_NONE:
+            if (friendMap || request == 1) {
+                sTransKey = PlaceKey();
+                sTransKeyValid = TRUE;
+            }
             if (friendMap)
                 sTransition = TR_FRIEND_MAP;
             else if (request == 1)
@@ -1978,8 +2000,14 @@ static int TransitionBrightness(void)
         }
         if (GroundLevel() >= 0x100 && Port_GroundExitRequest() == 0) {
             sTransition = TR_NONE;
+            sTransKeyValid = FALSE;
             return -1;
         }
+        // Black until the new place's map is ready (not the old one shown
+        // fading in, then the new one popping in)
+        if (sTransKeyValid && GroundLevel() < 0x100 && gDungeon == NULL && (PlaceKey() == sTransKey || sMapBuilding))
+            return 0;
+        sTransKeyValid = FALSE;
     }
     return GroundLevel();
 }
