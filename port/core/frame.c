@@ -426,7 +426,7 @@ static void RunFrame(void)
     }
     // Coming out of black (a fade in, a new map: its tiles decoded and sent
     // to the GPU on its first frames, 20-30 ms each on an Old 3DS), the
-    // first 2 frames are described and their textures sent, but the screen
+    // first 4 frames are described and their textures sent, but the screen
     // stays black: the fade then starts from frames that are ready instead
     // of on late ones.
     int hold = 0;
@@ -464,7 +464,7 @@ static void RunFrame(void)
                        || (((R16(0x50) >> 6) & 3) != 2 && BanksBlack(l->usedBanks)); // (not brightened)
         if (nowBlack)
             sHeld = 0;
-        hold = sShowingBlack && !nowBlack && sHeld < 2;
+        hold = sShowingBlack && !nowBlack && sHeld < 4;
         if (hold) {
             sHeld++;
             Backend_UploadList(l);
