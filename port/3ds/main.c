@@ -418,6 +418,7 @@ static void GpuConvert(uint16_t *dst, const uint16_t *src, int w, int y0, int y1
 // has the core, up to the 2 ms its frame's music takes. gpu-gspflush.txt:
 // through GSP again.
 static bool sGspFlush;
+static u64 sGlFrameFlush; // (the slow frame lines: this frame's flushing of the list's textures)
 static void GlFlushRange(const void *p, u32 size)
 {
     if (sGspFlush || R_FAILED(svcFlushProcessDataCache(CUR_PROCESS_HANDLE, (u32)p, size)))
@@ -496,6 +497,7 @@ static const GpuList *sGlList;    // the main screen's picture is this list (els
 static bool sGlUploaded;          // ... its textures written
 static int sGlFrameW, sGlFrameH, sGlOx, sGlOy; // where the list goes in the frame
 static uint16_t sGlMorton[8][8];  // (y, x) in a tile -> its place in the tile
+static uint8_t sGlPair[8][4];     // (y, x / 2) -> the place of texels x, x + 1 (together: Z order) in 32-bit words
 static u64 sGlUploadTicks;        // the meter: writing the textures
 static uint32_t sGlLastListed, sGlLastWhy[GPU_WHY_COUNT];
 
@@ -504,6 +506,9 @@ static void GpuListInit(void)
     for (int y = 0; y < 8; y++)
         for (int x = 0; x < 8; x++)
             sGlMorton[y][x] = (uint16_t)((x & 1) | ((y & 1) << 1) | ((x & 2) << 1) | ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3));
+    for (int y = 0; y < 8; y++)
+        for (int k = 0; k < 4; k++)
+            sGlPair[y][k] = (uint8_t)(sGlMorton[y][2 * k] >> 1);
     sGlFlip = true;
     FILE *flag = fopen(GPU_NOFLIP_FLAG, "r");
     if (flag != NULL) {
@@ -544,6 +549,14 @@ static inline uint16_t To5551(uint16_t c)
     return (uint16_t)(((c & 0x1F) << 11) | ((c & 0x3E0) << 1) | ((c >> 9) & 0x3E) | 1);
 }
 
+// Two pixels at once (the low half: the left one), as To5551
+static inline uint32_t To5551x2(uint32_t p)
+{
+    uint32_t clear = ((p >> 15) & 0x00010001u) * 0xFFFFu; // (bit 15: transparent)
+    uint32_t c = ((p & 0x001F001Fu) << 11) | ((p & 0x03E003E0u) << 1) | ((p >> 9) & 0x003E003Eu) | 0x00010001u;
+    return c & ~clear;
+}
+
 // Texel (x, y) of a list texture (y: the image's row, from its top)
 static inline uint16_t *GlTexel(uint16_t *tex, int x, int y)
 {
@@ -564,8 +577,11 @@ static void GlTouch(int y0, int y1) // (image rows y0 .. y1 - 1)
 }
 static void GlFlush(C3D_Tex *t)
 {
-    if (sGlHi > sGlLo)
+    if (sGlHi > sGlLo) {
+        u64 t0 = svcGetSystemTick();
         GlFlushRange((uint16_t *)t->data + sGlLo * GL_TEX, (sGlHi - sGlLo) * GL_TEX * 2);
+        sGlFrameFlush += svcGetSystemTick() - t0;
+    }
     sGlLo = GL_TEX;
     sGlHi = 0;
 }
@@ -602,7 +618,6 @@ static uint16_t sGlTileUse[4][64][64];
 static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
 {
     uint32_t buf32[32];
-    uint16_t *buf = (uint16_t *)buf32;
     int x0 = tx * 8, y0 = ty * 8;
     if (c->indexOk) { // (colour numbers: 0 is clear, as their pixels say)
         const uint8_t *idx = &c->idx[y0 * BGC_STRIDE + x0];
@@ -610,11 +625,11 @@ static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
         int shift = c->color256 ? 4 : 0;
         unsigned use = 0;
         for (int r = 0; r < 8; r++, idx += BGC_STRIDE) {
-            const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
-            for (int x = 0; x < 8; x++) {
-                unsigned n = idx[x];
-                buf[m[x]] = lut[n];
-                use |= (1u << ((n >> shift) & 15)) & -(n != 0);
+            const uint8_t *m = sGlPair[sGlFlip ? 7 - r : r];
+            for (int k = 0; k < 4; k++) {
+                unsigned a = idx[2 * k], b = idx[2 * k + 1];
+                buf32[m[k]] = lut[a] | ((uint32_t)lut[b] << 16);
+                use |= ((1u << ((a >> shift) & 15)) & -(a != 0)) | ((1u << ((b >> shift) & 15)) & -(b != 0));
             }
         }
         if (!c->color256)
@@ -624,9 +639,9 @@ static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
     else {
         const uint16_t *px = &c->px[y0 * BGC_STRIDE + x0];
         for (int r = 0; r < 8; r++, px += BGC_STRIDE) {
-            const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
-            for (int x = 0; x < 8; x++)
-                buf[m[x]] = To5551(px[x]);
+            const uint8_t *m = sGlPair[sGlFlip ? 7 - r : r];
+            for (int k = 0; k < 4; k++)
+                buf32[m[k]] = To5551x2(px[2 * k] | ((uint32_t)px[2 * k + 1] << 16));
         }
     }
     memcpy(GlTile(tex, tx, ty), buf32, sizeof(buf32));
@@ -640,6 +655,7 @@ static void GpuListUpload(const GpuList *l)
 {
     u64 start = svcGetSystemTick();
     sGlFrameTiles = 0;
+    sGlFrameFlush = 0;
 
     // The base palette's colours; the BG and OBJ banks whose colours changed
     // (and which BG colours: a palette animation changes a few of a bank's)
@@ -750,12 +766,11 @@ static void GpuListUpload(const GpuList *l)
             for (uint32_t bits = stripTiles[ty][w]; bits; bits &= bits - 1) {
                 int tx = w * 32 + __builtin_ctz(bits);
                 uint32_t buf32[32];
-                uint16_t *buf = (uint16_t *)buf32;
-                for (int r = 0; r < 8; r++) {
+                            for (int r = 0; r < 8; r++) {
                     const uint16_t *src = &gGpuStrip[ty * 8 + r][tx * 8];
-                    const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
-                    for (int x = 0; x < 8; x++)
-                        buf[m[x]] = To5551(src[x]);
+                    const uint8_t *m = sGlPair[sGlFlip ? 7 - r : r];
+                    for (int k = 0; k < 4; k++)
+                        buf32[m[k]] = To5551x2(src[2 * k] | ((uint32_t)src[2 * k + 1] << 16));
                 }
                 memcpy(GlTile(strip, tx, ty), buf32, sizeof(buf32));
             }
@@ -780,12 +795,15 @@ static void GpuListUpload(const GpuList *l)
         for (int ty = o->y >> 3; ty < (o->y + o->h) >> 3; ty++) // (slots are whole tiles)
             for (int tx = o->x >> 3; tx < (o->x + o->w) >> 3; tx++) {
                 uint32_t buf32[32];
-                uint16_t *buf = (uint16_t *)buf32;
-                for (int r = 0; r < 8; r++) {
+                            for (int r = 0; r < 8; r++) {
                     const uint16_t *src = &gGpuObj[ty * 8 + r][tx * 8];
-                    const uint16_t *m = sGlMorton[sGlFlip ? 7 - r : r];
-                    for (int x = 0; x < 8; x++)
-                        buf[m[x]] = (src[x] & 0x8000) ? 0 : sGlLut[256 + (src[x] & 0xFF)];
+                    const uint8_t *m = sGlPair[sGlFlip ? 7 - r : r];
+                    for (int k = 0; k < 4; k++) {
+                        unsigned a = src[2 * k], b = src[2 * k + 1];
+                        uint32_t ta = (a & 0x8000) ? 0 : sGlLut[256 + (a & 0xFF)];
+                        uint32_t tb = (b & 0x8000) ? 0 : sGlLut[256 + (b & 0xFF)];
+                        buf32[m[k]] = ta | (tb << 16);
+                    }
                 }
                 memcpy(GlTile(obj, tx, ty), buf32, sizeof(buf32));
             }
@@ -1182,6 +1200,7 @@ static void PresentSub(void)
         full = 1;
         gfxSetScreenFormat(screen, GSP_RGB565_OES);
         gfxSetDoubleBuffering(screen, true);
+        sGpuCopiedTo[screen] = NULL; // (its buffers set up again: no swap of the last copy to wait for)
         // both buffers, so the border stays black (the GPU clears its own:
         // and CPU writes left in the cache could later land over its picture)
         for (int i = 0; i < 2 && !sGpu; i++) {
@@ -1284,8 +1303,9 @@ static void MeterEndFrame(void)
                 n += snprintf(line + n, lineSize - n, " (mul %d add %d,%d,%d)", sGlList->fade.mul,
                               sGlList->fade.add[0], sGlList->fade.add[1], sGlList->fade.add[2]);
             if (sGlList != NULL && n < lineSize)
-                snprintf(line + n, lineSize - n, " | quads %d tiles %d: bg %.1f strips %.1f obj %.1f",
-                         sGlList->quadCount, sGlFrameTiles, sGlFrameBg * ms, sGlFrameStrip * ms, sGlFrameObj * ms);
+                snprintf(line + n, lineSize - n, " | quads %d tiles %d: bg %.1f strips %.1f obj %.1f (cache flush %.1f)",
+                         sGlList->quadCount, sGlFrameTiles, sGlFrameBg * ms, sGlFrameStrip * ms, sGlFrameObj * ms,
+                         sGlFrameFlush * ms);
             slowCount++;
         }
         lastNow = now;

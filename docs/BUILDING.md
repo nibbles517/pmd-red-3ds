@@ -98,7 +98,8 @@ frames drawn came from the drawing list (`list=listed/drawn`), how long
 writing its textures took (`up`), and why the other frames were drawn by the
 CPU (`window=`, `effect=`, `obj-semi=`, ...: docs/GPU.md).
 A frame that takes over 20 ms gets its own `slow frame` line (up to 20 every
-5 seconds): where its time went, its texture writing (`up`), and whether it
+5 seconds): where its time went, its texture writing (`up`: backgrounds,
+strips and sprites, and how much of it was flushing the CPU's cache), and whether it
 was a GPU frame in a fade (`list fade`, with the fade), a palette change the
 GPU couldn't take as a fade (`list palette-change`) or a CPU frame
 (`cpu-picture`).
