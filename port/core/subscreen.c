@@ -1180,7 +1180,8 @@ static inline u16 MapPixel(int i)
     return sMapBlend ? AddColors(sMapPal[sMapIdx[i]], sMapUnder[i]) : sMapPal[sMapIdx[i]];
 }
 
-static void DrawMapArea(int cx, int cy)
+// The part of the map around (cx, cy) the screen shows (DrawMapRows draws it)
+static void SetMapView(int cx, int cy)
 {
     int left = cx - W / 2, top = cy - H / 2;
     if (left < 0) left = 0;
@@ -1189,8 +1190,12 @@ static void DrawMapArea(int cx, int cy)
     if (top > MAP_H - H) top = MAP_H - H;
     sViewLeft = left;
     sViewTop = top;
+}
 
-    for (int y = 0; y < H; y++) {
+static void DrawMapRows(int y0, int y1)
+{
+    int left = sViewLeft, top = sViewTop;
+    for (int y = y0; y < y1; y++) {
         int my = top + y;
         for (int x = 0; x < W; x++) {
             int mx = left + x;
@@ -1726,9 +1731,20 @@ static bool8 DrawWorldMap(void)
             area = FRIEND_AREA_NONE;
     }
     bool8 newColors = LoadWindowPalette();
+    bool8 wasShown = sLayoutDrawn == -2 && sCachedPlace != -1; // (out holds a map: kept while a new one is made)
     sWorldMapChanged = sLayoutDrawn != -2;
     sLayoutDrawn = -2;
-    if (place != sCachedPlace || area != sCachedArea || W != sCachedW || newColors) {
+    // A new place: its map made a part a frame (MAP_STEP_ROWS rows, then the
+    // name box, then the water's pixels found), the old one shown meanwhile:
+    // all at once it took ~48 ms on an Old 3DS, on the frame a fade out
+    // ends (the music stuttered with it). All at once when nothing is shown.
+    enum { MAP_STEP_ROWS = 24, SCAN_STEP_ROWS = 60 };
+    static int sStep = -1; // the next row to make (H: the name box; H + 1 ...: finding the water), -1: none
+    static s32 sStepPlace, sStepArea, sStepW;
+    static u8 sStepName[128];
+    if (sStep >= 0 && (place != sStepPlace || area != sStepArea || W != sStepW || newColors))
+        sStep = -1; // (somewhere else again: started over)
+    if (sStep < 0 && (place != sCachedPlace || area != sCachedArea || W != sCachedW || newColors)) {
         int set = dungeon == PLACE_TOWN ? 0 : 1;
         int x = dungeon == PLACE_TOWN ? TEAM_BASE_X : gDungeonCoordinates[dungeon].x;
         int y = dungeon == PLACE_TOWN ? TEAM_BASE_Y : gDungeonCoordinates[dungeon].y;
@@ -1744,8 +1760,7 @@ static bool8 DrawWorldMap(void)
         if (!sSpritesLoaded && !LoadMapSprites())
             return FALSE;
         sSpritesLoaded = TRUE;
-        sOut = sCache;
-        DrawMapArea(x, y);
+        SetMapView(x, y);
         sDotX = x - sViewLeft;
         sDotY = y - sViewTop;
         if (area != FRIEND_AREA_NONE)
@@ -1754,27 +1769,52 @@ static bool8 DrawWorldMap(void)
             FormatString(GetDungeonName1(quickSave), name, name + sizeof(name) - 1, 0);
         else
             FormatString(GetGroundPlaceName(place), name, name + sizeof(name) - 1, 0);
-        DrawNameBox(name);
-        // the water's pixels that the name box didn't cover
+        memcpy(sStepName, name, sizeof(sStepName));
+        sStepPlace = place;
+        sStepArea = area;
+        sStepW = W;
+        sStep = 0;
         sWaterCount = 0;
         sWaterBox[0] = W; sWaterBox[1] = H; sWaterBox[2] = 0; sWaterBox[3] = 0;
-        for (int i = 0; i < W * H; i++) {
-            if (sMapIdx[i] < MAP_ANIM_FIRST || sMapIdx[i] >= MAP_ANIM_FIRST + MAP_ANIM_COLORS
-                || sCache[i] != MapPixel(i)) {
-                sMapIdx[i] = 0;
-                continue;
+    }
+    if (sStep >= 0) {
+        int all = !wasShown, scanEnd = H + 1 + (H + SCAN_STEP_ROWS - 1) / SCAN_STEP_ROWS;
+        sOut = sCache;
+        do {
+            if (sStep < H) { // the map's rows
+                int y1 = all || sStep + MAP_STEP_ROWS > H ? H : sStep + MAP_STEP_ROWS;
+                DrawMapRows(sStep, y1);
+                sStep = y1;
             }
-            int x = i % W, y = i / W;
-            sWater[sWaterCount++] = i;
-            if (x < sWaterBox[0]) sWaterBox[0] = x;
-            if (y < sWaterBox[1]) sWaterBox[1] = y;
-            if (x >= sWaterBox[2]) sWaterBox[2] = x + 1;
-            if (y >= sWaterBox[3]) sWaterBox[3] = y + 1;
-        }
-        sCachedPlace = place;
-        sCachedArea = area;
-        sCachedW = W;
+            else if (sStep == H) { // the name box
+                DrawNameBox(sStepName);
+                sStep++;
+            }
+            else { // the water's pixels that the name box didn't cover
+                int y0 = (sStep - H - 1) * SCAN_STEP_ROWS, y1 = y0 + SCAN_STEP_ROWS > H ? H : y0 + SCAN_STEP_ROWS;
+                for (int i = y0 * W; i < y1 * W; i++) {
+                    if (sMapIdx[i] < MAP_ANIM_FIRST || sMapIdx[i] >= MAP_ANIM_FIRST + MAP_ANIM_COLORS
+                        || sCache[i] != MapPixel(i)) {
+                        sMapIdx[i] = 0;
+                        continue;
+                    }
+                    int x = i % W, y = i / W;
+                    sWater[sWaterCount++] = i;
+                    if (x < sWaterBox[0]) sWaterBox[0] = x;
+                    if (y < sWaterBox[1]) sWaterBox[1] = y;
+                    if (x >= sWaterBox[2]) sWaterBox[2] = x + 1;
+                    if (y >= sWaterBox[3]) sWaterBox[3] = y + 1;
+                }
+                sStep++;
+            }
+        } while (all && sStep < scanEnd);
         sOut = sOutFrame;
+        if (sStep < scanEnd)
+            return TRUE; // (out keeps the old place's map: nothing new yet)
+        sStep = -1;
+        sCachedPlace = sStepPlace;
+        sCachedArea = sStepArea;
+        sCachedW = sStepW;
         sWorldMapChanged = TRUE;
     }
     if (sWorldMapChanged) { // all of it (the marker does not move)
