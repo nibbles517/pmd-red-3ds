@@ -768,7 +768,24 @@ static void GpuListUpload(const GpuList *l)
     // gpuDirty, not spread.)
     static uint32_t sGlPalPending[4][64][2];
     static bool sGlPalAny[4];
-    bool spread = l->palette != GPU_PAL_OTHER;
+    // (Not when the base colours change meaning: from or to the palettes as
+    // they are (GPU_PAL_OTHER: a fade the GPU can't do, the dungeon's
+    // brightness at times), or after a black or held frame: every tile
+    // changes then, and written a part a frame the dungeon's first floor
+    // came in in chunks, some still in the old colours.)
+    static int sGlLastClass = -1;
+    bool spread = l->palette != GPU_PAL_OTHER && sGlLastClass >= 0 && sGlLastClass != GPU_PAL_OTHER;
+    sGlLastClass = (l->quadCount == 0 || sGlNoBudget) ? -1 : l->palette;
+    for (int b = 0; !spread && b < 4; b++) // (tiles still waiting from a palette animation: now, whole)
+        if (sGlPalAny[b]) {
+            for (int ty = 0; ty < 64; ty++)
+                for (int w = 0; w < 2; w++) {
+                    gBgCache[b].gpuDirty[ty][w] |= sGlPalPending[b][ty][w];
+                    sGlPalPending[b][ty][w] = 0;
+                }
+            sGlPalAny[b] = false;
+            gBgCache[b].gpuAny = 1;
+        }
     for (int b = 0; changedBanks && b < 4; b++) {
         BgCache *c = &gBgCache[b];
         if (!c->valid || !c->indexOk)
