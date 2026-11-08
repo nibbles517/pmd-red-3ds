@@ -758,13 +758,16 @@ static void GpuListUpload(const GpuList *l)
     }
     // The tiles using a changed colour: written again when shown (a tile
     // already marked will be written anyway, and its sGlTileUse is old).
-    // A palette animation (the palettes steady otherwise: no fade) can
-    // change hundreds of tiles every few frames (the world map: ~800 every
-    // 6), about 8 microseconds each on an Old 3DS: those are written a part
-    // a frame (sGlPalPending), a tile a frame or two late at most
+    // A palette animation (the base colours changing, steady or under a
+    // fade) can change hundreds of tiles every few frames (the world map:
+    // ~800 every 6; the ground maps: ~575 every 10, also while they fade in
+    // and out, where it was the fades' stutter), a few microseconds each on
+    // an Old 3DS: those are written a part a frame (sGlPalPending), a tile
+    // a frame or two late at most. (A new scene's tiles are decoded again:
+    // gpuDirty, not spread.)
     static uint32_t sGlPalPending[4][64][2];
     static bool sGlPalAny[4];
-    bool spread = l->palette == GPU_PAL_STEADY && !l->fadeOn;
+    bool spread = l->palette != GPU_PAL_OTHER;
     for (int b = 0; changedBanks && b < 4; b++) {
         BgCache *c = &gBgCache[b];
         if (!c->valid || !c->indexOk)
