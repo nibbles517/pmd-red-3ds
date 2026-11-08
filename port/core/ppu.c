@@ -514,11 +514,27 @@ static int RenderTextBg(int bg, int line, uint16_t *out);
 
 // Wide view, gPortTileBg: the background's GBA-sized picture repeated, with
 // one copy in the middle of the screen (full-screen move effects).
+// A tiled background's line found clear from its cache's row (RenderTiledBg):
+// the cache and row (Ppu_ListLine: whether the next line is clear too)
+static BgCache *sTiledClearC;
+static int sTiledClearY;
+
 static int RenderTiledBg(int bg, int line, uint16_t *out)
 {
     static uint16_t gbaLine[GBA_W];
     int gy = ((line - TILE_OY) % GBA_H + GBA_H) % GBA_H;
     int any, list = sListMode;
+    // (its cache's row clear all along, and decoded: nothing to draw, without drawing the line)
+    BgCache *c = &gBgCache[bg];
+    uint16_t cnt = R16(0x08 + bg * 2);
+    if (c->valid && !c->wideMap && !c->edge && c->charBase == ((cnt >> 2) & 3) * 0x4000u
+        && c->screenBase == ((cnt >> 8) & 0x1F) * 0x800u && c->color256 == ((cnt >> 7) & 1) && c->size == ((cnt >> 14) & 3)
+        && !(cnt & 0x40) && !(c->todo[gy >> 3][0] | c->todo[gy >> 3][1]) && !(c->any[gy][0] | c->any[gy][1])) {
+        sTiledClearC = c;
+        sTiledClearY = gy;
+        sLastMask = 0; sLastFull = 0;
+        return 0;
+    }
 
     sWide = 0; sW = GBA_W; sOx = 0; sListMode = 0; // (pixels: repeated below)
     any = RenderTextBg(bg, gy, gbaLine);
@@ -1409,17 +1425,27 @@ int Ppu_ListLine(int line)
     // before again, a row further down (its rectangles a line taller;
     // describing each line took most of the main core's time on a frame)
     static uint8_t sPrevRegs[0x56];
-    static int sPrevLine = -2, sPrevEmpty; // (sPrevEmpty: a layer was clear all along the line before: maybe not this one)
+    static int sPrevLine = -2, sPrevEmpty; // (sPrevEmpty: a layer was clear all along the line before, and may not be on this one)
+    static const BgCache *sClearC[4]; // the layers clear all along the line before: their cache and row (to see this row is too)
+    static int sClearY[4], sClearN;
     int sameWin = line > 0 && memcmp(&key, &sWinKey, sizeof(key)) == 0;
     // (not DISPSTAT, VCOUNT: they change every line, and the picture doesn't follow them)
-    if (sameWin && sPrevLine == line - 1 && !sPrevEmpty && memcmp(sPrevRegs, gPortRegs, 4) == 0
+    int clearOk = !sPrevEmpty;
+    for (int i = 0; clearOk && i < sClearN; i++) { // (a layer clear before: its next row clear all along too)
+        int y2 = sClearY[i] + 1;
+        clearOk = (y2 & 7) != 0 && !(sClearC[i]->any[y2][0] | sClearC[i]->any[y2][1]);
+    }
+    if (sameWin && sPrevLine == line - 1 && clearOk && memcmp(sPrevRegs, gPortRegs, 4) == 0
         && memcmp(sPrevRegs + 8, gPortRegs + 8, sizeof(sPrevRegs) - 8) == 0 && GpuList_RepeatLine(line)) {
         sPrevLine = line;
+        for (int i = 0; i < sClearN; i++)
+            sClearY[i]++;
         return 1;
     }
     memcpy(sPrevRegs, gPortRegs, sizeof(sPrevRegs));
     sPrevLine = line;
     sPrevEmpty = 0;
+    sClearN = 0;
     if (!sameWin) {
         memcpy(&sWinKey, &key, sizeof(key));
         uint8_t winout6;
@@ -1453,6 +1479,7 @@ int Ppu_ListLine(int line)
             continue;
         uint16_t key = GpuKeyBg(R16(0x08 + b * 2) & 3, b);
         sDesc.have = 0;
+        sTiledClearC = NULL;
         sListXa = 0;
         sListStripN = 0;
         sListSide = 0;
@@ -1461,7 +1488,18 @@ int Ppu_ListLine(int line)
         int any = RenderTextBg(b, line, sBg[b]);
         sListMode = 0;
         if (!any) {
-            sPrevEmpty = 1;
+            if (sDesc.have && sClearN < 4) { // (from its cache: whether the next row is clear too can be seen)
+                sClearC[sClearN] = sDesc.c;
+                sClearY[sClearN] = sDesc.y;
+                sClearN++;
+            }
+            else if (sTiledClearC && sClearN < 4) { // (a tiled background, from its cache's row)
+                sClearC[sClearN] = sTiledClearC;
+                sClearY[sClearN] = sTiledClearY;
+                sClearN++;
+            }
+            else
+                sPrevEmpty = 1;
             continue;
         }
         // What the layer's line is made of: a piece of its cache, pixels
