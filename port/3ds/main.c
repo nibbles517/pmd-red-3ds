@@ -343,6 +343,7 @@ static int sProjLoc;
 static GpuPicture sGpuMain, sGpuSub;
 static bool sSubModeIsPicture(void);
 static void GpuListInit(void);
+static void GlBench(void);
 
 static bool GpuPictureInit(GpuPicture *p)
 {
@@ -532,6 +533,7 @@ static void GpuListInit(void)
         C3D_TexSetWrap(all[i], GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     }
     sGlReady = true;
+    GlBench();
     Backend_Log("gpu drawing: ready%s%s", sGlFlip ? "" : " (rows top first: gpu-noflip.txt)",
                 sGspFlush ? " (flushes through GSP: gpu-gspflush.txt)" : "");
 }
@@ -646,6 +648,51 @@ static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
     }
     memcpy(GlTile(tex, tx, ty), buf32, sizeof(buf32));
     GlTouch(y0, y0 + 8);
+}
+
+// Once at start: where writing a background tile's time goes (port.log
+// "gpu bench": per tile, 2048 tiles in screen order, as an upload writes
+// them): all of it; making it without writing the texture; only copying
+// made tiles into the texture; and all of it with the next tiles' colour
+// numbers asked for ahead (PLD)
+static void GlBench(void)
+{
+    static uint32_t made[64][32]; // (64 tiles, in the cache)
+    BgCache *c = &gBgCache[0];
+    uint16_t *tex = (uint16_t *)sGlBg[1].data;
+    double us = 1e6 / SYSCLOCK_ARM11;
+    u64 t[5];
+    for (int pass = 0; pass < 4; pass++) {
+        t[pass] = svcGetSystemTick();
+        for (int i = 0; i < 2048; i++) {
+            int tx = i & 63, ty = (i >> 6) & 63;
+            uint32_t *buf32 = made[i & 63];
+            if (pass != 2) {
+                const uint8_t *idx = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
+                if (pass == 3 && tx < 60)
+                    for (int r = 0; r < 8; r++)
+                        __builtin_prefetch(idx + r * BGC_STRIDE + 32);
+                unsigned use = 0;
+                for (int r = 0; r < 8; r++, idx += BGC_STRIDE) {
+                    const uint8_t *m = sGlPair[sGlFlip ? 7 - r : r];
+                    for (int k = 0; k < 4; k++) {
+                        unsigned a = idx[2 * k], b = idx[2 * k + 1];
+                        buf32[m[k]] = sGlLut16[a] | ((uint32_t)sGlLut16[b] << 16);
+                        use |= ((1u << (a & 15)) & -(a != 0)) | ((1u << (b & 15)) & -(b != 0));
+                    }
+                }
+                buf32[0] |= use & 1; // (kept)
+            }
+            if (pass != 1)
+                memcpy(GlTile(tex, tx, ty), buf32, 128);
+        }
+    }
+    t[4] = svcGetSystemTick();
+    memset(tex, 0, GL_TEX * GL_TEX * 2);
+    GlFlushRange(tex, GL_TEX * GL_TEX * 2);
+    Backend_Log("gpu bench: tile %.2f us, made only %.2f, copied only %.2f, with PLD %.2f",
+                (t[1] - t[0]) * us / 2048, (t[2] - t[1]) * us / 2048, (t[3] - t[2]) * us / 2048,
+                (t[4] - t[3]) * us / 2048);
 }
 
 static int sGlFramePalTiles; // (... of which a palette animation's)
