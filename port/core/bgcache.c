@@ -17,6 +17,20 @@ static uint8_t sCharChanged[0x10000 / 32]; // per 32 bytes: changed since then
 static uint16_t sPalCopy[256];           // the background palettes, likewise
 static int sCharFirst, sCharLast;        // the first and last changed 32 bytes (none: first > last)
 
+// A byte of 16-colour tile data (two pixels) as their two colour numbers
+// (0, or the bank's), for each bank
+static uint16_t sNibPair[16][256];
+static int sNibPairReady;
+static void MakeNibPair(void)
+{
+    for (int bank = 0; bank < 16; bank++)
+        for (int b = 0; b < 256; b++) {
+            unsigned n0 = b & 15, n1 = b >> 4;
+            sNibPair[bank][b] = (uint16_t)((n0 ? bank << 4 | n0 : 0) | ((n1 ? bank << 4 | n1 : 0) << 8));
+        }
+    sNibPairReady = 1;
+}
+
 // The map entry of tile (tx, ty), or -1 for one outside VRAM (drawn clear).
 static inline int MapEntry(const BgCache *c, int tx, int ty)
 {
@@ -56,45 +70,62 @@ void BgCache_Decode(BgCache *c, int tx, int ty)
             me = 0;
         unsigned tile = me & 0x3FF;
         int hflip = (me & 0x400) != 0;
+        // A row at a time: its 8 colour numbers as two words (pixels 0-3,
+        // 4-7, in the screen's order), then their colours
+        unsigned bank = (me >> 12) << 4;
+        int vflip = (me & 0x800) != 0, cmpPx = !c->indexOk; // (the pixels only matter to the GPU without indexOk)
+        const int color256 = c->color256;
+        const unsigned base = c->charBase + (color256 ? tile * 64 : tile * 32);
+        const uint16_t *pair = sNibPair[bank >> 4]; // (16 colours: each byte, two pixels)
+        const uint32_t *t32 = c->table32;
         for (int r = 0; r < 8; r++) {
             uint16_t *px = &dst[r * BGC_STRIDE];
             uint8_t *pi = &dsti[r * BGC_STRIDE];
-            int ty8 = (me & 0x800) ? 7 - r : r;
+            int ty8 = vflip ? 7 - r : r;
             unsigned st = 0;
-            if (c->color256) {
-                unsigned a = c->charBase + tile * 64 + ty8 * 8;
-                uint32_t lo = 0, hi = 0;
+            uint32_t lo, hi;
+            if (color256) {
+                unsigned a = base + ty8 * 8;
+                lo = 0, hi = 0;
                 if (a < 0x10000) {
                     lo = *(const uint32_t *)&gPortVram[a];
                     hi = *(const uint32_t *)&gPortVram[a + 4];
-                }
-                for (int i = 0; i < 8; i++) {
-                    unsigned n = (i < 4) ? (lo >> (8 * i)) & 0xFF : (hi >> (8 * (i - 4))) & 0xFF;
-                    int at = hflip ? 7 - i : i;
-                    dIdx |= pi[at] ^ n;
-                    dPx |= px[at] ^ table[n];
-                    pi[at] = (uint8_t)n;
-                    px[at] = table[n];
                 }
                 if (lo | hi)
                     st = (HAS_ZERO_BYTE(lo) || HAS_ZERO_BYTE(hi)) ? 1 : 2;
             }
             else {
-                unsigned a = c->charBase + tile * 32 + ty8 * 4;
+                unsigned a = base + ty8 * 4;
                 uint32_t row = (a < 0x10000) ? *(const uint32_t *)&gPortVram[a] : 0;
-                unsigned bank = (me >> 12) << 4;
-                for (int i = 0; i < 8; i++) {
-                    unsigned n = (row >> (4 * i)) & 0xF;
-                    unsigned v = n ? bank | n : 0;
-                    int at = hflip ? 7 - i : i;
-                    dIdx |= pi[at] ^ v;
-                    dPx |= px[at] ^ table[v];
-                    pi[at] = (uint8_t)v;
-                    px[at] = table[v];
-                }
                 if (row)
                     st = HAS_ZERO_NIBBLE(row) ? 1 : 2;
+                lo = pair[row & 0xFF] | ((uint32_t)pair[(row >> 8) & 0xFF] << 16);
+                hi = pair[(row >> 16) & 0xFF] | ((uint32_t)pair[row >> 24] << 16);
             }
+            if (hflip) {
+                uint32_t t = __builtin_bswap32(lo);
+                lo = __builtin_bswap32(hi);
+                hi = t;
+            }
+            uint32_t o0, o1;
+            memcpy(&o0, pi, 4);
+            memcpy(&o1, pi + 4, 4);
+            dIdx |= (o0 ^ lo) | (o1 ^ hi);
+            memcpy(pi, &lo, 4);
+            memcpy(pi + 4, &hi, 4);
+            uint32_t p0 = t32[lo & 0xFF] | (t32[(lo >> 8) & 0xFF] << 16);
+            uint32_t p1 = t32[(lo >> 16) & 0xFF] | (t32[lo >> 24] << 16);
+            uint32_t p2 = t32[hi & 0xFF] | (t32[(hi >> 8) & 0xFF] << 16);
+            uint32_t p3 = t32[(hi >> 16) & 0xFF] | (t32[hi >> 24] << 16);
+            if (cmpPx) {
+                uint32_t q[4];
+                memcpy(q, px, 16);
+                dPx |= (q[0] ^ p0) | (q[1] ^ p1) | (q[2] ^ p2) | (q[3] ^ p3);
+            }
+            memcpy(px, &p0, 4);
+            memcpy(px + 2, &p1, 4);
+            memcpy(px + 4, &p2, 4);
+            memcpy(px + 6, &p3, 4);
             rows |= st << (r * 2);
         }
     }
@@ -125,10 +156,20 @@ void BgCache_Recolor(BgCache *c, int tx, int ty)
 {
     uint16_t *dst = &c->px[ty * 8 * BGC_STRIDE + tx * 8];
     const uint8_t *src = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
-    const uint16_t *table = c->table;
-    for (int r = 0; r < 8; r++, dst += BGC_STRIDE, src += BGC_STRIDE)
-        for (int i = 0; i < 8; i++)
-            dst[i] = table[src[i]];
+    const uint32_t *t32 = c->table32;
+    for (int r = 0; r < 8; r++, dst += BGC_STRIDE, src += BGC_STRIDE) {
+        uint32_t lo, hi;
+        memcpy(&lo, src, 4);
+        memcpy(&hi, src + 4, 4);
+        uint32_t p0 = t32[lo & 0xFF] | (t32[(lo >> 8) & 0xFF] << 16);
+        uint32_t p1 = t32[(lo >> 16) & 0xFF] | (t32[lo >> 24] << 16);
+        uint32_t p2 = t32[hi & 0xFF] | (t32[(hi >> 8) & 0xFF] << 16);
+        uint32_t p3 = t32[(hi >> 16) & 0xFF] | (t32[hi >> 24] << 16);
+        memcpy(dst, &p0, 4);
+        memcpy(dst + 2, &p1, 4);
+        memcpy(dst + 4, &p2, 4);
+        memcpy(dst + 6, &p3, 4);
+    }
     c->recolor[ty][tx >> 5] &= ~(1u << (tx & 31));
     if (!c->indexOk) { // (the GPU's textures: from the colour numbers, but for these)
         c->gpuDirty[ty][tx >> 5] |= 1u << (tx & 31);
@@ -149,6 +190,8 @@ static void BuildTable(BgCache *c)
             c->table[n] = TRANSPARENT;
         c->table[0x10] = 0; // (the wide map's black)
     }
+    for (int n = 0; n < 256; n++)
+        c->table32[n] = c->table[n];
 }
 
 // Tile data or palette of entry e changed since the last Prepare.
@@ -171,6 +214,8 @@ static inline int EntryChanged(const BgCache *c, unsigned e, unsigned palChanged
 
 void BgCache_Prepare(const uint8_t *regs, int wide)
 {
+    if (!sNibPairReady)
+        MakeNibPair();
     // What changed in VRAM's tile data and the palettes since the last time
     const uint32_t *v = (const uint32_t *)gPortVram;
     uint32_t *copy = sCharCopy;

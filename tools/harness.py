@@ -352,7 +352,8 @@ class Harness:
             if self.uc.reg_read(UC_ARM_REG_CPSR) & 0x20:
                 pc |= 1  # resume in Thumb state
             per_frame[self.frame] += 1
-            if self.frame == frame_before or True:
+            pf = self.args.profile_frames
+            if not pf or int(pf.split(':')[0]) <= self.frame < int(pf.split(':')[1]):
                 name = where(self.syms, pc & ~1).split('+')[0]
                 samples[name] += 1
                 pcs[pc & ~1] += 1
@@ -454,6 +455,7 @@ def main():
     ap.add_argument('--gpu-list', type=int, default=0, help='drawing list: 1 draw frames from it, 2 also check them against the renderer')
     ap.add_argument('--sub-always', action='store_true', help='render the second screen every frame (as on the 3DS)')
     ap.add_argument('--profile-pcs', help='write the sampled PCs here (address count)')
+    ap.add_argument('--profile-frames', help='A:B: count only the samples in frames A..B-1')
     ap.add_argument('--profile', type=int, default=0, help='sample the PC every N instructions')
     return Harness(ap.parse_args()).run()
 
