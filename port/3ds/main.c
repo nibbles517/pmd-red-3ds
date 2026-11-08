@@ -617,27 +617,41 @@ static inline uint16_t *GlTile(uint16_t *tex, int tx, int ty)
 // writes again only the tiles using a changed colour, without reading them.
 static uint16_t sGlTileUse[4][64][64];
 
+// Each colour number's texel (low half) and its bit of sGlTileUse (high
+// half), 16 colours a bank and 256: a texel is one look-up (the bench on an
+// Old 3DS: making a tile was most of writing one, and not the memory's
+// waiting: the arithmetic per texel)
+static uint32_t sGlTab16[256], sGlTab256[256];
+
+// A tile of colour numbers (8 rows, BGC_STRIDE apart) into buf32 in the
+// texture's layout; returns the colours it uses (sGlTileUse)
+static inline unsigned GlMakeIdx(const uint8_t *idx, const uint32_t *tab, uint32_t *buf32)
+{
+    uint32_t use = 0;
+    for (int r = 0; r < 8; r++, idx += BGC_STRIDE) {
+        int y = sGlFlip ? 7 - r : r;
+        uint32_t *o = buf32 + ((y & 1) | ((y & 2) << 1) | ((y & 4) << 2)); // (texels x, x + 1: o[0], o[2], o[8], o[10])
+        uint32_t w0, w1;
+        memcpy(&w0, idx, 4);
+        memcpy(&w1, idx + 4, 4);
+        uint32_t e0 = tab[w0 & 0xFF], e1 = tab[(w0 >> 8) & 0xFF], e2 = tab[(w0 >> 16) & 0xFF], e3 = tab[w0 >> 24];
+        uint32_t e4 = tab[w1 & 0xFF], e5 = tab[(w1 >> 8) & 0xFF], e6 = tab[(w1 >> 16) & 0xFF], e7 = tab[w1 >> 24];
+        o[0] = (e0 & 0xFFFF) | (e1 << 16);
+        o[2] = (e2 & 0xFFFF) | (e3 << 16);
+        o[8] = (e4 & 0xFFFF) | (e5 << 16);
+        o[10] = (e6 & 0xFFFF) | (e7 << 16);
+        use |= e0 | e1 | e2 | e3 | e4 | e5 | e6 | e7;
+    }
+    return use >> 16;
+}
+
 static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
 {
     uint32_t buf32[32];
     int x0 = tx * 8, y0 = ty * 8;
-    if (c->indexOk) { // (colour numbers: 0 is clear, as their pixels say)
-        const uint8_t *idx = &c->idx[y0 * BGC_STRIDE + x0];
-        const uint16_t *lut = c->color256 ? sGlLut256 : sGlLut16;
-        int shift = c->color256 ? 4 : 0;
-        unsigned use = 0;
-        for (int r = 0; r < 8; r++, idx += BGC_STRIDE) {
-            const uint8_t *m = sGlPair[sGlFlip ? 7 - r : r];
-            for (int k = 0; k < 4; k++) {
-                unsigned a = idx[2 * k], b = idx[2 * k + 1];
-                buf32[m[k]] = lut[a] | ((uint32_t)lut[b] << 16);
-                use |= ((1u << ((a >> shift) & 15)) & -(a != 0)) | ((1u << ((b >> shift) & 15)) & -(b != 0));
-            }
-        }
-        if (!c->color256)
-            use &= ~1u; // (colour 0 of a bank: the wide map's black, 0x10)
-        sGlTileUse[layer][ty][tx] = (uint16_t)use;
-    }
+    if (c->indexOk) // (colour numbers: 0 is clear, as their pixels say)
+        sGlTileUse[layer][ty][tx] = (uint16_t)GlMakeIdx(&c->idx[y0 * BGC_STRIDE + x0],
+                                                         c->color256 ? sGlTab256 : sGlTab16, buf32);
     else {
         const uint16_t *px = &c->px[y0 * BGC_STRIDE + x0];
         for (int r = 0; r < 8; r++, px += BGC_STRIDE) {
@@ -650,11 +664,11 @@ static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
     GlTouch(y0, y0 + 8);
 }
 
-// Once at start: where writing a background tile's time goes (port.log
-// "gpu bench": per tile, 2048 tiles in screen order, as an upload writes
-// them): all of it; making it without writing the texture; only copying
-// made tiles into the texture; and all of it with the next tiles' colour
-// numbers asked for ahead (PLD)
+// Once at start: what writing a background tile takes (port.log "gpu
+// bench": per tile, 2048 tiles in screen order, as an upload writes them):
+// the first way (per texel: two look-ups and the colour's bit worked out),
+// the way it's done now (one look-up), only copying made tiles into the
+// texture, and making them the way it's done now without the copying
 static void GlBench(void)
 {
     static uint32_t made[64][32]; // (64 tiles, in the cache)
@@ -667,11 +681,10 @@ static void GlBench(void)
         for (int i = 0; i < 2048; i++) {
             int tx = i & 63, ty = (i >> 6) & 63;
             uint32_t *buf32 = made[i & 63];
-            if (pass != 2) {
+            if (pass == 1 || pass == 3) {
+                buf32[0] |= GlMakeIdx(&c->idx[ty * 8 * BGC_STRIDE + tx * 8], sGlTab16, buf32) & 1;
+            } else if (pass == 0) {
                 const uint8_t *idx = &c->idx[ty * 8 * BGC_STRIDE + tx * 8];
-                if (pass == 3 && tx < 60)
-                    for (int r = 0; r < 8; r++)
-                        __builtin_prefetch(idx + r * BGC_STRIDE + 32);
                 unsigned use = 0;
                 for (int r = 0; r < 8; r++, idx += BGC_STRIDE) {
                     const uint8_t *m = sGlPair[sGlFlip ? 7 - r : r];
@@ -683,14 +696,14 @@ static void GlBench(void)
                 }
                 buf32[0] |= use & 1; // (kept)
             }
-            if (pass != 1)
+            if (pass != 3)
                 memcpy(GlTile(tex, tx, ty), buf32, 128);
         }
     }
     t[4] = svcGetSystemTick();
     memset(tex, 0, GL_TEX * GL_TEX * 2);
     GlFlushRange(tex, GL_TEX * GL_TEX * 2);
-    Backend_Log("gpu bench: tile %.2f us, made only %.2f, copied only %.2f, with PLD %.2f",
+    Backend_Log("gpu bench: tile the first way %.2f us, now %.2f; copied only %.2f, made only (now) %.2f",
                 (t[1] - t[0]) * us / 2048, (t[2] - t[1]) * us / 2048, (t[3] - t[2]) * us / 2048,
                 (t[4] - t[3]) * us / 2048);
 }
@@ -739,6 +752,10 @@ static void GpuListUpload(const GpuList *l)
     memcpy(sGlLut256, sGlLut, sizeof(sGlLut256));
     sGlLut16[0] = sGlLut256[0] = 0;
     sGlLut16[0x10] = 1; // (the wide map's black)
+    for (int n = 0; n < 256; n++) {
+        sGlTab16[n] = sGlLut16[n] | ((n & 15) ? 1u << (16 + (n & 15)) : 0); // (colour 0 of a bank: clear, or the black)
+        sGlTab256[n] = sGlLut256[n] | (n ? 1u << (16 + (n >> 4)) : 0);
+    }
     // The tiles using a changed colour: written again when shown (a tile
     // already marked will be written anyway, and its sGlTileUse is old).
     // A palette animation (the palettes steady otherwise: no fade) can
