@@ -275,6 +275,18 @@ static void LoadWide(const WideState *w)
 // black with black stays black); not forced blank. What the next frames
 // show is not known before they are described, so at most 3 frames in a row
 // are taken as black this way.
+// Every palette entry of the banks `used` (bits 0-15 BG, 16-31 OBJ) is
+// black, the backdrop too (colour 0 of the other banks: clear, not shown)
+static int BanksBlack(uint32_t used)
+{
+    const uint16_t *p = (const uint16_t *)gPortPltt;
+    used |= 1; // (the backdrop: entry 0)
+    for (int i = 0; i < 512; i++)
+        if ((p[i] & 0x7FFF) && ((used >> (i >> 4)) & 1) && ((i & 15) || i == 0))
+            return 0;
+    return 1;
+}
+
 static int sLastListed, sBlackRun;
 static int sShowingBlack, sHeld; // the screen shows black; frames held black since (RunFrame)
 static int PictureBlack(void)
@@ -285,12 +297,7 @@ static int PictureBlack(void)
         return 0;
     if (((R16(0x50) >> 6) & 3) == 2)
         return 0;
-    const uint16_t *p = (const uint16_t *)gPortPltt;
-    uint32_t used = gGpuList.usedBanks | 1; // (the backdrop: entry 0)
-    for (int i = 0; i < 512; i++)
-        if (p[i] && ((used >> (i >> 4)) & 1) && ((i & 15) || i == 0))
-            return 0;
-    return 1;
+    return BanksBlack(gGpuList.usedBanks);
 }
 
 static void RunFrame(void)
@@ -452,7 +459,9 @@ static void RunFrame(void)
     }
     else if (listMode == 3 && listOk) {
         const GpuList *l = &gGpuList;
-        int nowBlack = l->fadeOn && l->fade.mul == 0 && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]);
+        // (black: faded to it, or the palettes it shows are black as they are)
+        int nowBlack = (l->fadeOn && l->fade.mul == 0 && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]))
+                       || (((R16(0x50) >> 6) & 3) != 2 && BanksBlack(l->usedBanks)); // (not brightened)
         if (nowBlack)
             sHeld = 0;
         hold = sShowingBlack && !nowBlack && sHeld < 2;

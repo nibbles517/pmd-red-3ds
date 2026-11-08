@@ -344,12 +344,12 @@ void GpuList_Palette(void)
     l->fade = sNoFade;
     l->fadeOn = 0;
     l->palette = GPU_PAL_STEADY;
+    uint32_t used = BgBanksUsed(l) | ((uint32_t)l->objBanks << 16);
+    l->usedBanks = used;
     if (!changed)
         return;
 
     // The fade: the one most of the shown entries have
-    uint32_t used = BgBanksUsed(l) | ((uint32_t)l->objBanks << 16);
-    l->usedBanks = used;
     PortPalFade cand[8];
     int candN = 0, candC[8] = { 0 };
     for (int i = 0; i < 512; i++) {
