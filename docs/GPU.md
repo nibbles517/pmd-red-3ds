@@ -117,7 +117,11 @@ it, and the GPU draws it in `GpuDrawFrame`:
 - **Strips** are written a whole tile at a time too (each tile the frame's
   strip rectangles read, once), and a palette change finds the tiles to
   write again from the colours each tile was written with (`sGlTileUse`),
-  without reading the tiles.
+  without reading the tiles. A palette animation (the palettes otherwise
+  steady) has its tiles written at most 250 a frame: a tile shows the new
+  colours a frame or two late, instead of the frame taking 7 ms (port.log:
+  `tiles N (palette P)`). Flushing the cache turned out to cost 0.1 ms a
+  frame; writing a tile, about 8 microseconds, is the CPU's work.
 - **The system core**: the GSP service, which flushed the textures and
   takes the GPU's work and the screen copies, runs on the system core, where
   Dual Core's worker makes the DS music. With the worker above it, every

@@ -648,6 +648,7 @@ static void GlBgTile(BgCache *c, int layer, uint16_t *tex, int tx, int ty)
     GlTouch(y0, y0 + 8);
 }
 
+static int sGlFramePalTiles; // (... of which a palette animation's)
 static int sGlFrameTiles; // (the slow frame lines: this frame's texture writing)
 static u64 sGlFrameBg, sGlFrameStrip, sGlFrameObj;
 
@@ -655,6 +656,7 @@ static void GpuListUpload(const GpuList *l)
 {
     u64 start = svcGetSystemTick();
     sGlFrameTiles = 0;
+    sGlFramePalTiles = 0;
     sGlFrameFlush = 0;
 
     // The base palette's colours; the BG and OBJ banks whose colours changed
@@ -691,7 +693,14 @@ static void GpuListUpload(const GpuList *l)
     sGlLut16[0] = sGlLut256[0] = 0;
     sGlLut16[0x10] = 1; // (the wide map's black)
     // The tiles using a changed colour: written again when shown (a tile
-    // already marked will be written anyway, and its sGlTileUse is old)
+    // already marked will be written anyway, and its sGlTileUse is old).
+    // A palette animation (the palettes steady otherwise: no fade) can
+    // change hundreds of tiles every few frames (the world map: ~800 every
+    // 6), about 8 microseconds each on an Old 3DS: those are written a part
+    // a frame (sGlPalPending), a tile a frame or two late at most
+    static uint32_t sGlPalPending[4][64][2];
+    static bool sGlPalAny[4];
+    bool spread = l->palette == GPU_PAL_STEADY && !l->fadeOn;
     for (int b = 0; changedBanks && b < 4; b++) {
         BgCache *c = &gBgCache[b];
         if (!c->valid || !c->indexOk)
@@ -699,7 +708,7 @@ static void GpuListUpload(const GpuList *l)
         int any = 0;
         for (int ty = 0; ty < c->tilesH; ty++) {
             const uint16_t *use = sGlTileUse[b][ty];
-            uint32_t *dirty = c->gpuDirty[ty];
+            uint32_t *dirty = spread ? sGlPalPending[b][ty] : c->gpuDirty[ty];
             for (int tx = 0; tx < c->tilesW; tx++) {
                 unsigned ch = c->color256 ? changed256 : changed16[c->entry[ty * 64 + tx] >> 12];
                 if (use[tx] & ch) {
@@ -708,8 +717,12 @@ static void GpuListUpload(const GpuList *l)
                 }
             }
         }
-        if (any)
-            c->gpuAny = 1;
+        if (any) {
+            if (spread)
+                sGlPalAny[b] = true;
+            else
+                c->gpuAny = 1;
+        }
     }
 
     // While a fade has the screen black (or nearly: under 10%), little shows:
@@ -718,12 +731,14 @@ static void GpuListUpload(const GpuList *l)
     // once; one not written yet shows its old tile at that brightness
     int dark = l->fadeOn && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]);
     int budget = dark && l->fade.mul == 0 ? 400 : dark && l->fade.mul < 26 ? 600 : 1 << 30;
+    int palBudget = 250;
     sGlLo = GL_TEX;
     sGlHi = 0;
-    for (int b = 0; b < 4 && budget > 0; b++) {
+    for (int b = 0; b < 4; b++) {
         BgCache *c = &gBgCache[b];
-        if (!c->gpuAny)
+        if (!c->gpuAny && !sGlPalAny[b])
             continue;
+        bool palLeft = false;
         uint16_t *tex = (uint16_t *)sGlBg[b].data;
         for (int i = 0; i < l->quadCount; i++) {
             const GpuQuad *q = &l->quads[i];
@@ -732,13 +747,34 @@ static void GpuListUpload(const GpuList *l)
             for (int ty = q->sy >> 3; ty <= (q->sy + q->h - 1) >> 3; ty++)
                 for (int tx = q->sx >> 3; tx <= (q->sx + q->w - 1) >> 3; tx++) {
                     uint32_t bit = 1u << (tx & 31);
-                    if ((c->gpuDirty[ty][tx >> 5] & bit) && budget > 0) {
-                        c->gpuDirty[ty][tx >> 5] &= ~bit;
-                        GlBgTile(c, b, tex, tx, ty);
+                    uint32_t *dirty = &c->gpuDirty[ty][tx >> 5], *pal = &sGlPalPending[b][ty][tx >> 5];
+                    if (*dirty & bit) {
+                        if (budget <= 0)
+                            continue;
                         budget--;
-                        sGlFrameTiles++;
+                    } else if (*pal & bit) {
+                        if (palBudget <= 0) {
+                            palLeft = true;
+                            continue;
+                        }
+                        palBudget--;
+                        sGlFramePalTiles++;
+                    } else {
+                        continue;
                     }
+                    *dirty &= ~bit;
+                    *pal &= ~bit;
+                    GlBgTile(c, b, tex, tx, ty);
+                    sGlFrameTiles++;
                 }
+        }
+        if (!palLeft) { // (those not shown: written when they are, whole: as if decoded again)
+            for (int ty = 0; sGlPalAny[b] && ty < 64; ty++)
+                for (int w = 0; w < 2; w++) {
+                    c->gpuDirty[ty][w] |= sGlPalPending[b][ty][w];
+                    sGlPalPending[b][ty][w] = 0;
+                }
+            sGlPalAny[b] = false;
         }
         GlFlush(&sGlBg[b]);
     }
@@ -1009,7 +1045,7 @@ static void GpuWaitForSwap(gfxScreen_t screen)
 {
     if (sGpuCopiedTo[screen] == NULL)
         return;
-    u64 giveUp = svcGetSystemTick() + SYSCLOCK_ARM11 / 15; // (4 frames: not double buffered after all)
+    u64 giveUp = svcGetSystemTick() + SYSCLOCK_ARM11 / 30; // (2 frames: a swap asked for comes at the next VBlank, or not at all)
     while ((gfxGetFramebuffer(screen, GFX_LEFT, NULL, NULL) == sGpuCopiedTo[screen]
             || gspIsPresentPending(screen))
            && svcGetSystemTick() < giveUp)
@@ -1303,8 +1339,8 @@ static void MeterEndFrame(void)
                 n += snprintf(line + n, lineSize - n, " (mul %d add %d,%d,%d)", sGlList->fade.mul,
                               sGlList->fade.add[0], sGlList->fade.add[1], sGlList->fade.add[2]);
             if (sGlList != NULL && n < lineSize)
-                snprintf(line + n, lineSize - n, " | quads %d tiles %d: bg %.1f strips %.1f obj %.1f (cache flush %.1f)",
-                         sGlList->quadCount, sGlFrameTiles, sGlFrameBg * ms, sGlFrameStrip * ms, sGlFrameObj * ms,
+                snprintf(line + n, lineSize - n, " | quads %d tiles %d (palette %d): bg %.1f strips %.1f obj %.1f (cache flush %.1f)",
+                         sGlList->quadCount, sGlFrameTiles, sGlFramePalTiles, sGlFrameBg * ms, sGlFrameStrip * ms, sGlFrameObj * ms,
                          sGlFrameFlush * ms);
             slowCount++;
         }
