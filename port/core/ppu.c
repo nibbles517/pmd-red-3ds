@@ -529,7 +529,7 @@ static int RenderTiledBg(int bg, int line, uint16_t *out)
     uint16_t cnt = R16(0x08 + bg * 2);
     if (c->valid && !c->wideMap && !c->edge && c->charBase == ((cnt >> 2) & 3) * 0x4000u
         && c->screenBase == ((cnt >> 8) & 0x1F) * 0x800u && c->color256 == ((cnt >> 7) & 1) && c->size == ((cnt >> 14) & 3)
-        && !(cnt & 0x40) && !(c->todo[gy >> 3][0] | c->todo[gy >> 3][1]) && !(c->any[gy][0] | c->any[gy][1])) {
+        && !(cnt & 0x40) && !((c->todo[gy >> 3][0] | c->any[gy][0]) & ((1u << (GBA_W / 8)) - 1))) { // (unscrolled: columns 0-29)
         sTiledClearC = c;
         sTiledClearY = gy;
         sLastMask = 0; sLastFull = 0;
@@ -1428,12 +1428,13 @@ int Ppu_ListLine(int line)
     static int sPrevLine = -2, sPrevEmpty; // (sPrevEmpty: a layer was clear all along the line before, and may not be on this one)
     static const BgCache *sClearC[4]; // the layers clear all along the line before: their cache and row (to see this row is too)
     static int sClearY[4], sClearN;
+    static uint32_t sClearM[4][2]; // (the tile columns that count: a 32-column map's second word means nothing)
     int sameWin = line > 0 && memcmp(&key, &sWinKey, sizeof(key)) == 0;
     // (not DISPSTAT, VCOUNT: they change every line, and the picture doesn't follow them)
     int clearOk = !sPrevEmpty;
     for (int i = 0; clearOk && i < sClearN; i++) { // (a layer clear before: its next row clear all along too)
         int y2 = sClearY[i] + 1;
-        clearOk = (y2 & 7) != 0 && !(sClearC[i]->any[y2][0] | sClearC[i]->any[y2][1]);
+        clearOk = (y2 & 7) != 0 && !((sClearC[i]->any[y2][0] & sClearM[i][0]) | (sClearC[i]->any[y2][1] & sClearM[i][1]));
     }
     if (sameWin && sPrevLine == line - 1 && clearOk && memcmp(sPrevRegs, gPortRegs, 4) == 0
         && memcmp(sPrevRegs + 8, gPortRegs + 8, sizeof(sPrevRegs) - 8) == 0 && GpuList_RepeatLine(line)) {
@@ -1491,11 +1492,15 @@ int Ppu_ListLine(int line)
             if (sDesc.have && sClearN < 4) { // (from its cache: whether the next row is clear too can be seen)
                 sClearC[sClearN] = sDesc.c;
                 sClearY[sClearN] = sDesc.y;
+                sClearM[sClearN][0] = 0xFFFFFFFFu;
+                sClearM[sClearN][1] = sDesc.c->tilesW == 64 ? 0xFFFFFFFFu : 0;
                 sClearN++;
             }
             else if (sTiledClearC && sClearN < 4) { // (a tiled background, from its cache's row)
                 sClearC[sClearN] = sTiledClearC;
                 sClearY[sClearN] = sTiledClearY;
+                sClearM[sClearN][0] = (1u << (GBA_W / 8)) - 1; // (unscrolled: columns 0-29)
+                sClearM[sClearN][1] = 0;
                 sClearN++;
             }
             else
