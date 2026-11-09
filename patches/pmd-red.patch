@@ -287,10 +287,10 @@ index d927bef9..a098cfde 100644
 \ No newline at end of file
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..7bb20ca2
+index 00000000..222bb9c6
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,11 @@
+@@ -0,0 +1,15 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -298,7 +298,11 @@ index 00000000..7bb20ca2
 +#define PORT_RUN_OPTIONS 8
 +extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On; each Save Data's in config.ini
 +// What they do (index in gPortRunOptions):
-+#define PORT_RUN_ORAN_TO_SITRUS 0 // Option 1: a rolled Oran Berry is a Sitrus Berry 1% of the time (dungeon_floor_spawns.c)
++// (dungeon_floor_spawns.c) Increased Sitrus Berries: a rolled Oran Berry is a
++// Sitrus Berry 1% of the time; Increased Life Seeds: a rolled Reviver Seed is
++// a Life Seed 1% of the time
++#define PORT_RUN_ORAN_TO_SITRUS 0
++#define PORT_RUN_REVIVER_TO_LIFE 1
 +void PortNewRun_Run(void (*frameActions)(u32));
 +
 +#endif
@@ -623,7 +627,7 @@ index 28b04fb0..368ffdc7 100644
 +#endif
  }
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
-index 4506e559..b92fdc91 100644
+index 4506e559..79c94376 100644
 --- a/src/dungeon_floor_spawns.c
 +++ b/src/dungeon_floor_spawns.c
 @@ -18,6 +18,9 @@
@@ -636,15 +640,18 @@ index 4506e559..b92fdc91 100644
  #include "dungeon_config.h"
  #include "structs/dungeon_mapparam.h"
  
-@@ -121,6 +124,12 @@ u8 GetRandomFloorItem(s32 spawnType)
+@@ -121,6 +124,15 @@ u8 GetRandomFloorItem(s32 spawnType)
      rand = DungeonRandInt(ITEM_SETS_RANDOM_CAP + 1);
      for (i = 0; i < NUMBER_OF_ITEM_IDS; i++) {
          if (gDungeon->itemSpawns[spawnType].itemValues[i] != 0 && GetItemCategory(i) == category && gDungeon->itemSpawns[spawnType].itemValues[i] >= rand) {
 +#ifdef PLATFORM_3DS
-+            // Run option 1: an Oran Berry rolled here (floor, shop, Monster
-+            // House, buried, held, Pickup...) is a Sitrus Berry 1 time in 100
++            // Run options 1 and 2: an Oran Berry or a Reviver Seed rolled here
++            // (floor, shop, Monster House, buried, held, Pickup...) is a
++            // Sitrus Berry or a Life Seed 1 time in 100
 +            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) == 0)
 +                return ITEM_SITRUS_BERRY;
++            if (i == ITEM_REVIVER_SEED && gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE] && DungeonRandInt(100) == 0)
++                return ITEM_LIFE_SEED;
 +#endif
              return i;
          }
@@ -5407,7 +5414,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
-index 00000000..06952c09
+index 00000000..2f5e3fb7
 --- /dev/null
 +++ b/src/port_new_run.c
 @@ -0,0 +1,161 @@
@@ -5468,10 +5475,10 @@ index 00000000..06952c09
 +ALIGNED(4) static const u8 sHelp[] = _("{COLOR CYAN}Left/Right{RESET}: Off or On   {COLOR CYAN}START{RESET}: Done");
 +ALIGNED(4) static const u8 sReady[] = _("Are you ready? You will not be able to\nchange these selections after this!");
 +static const u8 *const sNames[PORT_RUN_OPTIONS] = {
-+    _("Option 1"), _("Option 2"), _("Option 3"), _("Option 4"),
-+    _("Option 5"), _("Option 6"), _("Option 7"), _("Option 8"),
++    _("Increased Sitrus Berries"), _("Increased Life Seeds"), _("Option 3"), _("Option 4"),
++    _("Option 5"), _("Option 6"), _("Option 7"), _("Option 8"), // (and options.c sRunOptionNames)
 +};
-+#define CHOICE_X(i) (120 + (i) * 40)
++#define CHOICE_X(i) (144 + (i) * 40)
 +
 +static void Draw(void)
 +{

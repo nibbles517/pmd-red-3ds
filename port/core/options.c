@@ -301,6 +301,11 @@ static const char *const sIniLayouts[] = { "Blue", "Sky", "Log", "M+T", NULL };
 static const char *const sIniButtons[] = { "GBA", "DS", "3DS", NULL };
 static const char *const sIniStyles[] = { "GBA", "DS", NULL };
 static const char *const sIniSlots[] = { "1", "2", "3", NULL };
+// The run options, by their names in the menu (port_new_run.c sNames)
+static const char *const sRunOptionNames[PORT_RUN_OPTIONS] = {
+    "Increased Sitrus Berries", "Increased Life Seeds", "Option 3", "Option 4",
+    "Option 5", "Option 6", "Option 7", "Option 8",
+};
 
 typedef struct {
     const char *section, *key;
@@ -403,8 +408,8 @@ static void IniLoad(const char *text, uint32_t len)
                 continue;
             for (int i = 0; i < PORT_RUN_OPTIONS; i++) {
                 char key[16];
-                snprintf(key, sizeof(key), "Option %d", i + 1);
-                if (IniSame(line, keyLen, key)) {
+                snprintf(key, sizeof(key), "Option %d", i + 1); // (as written before they had names)
+                if (IniSame(line, keyLen, sRunOptionNames[i]) || IniSame(line, keyLen, key)) {
                     if (IniSame(eq + 1, valueLen, "On")) sRunOptions[slot][i] = 1;
                     else if (IniSame(eq + 1, valueLen, "Off")) sRunOptions[slot][i] = 0;
                 }
@@ -452,7 +457,7 @@ static bool8 IniSave(void)
     for (int slot = 0; slot < 3; slot++) {
         INI_PRINT("\n[Save Data %d]\n", slot + 1);
         for (int i = 0; i < PORT_RUN_OPTIONS; i++)
-            INI_PRINT("Option %d = %s\n", i + 1, sRunOptions[slot][i] ? "On" : "Off");
+            INI_PRINT("%s = %s\n", sRunOptionNames[i], sRunOptions[slot][i] ? "On" : "Off");
     }
 #undef INI_PRINT
     if (n >= (int)sizeof(text))
