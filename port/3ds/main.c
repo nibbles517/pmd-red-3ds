@@ -1256,7 +1256,8 @@ static bool OutInit(void)
         sTri[i] = vramAlloc(TRI_BYTES);
         if (sTri[i] == NULL)
             return false;
-        memset(sTri[i], 0, TRI_BYTES); // (VRAM: the CPU can write it directly)
+        // (not cleared: the CPU may not write VRAM, a data abort; each buffer
+        // is wholly written by its picture's copy before it is shown)
     }
     gspSetEventCallback(GSPGPU_EVENT_PPF, OnPpf, NULL, false);
     return true;
