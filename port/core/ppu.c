@@ -1370,6 +1370,51 @@ void Ppu_RenderLine(int line, uint16_t *dst)
 // windows show it. Returns 0 (with gGpuList.fallback set) if the line uses
 // what the list can't express; the frame is then drawn here after all.
 static int sListSemi; // (the frame's sprites have semi-transparent ones: Ppu_ListObjects)
+// Semi-transparent sprites that are second targets under first target
+// backgrounds in front of them (Ppu_ListObjects): their quads, and those backgrounds
+#define SEMI_MAX 16
+static uint16_t sObjBankOf[128]; // the listed sprites' palette banks (Ppu_ListObjects)
+static int sSemiN;
+static uint16_t sSemiQuad[SEMI_MAX];
+static uint8_t sSemiBgs[SEMI_MAX];
+static int RenderTextBg(int bg, int line, uint16_t *out);
+
+// Whether, on this line, such a background has a pixel over one of such a
+// sprite's (the background's line drawn as the renderer does, once)
+static int SemiCovered(int line, uint16_t dispcnt, const int *runX, const uint8_t *runV, int runN)
+{
+    static uint16_t bgLine[4][W];
+    unsigned drawn = 0;
+    for (int i = 0; i < sSemiN; i++) {
+        const GpuQuad *q = &gGpuList.quads[sSemiQuad[i]];
+        if (line < q->dy || line >= q->dy + q->h)
+            continue;
+        int j = line - q->dy;
+        const uint16_t *row = gGpuObj[q->sy + ((q->flags & GQ_VFLIP) ? q->h - 1 - j : j)];
+        for (int b = 0; b < 4; b++) {
+            if (!((sSemiBgs[i] >> b) & 1) || !(dispcnt & (0x100 << b)))
+                continue;
+            if (!((drawn >> b) & 1)) {
+                drawn |= 1u << b;
+                sWantPtr = 0;
+                if (!RenderTextBg(b, line, bgLine[b]))
+                    memset(bgLine[b], 0xFF, sizeof(bgLine[b])); // (all clear: TRANSPARENT set)
+                sWantPtr = 0;
+            }
+            int x0 = q->dx < 0 ? 0 : q->dx, x1 = q->dx + q->w > sW ? sW : q->dx + q->w;
+            int r = 0;
+            for (int x = x0; x < x1; x++) {
+                while (r + 1 < runN && runX[r + 1] <= x) // (the windows: where the background is shown)
+                    r++;
+                int k = x - q->dx;
+                if (!(row[q->sx + ((q->flags & GQ_HFLIP) ? q->w - 1 - k : k)] & 0x8000)
+                    && !(bgLine[b][x] & TRANSPARENT) && ((runV[r] >> b) & 1))
+                    return 1;
+            }
+        }
+    }
+    return 0;
+}
 
 int Ppu_ListLine(int line)
 {
@@ -1438,7 +1483,7 @@ int Ppu_ListLine(int line)
         int y2 = sClearY[i] + 1;
         clearOk = (y2 & 7) != 0 && !((sClearC[i]->any[y2][0] & sClearM[i][0]) | (sClearC[i]->any[y2][1] & sClearM[i][1]));
     }
-    if (sameWin && sPrevLine == line - 1 && clearOk && memcmp(sPrevRegs, gPortRegs, 4) == 0
+    if (sameWin && sPrevLine == line - 1 && clearOk && !sSemiN && memcmp(sPrevRegs, gPortRegs, 4) == 0
         && memcmp(sPrevRegs + 8, gPortRegs + 8, sizeof(sPrevRegs) - 8) == 0 && GpuList_RepeatLine(line)) {
         sPrevLine = line;
         for (int i = 0; i < sClearN; i++)
@@ -1469,6 +1514,7 @@ int Ppu_ListLine(int line)
     unsigned shown = 0; // (the layers shown somewhere on the line)
     for (int r = 0; r < runN; r++)
         shown |= runV[r];
+    if (sSemiN && SemiCovered(line, dispcnt, runX, runV, runN)) { l->fallback = GPU_WHY_OBJ_SEMI; return 0; }
     // Sprites are whole rectangles: they must be shown (and their effect
     // allowed, if they are a first target) all along the line
     if (dispcnt & 0x1000) {
@@ -1565,6 +1611,7 @@ int Ppu_ListObjects(int lines)
     GpuList *l = &gGpuList;
     uint16_t dispcnt = R16(0x00);
     sListSemi = 0;
+    sSemiN = 0;
     if (!(dispcnt & 0x1000))
         return 1;
     int oneD = (dispcnt >> 6) & 1;
@@ -1608,14 +1655,15 @@ int Ppu_ListObjects(int lines)
         // Semi-transparent: always a first target, alpha blending (whatever
         // the effect, and the windows' effect bit). Also a second target:
         // a first target background in front of it would blend with it (the
-        // GPU's stencil is cleared where a first target blended): not listed.
+        // GPU's stencil is cleared where a first target blended), so where
+        // such a background's pixels cover its pixels the frame can't be
+        // listed: the lines check (SemiCovered).
+        unsigned semiBgs = 0;
         if (mode == 1 && (bldcnt & 0x1000) && ((bldcnt >> 6) & 3) == 1) {
             int objPrio = (o[5] >> 2) & 3;
             for (int b = 0; b < 4; b++)
-                if (((bldcnt >> b) & 1) && (dispcnt & (0x100 << b)) && (R16(0x08 + b * 2) & 3) < objPrio) {
-                    l->fallback = GPU_WHY_OBJ_SEMI;
-                    return 0;
-                }
+                if (((bldcnt >> b) & 1) && (dispcnt & (0x100 << b)) && (R16(0x08 + b * 2) & 3) < objPrio)
+                    semiBgs |= 1u << b;
         }
         if (((a0 >> 12) & 1) && (mosaic & 0xFF00)) { l->fallback = GPU_WHY_OBJ_MOSAIC; return 0; }
 
@@ -1646,7 +1694,14 @@ int Ppu_ListObjects(int lines)
         uint16_t *dst = GpuList_Obj(x, y, w, h, flags, GpuKeyObj(prio, n),
                                     GpuObjLook(tileNum, shape, size, color256, palBank, oneD), changed,
                                     color256 ? 0xFFFF : (uint16_t)palBank, &made);
+        if (semiBgs && (made || dst != NULL)) {
+            if (sSemiN == SEMI_MAX) { l->fallback = GPU_WHY_OBJ_SEMI; return 0; }
+            sSemiQuad[sSemiN] = (uint16_t)(l->quadCount - 1);
+            sSemiBgs[sSemiN++] = (uint8_t)semiBgs;
+        }
         l->objBanks |= color256 ? 0xFFFF : (uint16_t)(1u << palBank);
+        if (l->quadCount - 1 - firstQuad < 128 && (made || dst != NULL))
+            sObjBankOf[l->quadCount - 1 - firstQuad] = color256 ? 0xFFFF : (uint16_t)palBank;
         if (made)
             continue; // (its slot has it)
         if (dst == NULL) { l->fallback = l->quadCount >= GPU_MAX_QUADS ? GPU_WHY_FULL : GPU_WHY_OBJ_FULL; return 0; }
@@ -1660,20 +1715,46 @@ int Ppu_ListObjects(int lines)
         }
     }
     // A blended sprite's shown pixels over another sprite's (one drawn before
-    // it: behind) can't be listed
+    // it: behind): the GBA shows only the front one's pixel there, so it
+    // blends with what is under the sprites; the list would draw both, and
+    // blend it with the one behind. That one is drawn from a copy of its
+    // pixels without those (its own slot, made again each frame it is so).
+    int objEnd = l->quadCount;
     if (anyBlend)
-        for (int i = firstQuad; i < l->quadCount; i++) {
-            const GpuQuad *a = &l->quads[i];
-            if (!(a->flags & GQ_BLEND))
-                continue;
-            for (int j = firstQuad; j < l->quadCount; j++) {
-                const GpuQuad *b = &l->quads[j];
-                if (j == i || (b->key & 1023) < (a->key & 1023) || ((b->key & 1023) == (a->key & 1023) && j > i))
-                    continue; // (drawn after it: in front)
-                if (b->dx < a->dx + a->w && a->dx < b->dx + b->w && b->dy < a->dy + a->h && a->dy < b->dy + b->h
-                    && GpuList_ObjOverlap(a, b)) {
-                    l->fallback = GPU_WHY_OBJ_SEMI;
-                    return 0;
+        for (int j = firstQuad; j < objEnd; j++) {
+            GpuQuad *b = &l->quads[j];
+            uint16_t *dst = NULL;
+            for (int i = firstQuad; i < objEnd; i++) {
+                const GpuQuad *a = &l->quads[i];
+                if (i == j || !(a->flags & GQ_BLEND) || (b->key & 1023) < (a->key & 1023)
+                    || ((b->key & 1023) == (a->key & 1023) && j > i))
+                    continue; // (not a blended one in front of it)
+                if (!(b->dx < a->dx + a->w && a->dx < b->dx + b->w && b->dy < a->dy + a->h && a->dy < b->dy + b->h)
+                    || !GpuList_ObjOverlap(a, b))
+                    continue;
+                if (dst == NULL) { // (its copy: a slot of its own, look by its place in front)
+                    int made;
+                    GpuQuad old = *b;
+                    dst = GpuList_Obj(b->dx, b->dy, b->w, b->h, b->flags, b->key, 0x40000000u | (b->key & 1023),
+                                      l->frame, sObjBankOf[j - firstQuad], &made);
+                    if (dst == NULL) { l->fallback = l->quadCount >= GPU_MAX_QUADS ? GPU_WHY_FULL : GPU_WHY_OBJ_FULL; return 0; }
+                    b->sx = l->quads[l->quadCount - 1].sx; // (the quad drawn where it was, from the copy)
+                    b->sy = l->quads[l->quadCount - 1].sy;
+                    l->quadCount--;
+                    for (int ty = 0; ty < b->h; ty++)
+                        memcpy(&dst[ty * GPU_OBJ_W], &gGpuObj[old.sy + ty][old.sx], (size_t)b->w * 2);
+                }
+                int y0 = a->dy > b->dy ? a->dy : b->dy, y1 = a->dy + a->h < b->dy + b->h ? a->dy + a->h : b->dy + b->h;
+                int x0 = a->dx > b->dx ? a->dx : b->dx, x1 = a->dx + a->w < b->dx + b->w ? a->dx + a->w : b->dx + b->w;
+                for (int y = y0; y < y1; y++) {
+                    int ja = y - a->dy, jb = y - b->dy;
+                    const uint16_t *ra = gGpuObj[a->sy + ((a->flags & GQ_VFLIP) ? a->h - 1 - ja : ja)];
+                    uint16_t *rb = &dst[((b->flags & GQ_VFLIP) ? b->h - 1 - jb : jb) * GPU_OBJ_W];
+                    for (int x = x0; x < x1; x++) {
+                        int ia = x - a->dx, ib = x - b->dx;
+                        if (!(ra[a->sx + ((a->flags & GQ_HFLIP) ? a->w - 1 - ia : ia)] & 0x8000))
+                            rb[(b->flags & GQ_HFLIP) ? b->w - 1 - ib : ib] = TRANSPARENT;
+                    }
                 }
             }
         }

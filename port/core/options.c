@@ -8,7 +8,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 13
+#define PORT_CONFIG_VERSION 14
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19, .sfxVolume = 10 };
 
 // The settings before any are chosen (no config file yet). Those kept in the
@@ -22,7 +22,7 @@ static void SetDefaultConfig(void)
     // Graphics Options
     gPortConfig.frameSkip = Backend_IsNew3DS() ? PORT_FRAMESKIP_OFF : PORT_FRAMESKIP_AUTO;
     gPortConfig.dualCore = 1;
-    gPortConfig.busyWait = 1; // Busy Screen: Wait (as before)
+    gPortConfig.busyWait = 0; // Busy Screen: Skip
     gPortConfig.layout[0][0] = PORT_SIZE_FIT; // Main Screen Settings: Size Fit,
     gPortConfig.layout[0][1] = 1;             // Scale Full
     gPortConfig.subScreenDisabled = 0;        // Sub-Screen Settings: Enabled? Yes,
@@ -99,6 +99,10 @@ void Port_LoadConfig(void)
     if (c.version == 12) { // Busy Screen: Wait at first (Triple Buffer, its place's setting before, froze a 3DS)
         c.version = 13;
         c.busyWait = 1;
+    }
+    if (c.version == 13) { // Busy Screen: Skip, the default now (tried on an Old 3DS)
+        c.version = 14;
+        c.busyWait = 0;
     }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
