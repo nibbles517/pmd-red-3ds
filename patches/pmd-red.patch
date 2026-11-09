@@ -287,16 +287,18 @@ index d927bef9..a098cfde 100644
 \ No newline at end of file
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..1d53a9d4
+index 00000000..7bb20ca2
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,11 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
 +// 3DS port: the run options, chosen once after New Game (src/port_new_run.c).
 +#define PORT_RUN_OPTIONS 8
-+extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On (they do nothing yet)
++extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On; each Save Data's in config.ini
++// What they do (index in gPortRunOptions):
++#define PORT_RUN_ORAN_TO_SITRUS 0 // Option 1: a rolled Oran Berry is a Sitrus Berry 1% of the time (dungeon_floor_spawns.c)
 +void PortNewRun_Run(void (*frameActions)(u32));
 +
 +#endif
@@ -620,6 +622,33 @@ index 28b04fb0..368ffdc7 100644
 +    }
 +#endif
  }
+diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
+index 4506e559..b92fdc91 100644
+--- a/src/dungeon_floor_spawns.c
++++ b/src/dungeon_floor_spawns.c
+@@ -18,6 +18,9 @@
+ #include "pokemon_3.h"
+ #include "text_1.h"
+ #include "text_3.h"
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#endif
+ #include "dungeon_config.h"
+ #include "structs/dungeon_mapparam.h"
+ 
+@@ -121,6 +124,12 @@ u8 GetRandomFloorItem(s32 spawnType)
+     rand = DungeonRandInt(ITEM_SETS_RANDOM_CAP + 1);
+     for (i = 0; i < NUMBER_OF_ITEM_IDS; i++) {
+         if (gDungeon->itemSpawns[spawnType].itemValues[i] != 0 && GetItemCategory(i) == category && gDungeon->itemSpawns[spawnType].itemValues[i] >= rand) {
++#ifdef PLATFORM_3DS
++            // Run option 1: an Oran Berry rolled here (floor, shop, Monster
++            // House, buried, held, Pickup...) is a Sitrus Berry 1 time in 100
++            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) == 0)
++                return ITEM_SITRUS_BERRY;
++#endif
+             return i;
+         }
+     }
 diff --git a/src/dungeon_items.c b/src/dungeon_items.c
 index 148a1118..359ba656 100644
 --- a/src/dungeon_items.c
@@ -5378,7 +5407,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
-index 00000000..4fd5afd5
+index 00000000..06952c09
 --- /dev/null
 +++ b/src/port_new_run.c
 @@ -0,0 +1,161 @@
@@ -5389,7 +5418,7 @@ index 00000000..4fd5afd5
 +// finish. Then the game's own message box asks "Are you ready? You will not be
 +// able to change these selections after this!" with its small Yes/No window
 +// (as the options menu's old "Change settings?"): Yes goes on to the quiz, No
-+// or B back to the options. The options do nothing yet (gPortRunOptions). They
++// or B back to the options. What the options do: port_new_run.h (gPortRunOptions). They
 +// can't be changed in the game after that; config.ini keeps them per Save Data.
 +#include <string.h>
 +#include "global.h"
