@@ -2865,6 +2865,44 @@ index f3807983..fa116197 100644
      AnimateSprites();
      UpdateAnimatedColors(FadeScreen(), gFriendAreasMapPtr->unk4C4C, 0xB0, 16, gFriendAreasMapPtr->brightness, NULL);
      CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
+diff --git a/src/game_options.c b/src/game_options.c
+index 4d138409..9797af88 100644
+--- a/src/game_options.c
++++ b/src/game_options.c
+@@ -3,6 +3,9 @@
+ #include "game_options.h"
+ #include "graphics_memory.h"
+ #include "data_serializer.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ 
+ EWRAM_INIT GameOptions *gGameOptionsRef = {NULL};
+ EWRAM_DATA GameOptions gGameOptions = {0};
+@@ -25,7 +28,11 @@ void InitializeGameOptions(bool8 initializeGender)
+         gGameOptionsRef->playerGender = MALE;
+     }
+     gGameOptionsRef->controls = CONTROLS_GBA;
++#ifdef PLATFORM_3DS
++    gGameOptionsRef->touchScreen = gPortConfig.mainScreenTop; // Main Screen: config.ini's (options.c)
++#else
+     gGameOptionsRef->touchScreen = 0;
++#endif
+     gGameOptionsRef->dungeonSpeed = DUNGEON_SPEED_SLOW;
+     gGameOptionsRef->FarOffPals = FAROFFPALS_LOCK;
+     gGameOptionsRef->damageTurn = TRUE;
+@@ -157,7 +164,11 @@ void ReadGameOptionsBits(DataSerializer *param_1)
+     gGameOptionsRef->controls  = byteArray[0] & 1;
+ 
+     ReadBits(param_1, byteArray, 1);
++#ifdef PLATFORM_3DS
++    gGameOptionsRef->touchScreen = gPortConfig.mainScreenTop; // Main Screen: config.ini's, not the save's (options.c)
++#else
+     gGameOptionsRef->touchScreen  = byteArray[0] & 1;
++#endif
+ 
+     ReadBits(param_1, byteArray, 1);
+     gGameOptionsRef->playerGender  = byteArray[0] & 1;
 diff --git a/src/graphics_memory.c b/src/graphics_memory.c
 index 1179e657..2f5761d8 100644
 --- a/src/graphics_memory.c

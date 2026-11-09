@@ -49,6 +49,8 @@ struct PortConfig
     u8 sfxVolume;           // the DS sound effects' volume, in tens of percent (version 10; 10 at first)
     u8 gpuDrawOff;          // Graphics Options > GPU Drawing: 0 On, 1 Off (version 11)
     u8 busyWait;            // Graphics Options > Busy Screen: 0 Skip, 1 Wait (version 12; Skip at first since version 14)
+    u8 mainScreenTop;       // Graphics Options > Main Screen: 0 Bottom, 1 Top (in config.ini; was in the save,
+                            // in the game options' touch screen bit, which now just follows it: game_options.c)
 };
 
 extern struct PortConfig gPortConfig;

@@ -174,6 +174,8 @@ static void CheckConfig(void)
         gPortConfig.sfxVolume = 10;
     if (gPortConfig.saveSlot > 2)
         gPortConfig.saveSlot = 0;
+    if (gPortConfig.mainScreenTop > 1)
+        gPortConfig.mainScreenTop = 0;
     memset(gPortConfig.unused1, 0, sizeof(gPortConfig.unused1));
     gPortConfig.version = PORT_CONFIG_VERSION;
     Port_UpdateScreenSize();
@@ -294,6 +296,7 @@ static const char *const sIniOnOff[] = { "On", "Off", NULL };
 static const char *const sIniYesNo[] = { "Yes", "No", NULL };
 static const char *const sIniSkip[] = { "Off", "Auto", "Always", NULL };
 static const char *const sIniBusy[] = { "Skip", "Wait", NULL };
+static const char *const sIniMainScreen[] = { "Bottom", "Top", NULL };
 static const char *const sIniSizes[] = { "GBA", "DS", "Fit", "3DS", NULL };
 static const char *const sIniSubSizes[] = { "GBA", "DS", "Fit", NULL };
 static const char *const sIniScales[] = { "None", "Full", "Stretch", NULL };
@@ -318,6 +321,7 @@ static const IniSetting sIni[] = {
     { "Graphics Options", "Dual Core", &gPortConfig.dualCore, sIniOffOn },
     { "Graphics Options", "GPU Drawing", &gPortConfig.gpuDrawOff, sIniOnOff },
     { "Graphics Options", "Busy Screen", &gPortConfig.busyWait, sIniBusy },
+    { "Graphics Options", "Main Screen", &gPortConfig.mainScreenTop, sIniMainScreen },
     { "Main Screen Settings", "Size", &gPortConfig.layout[0][0], sIniSizes },
     { "Main Screen Settings", "Scale", &gPortConfig.layout[0][1], sIniScales },
     { "Sub-Screen Settings", "Enabled", &gPortConfig.subScreenDisabled, sIniYesNo },
@@ -482,5 +486,12 @@ bool Port_DsButtons(void)
 
 bool Port_WantsBottomScreen(void)
 {
-    return gGameOptionsRef == NULL || !gGameOptionsRef->touchScreen;
+    // Main Screen is kept in config.ini (gPortConfig.mainScreenTop): the game
+    // options' bit is set from it whenever they are loaded or reset
+    // (game_options.c); the menus change the bit, which is written there.
+    if (gGameOptionsRef != NULL && (gGameOptionsRef->touchScreen != 0) != gPortConfig.mainScreenTop) {
+        gPortConfig.mainScreenTop = gGameOptionsRef->touchScreen != 0;
+        Port_SaveConfig();
+    }
+    return !gPortConfig.mainScreenTop;
 }
