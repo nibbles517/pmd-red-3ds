@@ -6757,7 +6757,7 @@ index be399eb4..60375839 100644
          }
          else {
 diff --git a/src/text_1.c b/src/text_1.c
-index e6612f2c..6c39b33a 100644
+index e6612f2c..5819b861 100644
 --- a/src/text_1.c
 +++ b/src/text_1.c
 @@ -1,4 +1,10 @@
@@ -6812,30 +6812,31 @@ index e6612f2c..6c39b33a 100644
      UpdateFadeInTile(0);
  }
  
-@@ -246,6 +258,22 @@ void ShowWindows(const WindowTemplates *winTemplates, bool8 a1, bool8 a2)
+@@ -246,6 +258,23 @@ void ShowWindows(const WindowTemplates *winTemplates, bool8 a1, bool8 a2)
      ShowWindowsInternal(winTemplates, a1, a2, &positionModifier);
  }
  
 +#ifdef PLATFORM_3DS
-+// How many rows a window at GBA row y, `height` rows tall, goes down in the
++// How many rows a window at GBA row y, `height` rows tall (its header too), goes down in the
 +// wide view. DS size: all 2 rows (16 lines). Fit: windows starting in the
 +// GBA screen's bottom half 7 rows (the ones at its bottom end 25 lines above
 +// the screen's bottom); the others, tall lists from near the top included,
-+// 3 (the menus at its top 41 lines below the screen's top). Never less below
-+// than above, so windows only move apart.
++// 3 (the menus at its top 41 lines below the screen's top); but 7 too for a
++// window ending right above the message box (row 15), as the choices of a
++// question do, however many (string_format.c), so it stays on the box. Never
++// less below than above, so windows only move apart.
 +static s32 WindowShiftTiles(s32 y, s32 height)
 +{
-+    (void)height;
 +    if (SCREEN_H <= 192)
 +        return WINDOW_SHIFT_TILES;
-+    return y >= 10 ? WINDOW_SHIFT_TILES : WINDOW_SHIFT_TILES_TOP;
++    return y >= 10 || y + height == 14 ? WINDOW_SHIFT_TILES : WINDOW_SHIFT_TILES_TOP;
 +}
 +#endif
 +
  // red  https://decomp.me/scratch/EN6n0 (includes removed code from pmd-blue)
  // blue https://decomp.me/scratch/1y9BG
  // arm9.bin::020051B0
-@@ -258,6 +286,14 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+@@ -258,6 +287,14 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
          winTemplates = &sDummyWindows;
      if (a2)
          sub_8009388();
@@ -6850,19 +6851,19 @@ index e6612f2c..6c39b33a 100644
  
      ResetWindowBgData();
  
-@@ -265,6 +301,11 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+@@ -265,6 +302,11 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
          sSavedWindows.id[i] = winTemplates->id[i];
  
          if (winTemplates->id[i].width != 0) {
 +#ifdef PLATFORM_3DS
 +            shifted.y = original.y;
 +            if (wide)
-+                shifted.y += WindowShiftTiles(winTemplates->id[i].pos.y + original.y, winTemplates->id[i].height);
++                shifted.y += WindowShiftTiles(winTemplates->id[i].pos.y + original.y, winTemplates->id[i].totalHeight);
 +#endif
              AddWindow(gWindows, (u32 *)VRAM, sWindowGFXPool, gBgTilemaps, sUnknown_80B8804[i], &winTemplates->id[i], a1, startTileNum, positionModifier, FALSE);
              DrawWindowBg(&winTemplates->id[i], positionModifier);
  
-@@ -320,6 +361,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
+@@ -320,6 +362,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
      newWindow = &windows[windowId];
      x = winTemplate->pos.x + positionModifier->x;
      y =  winTemplate->pos.y + positionModifier->y;
