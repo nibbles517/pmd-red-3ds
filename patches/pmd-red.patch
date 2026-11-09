@@ -287,10 +287,10 @@ index d927bef9..a098cfde 100644
 \ No newline at end of file
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..99994117
+index 00000000..296429d9
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,19 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -305,6 +305,8 @@ index 00000000..99994117
 +#define PORT_RUN_ORAN_TO_SITRUS 0
 +#define PORT_RUN_REVIVER_TO_LIFE 1
 +#define PORT_RUN_ELIXIR_TO_VITAMIN 2
++// Normalized Shop Prices: items.c prices items by data/port_shop_prices.h
++#define PORT_RUN_SHOP_PRICES 7
 +void PortNewRun_Run(void (*frameActions)(u32));
 +
 +#endif
@@ -612,6 +614,258 @@ index 55f3b5f3..4bfc40f9 100644
  ALIGNED(4) static const u8 sBlue[] = _("Blue");
  ALIGNED(4) static const u8 sRed[] = _("Red");
  ALIGNED(4) static const u8 sGreen[] = _("Green");
+diff --git a/src/data/port_shop_prices.h b/src/data/port_shop_prices.h
+new file mode 100644
+index 00000000..a1d6eff3
+--- /dev/null
++++ b/src/data/port_shop_prices.h
+@@ -0,0 +1,246 @@
++// 3DS port, run option 8 (Normalized Shop Prices): each item's buy and sell
++// price, from kecleon-item-prices.xlsx (Custom Buy / Custom Sell; halves
++// rounded up). Built in, never read from a file. Not listed (both 0): the
++// game's own prices.
++// Thrown items: per piece, as the game's (items.c).
++static const s32 sPortShopPrices[NUMBER_OF_ITEM_IDS][2] = {
++    [1] = { 2, 1 }, // Stick (was 2 / 1)
++    [2] = { 4, 2 }, // Iron Thorn (was 4 / 2)
++    [3] = { 6, 3 }, // Silver Spike (was 6 / 3)
++    [4] = { 8, 4 }, // Gold Fang (was 8 / 4)
++    [5] = { 10, 5 }, // Cacnea Spike (was 10 / 5)
++    [6] = { 12, 6 }, // Corsola Twig (was 12 / 6)
++    [7] = { 10, 5 }, // Gravelerock (was 10 / 5)
++    [8] = { 5, 3 }, // Geo Pebble (was 5 / 5)
++    [9] = { 1000, 500 }, // Mobile Scarf (was 1000 / 300)
++    [10] = { 1100, 550 }, // Heal Ribbon (was 1100 / 350)
++    [11] = { 1200, 600 }, // Twist Band (was 1200 / 400)
++    [12] = { 1300, 650 }, // Scope Lens (was 1300 / 450)
++    [13] = { 50, 25 }, // Patsy Band (was 50 / 25)
++    [14] = { 1500, 750 }, // No-Stick Cap (was 1500 / 550)
++    [15] = { 1600, 800 }, // Pierce Band (was 1600 / 600)
++    [16] = { 5000, 2500 }, // Joy Ribbon (was 5000 / 2000)
++    [17] = { 4000, 2000 }, // X-Ray Specs (was 4000 / 2000)
++    [18] = { 1500, 750 }, // Persim Band (was 1500 / 750)
++    [19] = { 500, 250 }, // Power Band (was 500 / 250)
++    [20] = { 1200, 600 }, // Pecha Scarf (was 1200 / 500)
++    [21] = { 1200, 600 }, // Insomniscope (was 1200 / 500)
++    [22] = { 50, 25 }, // Warp Scarf (was 50 / 25)
++    [23] = { 5000, 2500 }, // Tight Belt (was 5000 / 1000)
++    [24] = { 2500, 1250 }, // Sneak Scarf (was 2500 / 1000)
++    [25] = { 5000, 2500 }, // Gold Ribbon (was 3000 / 2000)
++    [26] = { 1500, 750 }, // Goggle Specs (was 1500 / 500)
++    [27] = { 50, 25 }, // Diet Ribbon (was 50 / 25)
++    [28] = { 5000, 2500 }, // Trap Scarf (was 5000 / 1500)
++    [29] = { 3000, 1500 }, // Racket Band (was 3000 / 1300)
++    [30] = { 3000, 1500 }, // Def. Scarf (was 3000 / 1350)
++    [31] = { 3200, 1600 }, // Stamina Band (was 3200 / 1400)
++    [32] = { 50, 25 }, // Plain Ribbon (was 50 / 25)
++    [33] = { 5000, 2500 }, // Special Band (was 5000 / 1500)
++    [34] = { 5000, 2500 }, // Zinc Band (was 5000 / 1500)
++    [35] = { 5000, 2500 }, // Detect Band (was 5000 / 1500)
++    [36] = { 4000, 2000 }, // Alert Specs (was 4000 / 2000)
++    [37] = { 5000, 2500 }, // Dodge Scarf (was 5000 / 2500)
++    [38] = { 3500, 1750 }, // Bounce Band (was 3500 / 1500)
++    [39] = { 50, 25 }, // Curve Band (was 50 / 25)
++    [40] = { 50, 25 }, // Whiff Specs (was 50 / 25)
++    [41] = { 100, 50 }, // No-Aim Scope (was 100 / 50)
++    [42] = { 4000, 2000 }, // Lockon Specs (was 4000 / 1500)
++    [43] = { 4000, 2000 }, // Munch Belt (was 4000 / 1500)
++    [44] = { 4000, 2000 }, // Pass Scarf (was 4000 / 1500)
++    [45] = { 4000, 2000 }, // Weather Band (was 4000 / 1500)
++    [46] = { 5000, 2500 }, // Friend Bow (was 5000 / 500)
++    [47] = { 10000, 5000 }, // Beauty Scarf (was 9000 / 5000)
++    [48] = { 5000, 2500 }, // Sun Ribbon (was 5000 / 1500)
++    [49] = { 5000, 2500 }, // Lunar Ribbon (was 5000 / 1500)
++    [50] = { 5100, 2550 }, // Ring D (was 5100 / 1500)
++    [51] = { 5200, 2600 }, // Ring E (was 5200 / 1500)
++    [52] = { 5300, 2650 }, // Ring F (was 5300 / 1500)
++    [53] = { 250, 125 }, // Heal Seed (was 250 / 120)
++    [54] = { 4, 2 }, // Wish Stone (was 4 / 2)
++    [55] = { 50, 25 }, // Oran Berry (was 50 / 25)
++    [56] = { 4000, 2000 }, // Sitrus Berry (was 4000 / 100)
++    [57] = { 60, 30 }, // Eyedrop Seed (was 60 / 20)
++    [58] = { 800, 400 }, // Reviver Seed (was 800 / 150)
++    [59] = { 50, 25 }, // Blinker Seed (was 50 / 20)
++    [60] = { 20, 10 }, // Doom Seed (was 20 / 5)
++    [61] = { 60, 30 }, // Allure Seed (was 60 / 30)
++    [62] = { 1000, 500 }, // Life Seed (was 1000 / 50)
++    [63] = { 150, 75 }, // Rawst Berry (was 150 / 20)
++    [64] = { 50, 25 }, // Hunger Seed (was 50 / 20)
++    [65] = { 30, 15 }, // Quick Seed (was 30 / 15)
++    [66] = { 80, 40 }, // Pecha Berry (was 80 / 5)
++    [67] = { 120, 60 }, // Cheri Berry (was 120 / 20)
++    [68] = { 60, 30 }, // Totter Seed (was 60 / 30)
++    [69] = { 70, 35 }, // Sleep Seed (was 70 / 35)
++    [70] = { 6, 3 }, // Plain Seed (was 6 / 1)
++    [71] = { 20, 10 }, // Warp Seed (was 20 / 10)
++    [72] = { 30, 15 }, // Blast Seed (was 30 / 15)
++    [73] = { 2600, 1300 }, // Ginseng (was 2600 / 1000)
++    [74] = { 3000, 1500 }, // Joy Seed (was 3000 / 1000)
++    [75] = { 30, 15 }, // Chesto Berry (was 30 / 15)
++    [76] = { 50, 25 }, // Stun Seed (was 50 / 25)
++    [77] = { 250, 125 }, // Max Elixir (was 250 / 100)
++    [78] = { 5000, 2500 }, // Protein (was 5000 / 5)
++    [79] = { 6000, 3000 }, // Calcium (was 6000 / 5)
++    [80] = { 7000, 3500 }, // Iron (was 7000 / 5)
++    [81] = { 8000, 4000 }, // Zinc (was 8000 / 5)
++    [82] = { 25, 13 }, // Apple (was 25 / 1)
++    [83] = { 50, 25 }, // Big Apple (was 50 / 1)
++    [84] = { 5, 3 }, // Grimy Food (was 5 / 1)
++    [85] = { 100, 50 }, // Huge Apple (was 100 / 50)
++    [86] = { 200, 100 }, // White Gummi (was 200 / 50)
++    [87] = { 200, 100 }, // Red Gummi (was 200 / 50)
++    [88] = { 200, 100 }, // Blue Gummi (was 200 / 50)
++    [89] = { 200, 100 }, // Grass Gummi (was 200 / 50)
++    [90] = { 200, 100 }, // Yellow Gummi (was 200 / 50)
++    [91] = { 200, 100 }, // Clear Gummi (was 200 / 50)
++    [92] = { 200, 100 }, // Orange Gummi (was 200 / 50)
++    [93] = { 1500, 750 }, // Pink Gummi (was 1500 / 50)
++    [94] = { 200, 100 }, // Brown Gummi (was 200 / 50)
++    [95] = { 200, 100 }, // Sky Gummi (was 200 / 50)
++    [96] = { 200, 100 }, // Gold Gummi (was 200 / 50)
++    [97] = { 200, 100 }, // Green Gummi (was 200 / 50)
++    [98] = { 200, 100 }, // Gray Gummi (was 200 / 50)
++    [99] = { 200, 100 }, // Purple Gummi (was 200 / 50)
++    [100] = { 200, 100 }, // Royal Gummi (was 200 / 50)
++    [101] = { 200, 100 }, // Black Gummi (was 200 / 50)
++    [102] = { 1000, 500 }, // Silver Gummi (was 1000 / 500)
++    [103] = { 10000, 5000 }, // Banana (was 9000 / 5000)
++    [104] = { 3, 2 }, // Chestnut (was 3 / 1)
++    [105] = { 0, 0 }, // None (was 0 / 0)
++    [106] = { 3000, 300 }, // Upgrade (was 3000 / 1)
++    [107] = { 3000, 300 }, // ItemNameKingsRock (was 3000 / 1)
++    [108] = { 3000, 300 }, // Thunderstone (was 3000 / 1)
++    [109] = { 3000, 300 }, // Deepseascale (was 3000 / 1)
++    [110] = { 3000, 300 }, // Deepseatooth (was 3000 / 1)
++    [111] = { 3000, 300 }, // Sun Stone (was 3000 / 1)
++    [112] = { 3000, 300 }, // Moon Stone (was 3000 / 1)
++    [113] = { 3000, 300 }, // Fire Stone (was 3000 / 1)
++    [114] = { 3000, 300 }, // Water Stone (was 3000 / 1)
++    [115] = { 3000, 300 }, // Metal Coat (was 3000 / 1)
++    [116] = { 3000, 300 }, // Leaf Stone (was 3000 / 1)
++    [117] = { 3000, 300 }, // Dragon Scale (was 3000 / 1)
++    [118] = { 3000, 300 }, // Link Cable (was 3000 / 1)
++    [119] = { 1, 1 }, // Ice Part (was 1 / 1)
++    [120] = { 1, 1 }, // Steel Part (was 1 / 1)
++    [121] = { 1, 1 }, // Rock Part (was 1 / 1)
++    [122] = { 1, 1 }, // Music Box (was 1 / 1)
++    [123] = { 1, 1 }, // Key (was 1 / 1)
++    [124] = { 1, 1 }, // Used TM (was 1 / 1)
++    [125] = { 5000, 1250 }, // Focus Punch (was 5000 / 1000)
++    [126] = { 8000, 2000 }, // Dragon Claw (was 8000 / 2000)
++    [127] = { 7500, 1875 }, // Water Pulse (was 7500 / 2000)
++    [128] = { 8000, 2000 }, // Calm Mind (was 8000 / 2000)
++    [129] = { 1500, 375 }, // Roar (was 1500 / 300)
++    [130] = { 6000, 1500 }, // Toxic (was 6000 / 1500)
++    [131] = { 300, 150 }, // Hail Orb (was 300 / 150)
++    [132] = { 8000, 2000 }, // Bulk Up (was 8000 / 2000)
++    [133] = { 6000, 1500 }, // Bullet Seed (was 6000 / 1500)
++    [134] = { 1500, 375 }, // Hidden Power (was 1500 / 300)
++    [135] = { 300, 150 }, // Sunny Orb (was 300 / 150)
++    [136] = { 1500, 375 }, // Taunt (was 1500 / 300)
++    [137] = { 8000, 2000 }, // Ice Beam (was 8000 / 2000)
++    [138] = { 9000, 2250 }, // Blizzard (was 9000 / 3000)
++    [139] = { 9000, 2250 }, // Hyper Beam (was 9000 / 3000)
++    [140] = { 2500, 625 }, // Light Screen (was 2500 / 300)
++    [141] = { 6000, 1500 }, // Protect (was 6000 / 2000)
++    [142] = { 300, 150 }, // Rainy Orb (was 300 / 150)
++    [143] = { 7000, 1750 }, // Giga Drain (was 7000 / 2000)
++    [144] = { 6000, 1500 }, // Safeguard (was 6000 / 1500)
++    [145] = { 3000, 750 }, // Frustration (was 3000 / 1000)
++    [146] = { 7000, 1750 }, // Solarbeam (was 7000 / 2000)
++    [147] = { 8000, 2000 }, // Iron Tail (was 8000 / 2000)
++    [148] = { 8000, 2000 }, // Thunderbolt (was 8000 / 2000)
++    [149] = { 9000, 2250 }, // Thunder (was 9000 / 3000)
++    [150] = { 6500, 1625 }, // Earthquake (was 6500 / 1500)
++    [151] = { 3000, 750 }, // Return (was 3000 / 1000)
++    [152] = { 3000, 750 }, // Dig (was 3000 / 1000)
++    [153] = { 5000, 1250 }, // Psychic (was 5000 / 1500)
++    [154] = { 6500, 1625 }, // Shadow Ball (was 6500 / 1000)
++    [155] = { 2500, 625 }, // Brick Break (was 2500 / 500)
++    [156] = { 300, 150 }, // Evasion Orb (was 300 / 150)
++    [157] = { 2500, 625 }, // Reflect (was 2500 / 500)
++    [158] = { 7500, 1875 }, // Shock Wave (was 7500 / 2000)
++    [159] = { 8000, 2000 }, // Flamethrower (was 8000 / 2000)
++    [160] = { 7500, 1875 }, // Sludge Bomb (was 7500 / 1500)
++    [161] = { 500, 250 }, // Sandy Orb (was 500 / 250)
++    [162] = { 9000, 2250 }, // Fire Blast (was 9000 / 3000)
++    [163] = { 500, 250 }, // Rocky Orb (was 500 / 250)
++    [164] = { 7500, 1875 }, // Aerial Ace (was 7500 / 2000)
++    [165] = { 1500, 375 }, // Torment (was 1500 / 300)
++    [166] = { 1500, 375 }, // Facade (was 1500 / 300)
++    [167] = { 1500, 375 }, // Secret Power (was 1500 / 300)
++    [168] = { 3000, 750 }, // Rest (was 3000 / 500)
++    [169] = { 1500, 375 }, // Attract (was 1500 / 500)
++    [170] = { 1500, 375 }, // Thief (was 1500 / 500)
++    [171] = { 7000, 1750 }, // Steel Wing (was 7000 / 2000)
++    [172] = { 7000, 1750 }, // Skill Swap (was 7000 / 2000)
++    [173] = { 300, 150 }, // Snatch Orb (was 300 / 150)
++    [174] = { 6500, 1625 }, // Overheat (was 6500 / 2000)
++    [175] = { 2500, 625 }, // Wide Slash (was 2500 / 300)
++    [176] = { 2500, 625 }, // Excavate (was 2500 / 300)
++    [177] = { 2500, 625 }, // Spin Slash (was 2500 / 300)
++    [178] = { 300, 150 }, // See-Trap Orb (was 300 / 150)
++    [179] = { 300, 150 }, // Mug Orb (was 300 / 150)
++    [180] = { 300, 150 }, // Rebound Orb (was 300 / 150)
++    [181] = { 300, 150 }, // Lob Orb (was 300 / 150)
++    [182] = { 300, 150 }, // Switcher Orb (was 300 / 150)
++    [183] = { 300, 150 }, // Blowback Orb (was 300 / 150)
++    [184] = { 300, 150 }, // Warp Orb (was 300 / 150)
++    [185] = { 300, 150 }, // Transfer Orb (was 300 / 150)
++    [186] = { 300, 150 }, // Slow Orb (was 300 / 150)
++    [187] = { 300, 150 }, // Quick Orb (was 300 / 150)
++    [188] = { 300, 150 }, // Luminous Orb (was 300 / 150)
++    [189] = { 300, 150 }, // Petrify Orb (was 300 / 150)
++    [190] = { 300, 150 }, // Stayaway Orb (was 300 / 150)
++    [191] = { 300, 150 }, // Pounce Orb (was 300 / 150)
++    [192] = { 300, 150 }, // Trawl Orb (was 300 / 150)
++    [193] = { 300, 150 }, // Cleanse Orb (was 300 / 150)
++    [194] = { 300, 150 }, // Observer Orb (was 300 / 150)
++    [195] = { 300, 150 }, // Decoy Orb (was 300 / 150)
++    [196] = { 300, 150 }, // Slumber Orb (was 300 / 150)
++    [197] = { 300, 150 }, // Totter Orb (was 300 / 150)
++    [198] = { 300, 150 }, // Two-Edge Orb (was 300 / 150)
++    [199] = { 300, 150 }, // Silence Orb (was 300 / 150)
++    [200] = { 300, 150 }, // Escape Orb (was 300 / 150)
++    [201] = { 300, 150 }, // Scanner Orb (was 300 / 150)
++    [202] = { 300, 150 }, // Radar Orb (was 300 / 150)
++    [203] = { 300, 150 }, // Drought Orb (was 300 / 150)
++    [204] = { 300, 150 }, // Trapbust Orb (was 300 / 150)
++    [205] = { 300, 150 }, // Rollcall Orb (was 300 / 150)
++    [206] = { 300, 150 }, // Invisify Orb (was 300 / 150)
++    [207] = { 300, 150 }, // One-Shot Orb (was 300 / 150)
++    [208] = { 300, 150 }, // Identify Orb (was 300 / 150)
++    [209] = { 2500, 625 }, // Vacuum-Cut (was 2500 / 300)
++    [210] = { 300, 150 }, // Reviver Orb (was 300 / 150)
++    [211] = { 300, 150 }, // Shocker Orb (was 300 / 150)
++    [212] = { 300, 150 }, // Sizebust Orb (was 300 / 150)
++    [213] = { 300, 150 }, // One-Room Orb (was 300 / 150)
++    [214] = { 300, 150 }, // Fill-In Orb (was 300 / 150)
++    [215] = { 300, 150 }, // Trapper Orb (was 300 / 150)
++    [216] = { 300, 150 }, // Possess Orb (was 300 / 150)
++    [217] = { 300, 150 }, // Itemizer Orb (was 300 / 150)
++    [218] = { 300, 150 }, // Hurl Orb (was 300 / 150)
++    [219] = { 300, 150 }, // Mobile Orb (was 300 / 150)
++    [220] = { 300, 150 }, // Toss Orb (was 300 / 150)
++    [221] = { 300, 150 }, // Stairs Orb (was 300 / 150)
++    [222] = { 300, 150 }, // Longtoss Orb (was 300 / 150)
++    [223] = { 300, 150 }, // Pierce Orb (was 300 / 150)
++    [224] = { 2, 1 }, // Cut (was 2 / 1)
++    [225] = { 2, 1 }, // Fly (was 2 / 1)
++    [226] = { 2, 1 }, // Surf (was 2 / 1)
++    [227] = { 2, 1 }, // Strength (was 2 / 1)
++    [228] = { 2, 1 }, // Flash (was 2 / 1)
++    [229] = { 2, 1 }, // Rock Smash (was 2 / 1)
++    [230] = { 2, 1 }, // Waterfall (was 2 / 1)
++    [231] = { 2, 1 }, // Dive (was 2 / 1)
++    [232] = { 3000, 1500 }, // Link Box (was 3000 / 500)
++    [233] = { 1500, 750 }, // Switch Box (was 1500 / 500)
++    [234] = { 1, 1 }, // Weavile Fig (was 1 / 1)
++    [235] = { 1, 1 }, // Mime Jr. Fig (was 1 / 1)
++    [236] = { 300, 150 }, // Beatup Orb (was 300 / 150)
++    [237] = { 8000, 4000 }, // G Machine 6 (was 8000 / 500)
++    [238] = { 8000, 4000 }, // G Machine 7 (was 8000 / 500)
++    [239] = { 8000, 4000 }, // G Machine 8 (was 8000 / 500)
++};
 diff --git a/src/dungeon_cleared_window.c b/src/dungeon_cleared_window.c
 index 28b04fb0..368ffdc7 100644
 --- a/src/dungeon_cleared_window.c
@@ -3038,6 +3292,106 @@ index 79fd9c0d..0a1feab2 100644
          ptr->unk70 = 0;
          return FALSE;
      }
+diff --git a/src/items.c b/src/items.c
+index a2ebfc31..241ca022 100644
+--- a/src/items.c
++++ b/src/items.c
+@@ -16,6 +16,33 @@
+ #include "strings.h"
+ #include "dungeon_info.h"
+ #include "dungeon_data.h"
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#include "data/port_shop_prices.h"
++
++// Run option 8, Normalized Shop Prices: the built-in table's prices
++// (data/port_shop_prices.h) instead of the game's, everywhere it prices items
++static s32 PortBuyPrice(u8 id)
++{
++    if (gPortRunOptions[PORT_RUN_SHOP_PRICES] && id < NUMBER_OF_ITEM_IDS
++        && (sPortShopPrices[id][0] != 0 || sPortShopPrices[id][1] != 0))
++        return sPortShopPrices[id][0];
++    return gItemParametersData[id].buyPrice;
++}
++
++static s32 PortSellPrice(u8 id)
++{
++    if (gPortRunOptions[PORT_RUN_SHOP_PRICES] && id < NUMBER_OF_ITEM_IDS
++        && (sPortShopPrices[id][0] != 0 || sPortShopPrices[id][1] != 0))
++        return sPortShopPrices[id][1];
++    return gItemParametersData[id].sellPrice;
++}
++#define PORT_BUY_PRICE(id) PortBuyPrice(id)
++#define PORT_SELL_PRICE(id) PortSellPrice(id)
++#else
++#define PORT_BUY_PRICE(id) gItemParametersData[id].buyPrice
++#define PORT_SELL_PRICE(id) gItemParametersData[id].sellPrice
++#endif
+ 
+ EWRAM_DATA OpenedFile *gItemParametersFile = {NULL};
+ EWRAM_DATA ItemDataEntry *gItemParametersData = {NULL}; // NDS=0213BEF0
+@@ -248,9 +275,9 @@ s32 GetStackBuyValue(Item *param_1)
+     if (param_1->id == ITEM_POKE)
+         return GetMoneyValue(param_1);
+     else if (IsThrownItem(param_1->id))
+-        return gItemParametersData[param_1->id].buyPrice * param_1->quantity;
++        return PORT_BUY_PRICE(param_1->id) * param_1->quantity;
+     else
+-        return gItemParametersData[param_1->id].buyPrice;
++        return PORT_BUY_PRICE(param_1->id);
+ }
+ 
+ // arm9.bin::02060CE0
+@@ -259,9 +286,9 @@ s32 GetStackSellValue(Item *param_1)
+     if (param_1->id == ITEM_POKE)
+         return GetMoneyValue(param_1);
+     else if (IsThrownItem(param_1->id))
+-        return gItemParametersData[param_1->id].sellPrice * param_1->quantity;
++        return PORT_SELL_PRICE(param_1->id) * param_1->quantity;
+     else
+-        return gItemParametersData[param_1->id].sellPrice;
++        return PORT_SELL_PRICE(param_1->id);
+ }
+ 
+ // arm9.bin::02060C7C
+@@ -270,9 +297,9 @@ s32 GetActualBuyPrice(Item *param_1)
+     if (!IsShoppableItem(param_1->id))
+         return 0;
+     else if (IsThrownItem(param_1->id))
+-        return gItemParametersData[param_1->id].buyPrice * param_1->quantity;
++        return PORT_BUY_PRICE(param_1->id) * param_1->quantity;
+     else
+-        return gItemParametersData[param_1->id].buyPrice;
++        return PORT_BUY_PRICE(param_1->id);
+ }
+ 
+ // arm9.bin::02060C18
+@@ -281,21 +308,21 @@ s32 GetActualSellPrice(Item *param_1)
+     if (!IsShoppableItem(param_1->id))
+         return 0;
+     else if (IsThrownItem(param_1->id))
+-        return gItemParametersData[param_1->id].sellPrice * param_1->quantity;
++        return PORT_SELL_PRICE(param_1->id) * param_1->quantity;
+     else
+-        return gItemParametersData[param_1->id].sellPrice;
++        return PORT_SELL_PRICE(param_1->id);
+ }
+ 
+ // arm9.bin::02060C00
+ s32 GetItemBuyPrice(u8 id)
+ {
+-    return gItemParametersData[id].buyPrice;
++    return PORT_BUY_PRICE(id);
+ }
+ 
+ // arm9.bin::02060BE8
+ s32 GetItemSellPrice(u8 id)
+ {
+-    return gItemParametersData[id].sellPrice;
++    return PORT_SELL_PRICE(id);
+ }
+ 
+ // arm9.bin::02060BD0
 diff --git a/src/m4a.c b/src/m4a.c
 index 2bcf6f8a..603c0a3d 100644
 --- a/src/m4a.c
@@ -5422,7 +5776,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
-index 00000000..9a5c364f
+index 00000000..dac6265d
 --- /dev/null
 +++ b/src/port_new_run.c
 @@ -0,0 +1,161 @@
@@ -5484,7 +5838,7 @@ index 00000000..9a5c364f
 +ALIGNED(4) static const u8 sReady[] = _("Are you ready? You will not be able to\nchange these selections after this!");
 +static const u8 *const sNames[PORT_RUN_OPTIONS] = {
 +    _("Increased Sitrus Berries"), _("Increased Life Seeds"), _("Increased Vitamins"), _("Option 4"),
-+    _("Option 5"), _("Option 6"), _("Option 7"), _("Option 8"), // (and options.c sRunOptionNames)
++    _("Option 5"), _("Option 6"), _("Option 7"), _("Normalized Shop Prices"), // (and options.c sRunOptionNames)
 +};
 +#define CHOICE_X(i) (144 + (i) * 40)
 +
