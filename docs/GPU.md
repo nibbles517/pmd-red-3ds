@@ -134,6 +134,25 @@ it, and the GPU draws it in `GpuDrawFrame`:
 port.log's `gpu:` part: on/off, frames from the list out of those drawn,
 the time writing textures takes, and why the others weren't listed.
 
+## Describing a frame quickly (Old 3DS)
+
+Describing a frame is the main core's steady cost with the GPU drawing.
+What keeps it down (gpulist.c, ppu.c `Ppu_ListLine`):
+
+- A piece continues the rectangle of the line before that starts at the
+  same screen x: found with one look (`sDxQuad`), not by searching.
+- A line whose registers (but VCOUNT/DISPSTAT) and windows are the line
+  before's, with each layer that was clear all along it still clear on its
+  next row, is that line again a row further down: its rectangles are made
+  a line taller (`GpuList_RepeatLine`; not across a row of tiles, nor with
+  strips). About half of a dungeon's lines, and most of a town's.
+- The dungeon's full-screen tiled BG2, clear most of the time, is seen
+  clear from its cache's row instead of drawing a GBA line for it.
+
+The harness's profile of 60 frames walking in a dungeon (Fit): about a
+third fewer instructions in all than before these, half as many describing
+lines.
+
 ## Next stages
 
 2. **Tuning on the hardware** (stage 2 is built): what port.log shows the
