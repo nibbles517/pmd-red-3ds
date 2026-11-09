@@ -285,6 +285,21 @@ index d927bef9..a098cfde 100644
  
  #endif // GUARD_OPTIONS_MENU1_H
 \ No newline at end of file
+diff --git a/include/port_new_run.h b/include/port_new_run.h
+new file mode 100644
+index 00000000..1d53a9d4
+--- /dev/null
++++ b/include/port_new_run.h
+@@ -0,0 +1,9 @@
++#ifndef GUARD_PORT_NEW_RUN_H
++#define GUARD_PORT_NEW_RUN_H
++
++// 3DS port: the run options, chosen once after New Game (src/port_new_run.c).
++#define PORT_RUN_OPTIONS 8
++extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On (they do nothing yet)
++void PortNewRun_Run(void (*frameActions)(u32));
++
++#endif
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
 index 00000000..46348dc7
@@ -3101,18 +3116,21 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..b1dbf665 100644
+index 372641a7..146728c9 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,10 @@
  #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#endif
 +#ifdef PLATFORM_3DS
 +#include "port_game.h"
 +#endif
  #include "globaldata.h"
  #include "constants/bg_music.h"
  #include "constants/friend_area.h"
-@@ -60,6 +63,19 @@ typedef struct unkTalkTable
+@@ -60,6 +66,19 @@ typedef struct unkTalkTable
  } unkTalkTable;
  
  static EWRAM_DATA s32 sTitleBrightness = 0; // NDS=210FAC0
@@ -3132,7 +3150,7 @@ index 372641a7..b1dbf665 100644
  // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
  
  static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
-@@ -140,6 +156,9 @@ void GameLoop_Async(void)
+@@ -140,6 +159,9 @@ void GameLoop_Async(void)
      LoadMailInfo();
      sub_800CD64(0x8000, FALSE);
      sub_8012284();
@@ -3142,7 +3160,7 @@ index 372641a7..b1dbf665 100644
      InitializeGameOptions(TRUE);
      SetWindowTitle(_("PKDi ver 1.0 [Apr 28 2006] 16:37:54"));
      sub_800DAAC();
-@@ -149,6 +168,9 @@ void GameLoop_Async(void)
+@@ -149,6 +171,9 @@ void GameLoop_Async(void)
      if (ReadSaveFromPak(&tmp))
          ThoroughlyResetScriptVars();
  
@@ -3152,7 +3170,7 @@ index 372641a7..b1dbf665 100644
      xxx_script_related_8001334_Async(STARTMODE_14);
      xxx_script_related_8001334_Async(STARTMODE_15);
      ClearScriptVarArray(NULL, EVENT_LOCAL);
-@@ -156,6 +178,10 @@ void GameLoop_Async(void)
+@@ -156,6 +181,10 @@ void GameLoop_Async(void)
  
      if (GetScriptVarValue(NULL, EVENT_LOCAL) == 0)
          xxx_script_related_8001334_Async(STARTMODE_17);
@@ -3163,7 +3181,7 @@ index 372641a7..b1dbf665 100644
  
      while (TRUE) {
          sMainLoopsUnk = MAINLOOPS_UNK_0;
-@@ -166,6 +192,18 @@ void GameLoop_Async(void)
+@@ -166,6 +195,18 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
@@ -3182,7 +3200,7 @@ index 372641a7..b1dbf665 100644
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -224,6 +262,10 @@ void GameLoop_Async(void)
+@@ -224,6 +265,10 @@ void GameLoop_Async(void)
                  break;
              if (nextMenu == MENU_NEW_GAME)
                  break;
@@ -3193,7 +3211,7 @@ index 372641a7..b1dbf665 100644
          }
  
          DeleteMainMenu();
-@@ -241,7 +283,22 @@ void GameLoop_Async(void)
+@@ -241,7 +286,22 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
@@ -3217,7 +3235,17 @@ index 372641a7..b1dbf665 100644
          switch (nextMenu) {
              case 2: {
                  s32 mailIndex = GetFirstIndexofMailType(7);
-@@ -1095,7 +1152,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -259,6 +319,9 @@ void GameLoop_Async(void)
+                 break;
+             }
+             case MENU_NEW_GAME: {
++#ifdef PLATFORM_3DS
++                PortNewRun_Run(MainLoops_RunFrameActions); // the run options, then the quiz
++#endif
+                 sub_80122A8();
+                 nullsub_33();
+                 tmp3 = RunGameMode_Async(0);
+@@ -1095,7 +1158,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
@@ -5348,6 +5376,169 @@ index 926d28d1..684b3d20 100644
  void sub_8099744(void)
  {
      RunPaletteFadeFunctions();
+diff --git a/src/port_new_run.c b/src/port_new_run.c
+new file mode 100644
+index 00000000..a2e4e00b
+--- /dev/null
++++ b/src/port_new_run.c
+@@ -0,0 +1,157 @@
++// 3DS port: the run options, chosen once when a new adventure starts.
++//
++// After New Game (main_loops.c), before the personality quiz: a window over
++// the whole screen with 8 Off/On options (Left/Right or A to toggle), START to
++// finish. Then the game's own message box asks "Are you ready? You will not be
++// able to change these selections after this!" with its small Yes/No window
++// (as the options menu's old "Change settings?"): Yes goes on to the quiz, No
++// or B back to the options. The options do nothing yet (gPortRunOptions).
++#include <string.h>
++#include "global.h"
++#include "globaldata.h"
++#include "common_strings.h"
++#include "constants/colors.h"
++#include "constants/input.h"
++#include "music_util.h"
++#include "input.h"
++#include "menu_input.h"
++#include "port_game.h"
++#include "port_new_run.h"
++#include "string_format.h"
++#include "text_1.h"
++#include "text_2.h"
++#include "text_3.h"
++
++#ifdef PLATFORM_3DS
++
++u8 gPortRunOptions[PORT_RUN_OPTIONS];
++
++enum { ANSWER_YES = 1, ANSWER_NO };
++
++static struct {
++    MenuInputStruct input;
++    WindowTemplates windows;
++    MenuItem answers[3];
++} sRun;
++
++static const WindowTemplate sNoWindow = { 0, 3, 0, 0, 0, 0, 0, 0, NULL };
++static const WindowHeader sHeader = { 1, 0, 16, 0 };
++// The whole GBA screen, but the frame. (Text windows can't be wider than the
++// GBA screen: their tilemap is 32 tiles wide.)
++static const WindowTemplate sWindow = {
++    0,
++    6,
++    1, 2,
++    28, 17,
++    19, 0,
++    &sHeader
++};
++
++ALIGNED(4) static const u8 sTitle[] = _("Run Options");
++ALIGNED(4) static const u8 sOff[] = _("Off");
++ALIGNED(4) static const u8 sOn[] = _("On");
++ALIGNED(4) static const u8 sHelp[] = _("{COLOR CYAN}Left/Right{RESET}: Off or On   {COLOR CYAN}START{RESET}: Done");
++ALIGNED(4) static const u8 sReady[] = _("Are you ready? You will not be able to\nchange these selections after this!");
++static const u8 *const sNames[PORT_RUN_OPTIONS] = {
++    _("Option 1"), _("Option 2"), _("Option 3"), _("Option 4"),
++    _("Option 5"), _("Option 6"), _("Option 7"), _("Option 8"),
++};
++#define CHOICE_X(i) (120 + (i) * 40)
++
++static void Draw(void)
++{
++    s32 i, y;
++
++    CallPrepareTextbox_8008C54(0);
++    sub_80073B8(0);
++    PrintStringOnWindow(16, 0, sTitle, 0, 0);
++    for (i = 0; i < PORT_RUN_OPTIONS; i++) {
++        y = GetMenuEntryYCoord(&sRun.input, i);
++        PrintStringOnWindow(8, y, sNames[i], 0, 0);
++        PrintStringOnWindow(CHOICE_X(0), y, sOff, 0, 0);
++        PrintStringOnWindow(CHOICE_X(1), y, sOn, 0, 0);
++        AddDoubleUnderScoreHighlight(0, CHOICE_X(gPortRunOptions[i] ? 1 : 0), y + 10,
++                                     GetStringLineWidth(gPortRunOptions[i] ? sOn : sOff), COLOR_WHITE_2);
++    }
++    PrintStringOnWindow(8, GetMenuEntryYCoord(&sRun.input, PORT_RUN_OPTIONS - 1) + 20, sHelp, 0, 0);
++    sub_80073E0(0);
++}
++
++// The options window, cursor on `entry`
++static void ShowOptions(s32 entry)
++{
++    sRun.windows.id[0] = sWindow;
++    sRun.windows.id[1] = sNoWindow;
++    sRun.windows.id[2] = sNoWindow;
++    sRun.windows.id[3] = sNoWindow;
++    ResetUnusedInputStruct();
++    ShowWindows(&sRun.windows, TRUE, TRUE);
++    CreateMenuOnWindow(&sRun.input, PORT_RUN_OPTIONS, PORT_RUN_OPTIONS, 0);
++    MoveMenuToEntryId(&sRun.input, entry);
++    sRun.input.entryHeight = 12 << 8;
++    Draw();
++}
++
++// The question in the message box, with the Yes/No window (cursor on No)
++static void Ask(void)
++{
++    sRun.answers[0].text = gCommonYes[0];
++    sRun.answers[0].menuAction = ANSWER_YES;
++    sRun.answers[1].text = gCommonNo[0];
++    sRun.answers[1].menuAction = ANSWER_NO;
++    sRun.answers[2].text = NULL;
++    sRun.answers[2].menuAction = 0;
++    CreateMenuDialogueBoxAndPortrait(sReady, NULL, ANSWER_NO, sRun.answers, NULL, 4, 0, NULL,
++                                     STR_FORMAT_FLAG_INSTANT_TEXT);
++}
++
++// Runs until the player says Yes to the question; frameActions draws a frame
++// and waits for the next one (it also runs the message box).
++void PortNewRun_Run(void (*frameActions)(u32))
++{
++    bool8 asking = FALSE;
++
++    memset(gPortRunOptions, 0, sizeof(gPortRunOptions));
++    ShowOptions(0);
++    while (TRUE) {
++        s32 index = sRun.input.menuIndex;
++        s32 input;
++        bool8 redraw = FALSE;
++
++        frameActions(0);
++        if (asking) {
++            s32 answer;
++
++            if (sub_80144A4(&answer) != 0)
++                continue; // (still asking)
++            if (answer == ANSWER_YES)
++                break;
++            asking = FALSE;
++            ShowOptions(0);
++            continue;
++        }
++        input = GetMenuInput();
++        if (input == INPUT_START_BUTTON) {
++            PlayMenuSoundEffect(MENU_SFX_ACCEPT);
++            asking = TRUE;
++            Ask();
++            continue;
++        }
++        if (input == INPUT_DPAD_LEFT || input == INPUT_DPAD_RIGHT || input == INPUT_A_BUTTON) {
++            u8 on = input == INPUT_DPAD_RIGHT ? 1 : input == INPUT_DPAD_LEFT ? 0 : !gPortRunOptions[index];
++            if (on != gPortRunOptions[index]) {
++                gPortRunOptions[index] = on;
++                PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
++                redraw = TRUE;
++            }
++        }
++        if (MenuCursorUpdate(&sRun.input, TRUE) || redraw)
++            Draw();
++    }
++    sRun.windows.id[0] = sNoWindow;
++    ResetUnusedInputStruct();
++    ShowWindows(&sRun.windows, TRUE, TRUE);
++    frameActions(0);
++}
++
++#endif // PLATFORM_3DS
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
 index 00000000..ee82f957
