@@ -2097,7 +2097,7 @@ index e5de5d56..c5591c72 100644
  const u8 *const gUnknown_80FE764 = _("Speed{MOVE_X_POSITION_BY_80}Slow{MOVE_X_POSITION_BY_136}Fast");
  const u8 *const gUnknown_80FE788 = _("Far-off pals{MOVE_X_POSITION_BY_80}Self{MOVE_X_POSITION_BY_136}Look");
 diff --git a/src/dungeon_tilemap.c b/src/dungeon_tilemap.c
-index 80a7d04f..7c8c6e8a 100644
+index 80a7d04f..71ab1be4 100644
 --- a/src/dungeon_tilemap.c
 +++ b/src/dungeon_tilemap.c
 @@ -33,6 +33,12 @@
@@ -2113,7 +2113,25 @@ index 80a7d04f..7c8c6e8a 100644
  
  static void sub_803F38C(void);
  static void sub_803F7BC(void);
-@@ -195,7 +201,7 @@ void UpdateCamera(u8 a0)
+@@ -122,7 +128,17 @@ bool8 sub_803F428(DungeonPos *pos)
+     UnkDungeonGlobal_unk181E8_sub *strPtr = &gDungeon->unk181e8;
+     Entity *cameraEntity = strPtr->cameraTarget;
+ 
++#ifdef PLATFORM_3DS
++    // The wide view shows more tiles around the leader. The range has to cover the whole
++    // screen plus one tile, because cameraPos moves to the new tile as soon as a step starts
++    // while the picture is still scrolling there; on the GBA a 6x5 range is already past the
++    // edge, here it made sprites near the edge vanish on the step frame.
++    s32 rangeX = PORT_WIDE_SIZE ? (SCREEN_W / 2 + 24 + 32 + 23) / 24 : 6;
++    s32 rangeY = PORT_WIDE_SIZE ? (SCREEN_H / 2 + 12 + 24 + 32 + 23) / 24 : 5;
++    if (abs(strPtr->cameraPos.x - pos->x) <= rangeX && abs(strPtr->cameraPos.y - pos->y) <= rangeY) {
++#else
+     if (abs(strPtr->cameraPos.x - pos->x) <= 6 && abs(strPtr->cameraPos.y - pos->y) <= 5) {
++#endif
+         if (strPtr->allTilesRevealed == 0 && strPtr->unk1820C == 0 && cameraEntity != NULL) {
+             return IsPositionActuallyInSight(&strPtr->cameraPos, pos);
+         }
+@@ -195,7 +211,7 @@ void UpdateCamera(u8 a0)
          strPtr->cameraPos.y = cameraTarget->pos.y;
  
          strPtr->cameraPixelPos.x = (cameraTarget->pixelPos.x / 256) - 120;
@@ -2122,7 +2140,7 @@ index 80a7d04f..7c8c6e8a 100644
  
          if (HasHeldItem(cameraTarget, ITEM_X_RAY_SPECS) && info->isTeamLeader) {
              strPtr->unk1820D = TRUE;
-@@ -328,7 +334,7 @@ void sub_803F878(s32 a0, s32 a1)
+@@ -328,7 +344,7 @@ void sub_803F878(s32 a0, s32 a1)
      strPtr->cameraPixelPosMirror = strPtr->cameraPixelPos;
      strPtr->cameraPosMirror = strPtr->cameraPos;
      strPtr->cameraPixelPos.x = (a0 / 256) - 120;
@@ -2131,7 +2149,7 @@ index 80a7d04f..7c8c6e8a 100644
      strPtr->cameraPos.x = a0 / 6144;
      strPtr->cameraPos.y = a1 / 6144;
      strPtr->unk1820D = FALSE;
-@@ -373,7 +379,7 @@ s32 GetCameraXPos(void)
+@@ -373,7 +389,7 @@ s32 GetCameraXPos(void)
  s32 GetCameraYPos(void)
  {
      UnkDungeonGlobal_unk181E8_sub *strPtr = &gDungeon->unk181e8;
@@ -2140,7 +2158,7 @@ index 80a7d04f..7c8c6e8a 100644
  }
  
  void sub_803F9CC(void)
-@@ -404,6 +410,40 @@ void sub_803F9CC(void)
+@@ -404,6 +420,40 @@ void sub_803F9CC(void)
  
  IWRAM_DATA static u32 gUnknown_3001018[96] = {0};
  
@@ -2181,7 +2199,7 @@ index 80a7d04f..7c8c6e8a 100644
  static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
  {
      s32 i;
-@@ -423,6 +463,9 @@ static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
+@@ -423,6 +473,9 @@ static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
  
      strPtr->unk3E = a0;
      strPtr->unk40 = a1;
