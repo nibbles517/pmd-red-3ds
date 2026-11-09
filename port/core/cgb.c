@@ -167,6 +167,45 @@ static void SequencerStep(int rate)
 
 static const uint8_t sDuty[4] = { 0x01, 0x81, 0x87, 0x7E }; // 12.5%, 25%, 50%, 75%
 
+// The noise LFSR, one clock.
+static inline uint16_t LfsrStep(uint16_t l, int width7)
+{
+    unsigned bit = (l ^ (l >> 1)) & 1;
+    l = (uint16_t)((l >> 1) | (bit << 14));
+    if (width7) l = (uint16_t)((l & ~0x40) | (bit << 6));
+    return l;
+}
+
+// At high noise pitches the LFSR clocks dozens of times a sample. Its states
+// run in a fixed cycle, so a sample advances a position in a table instead:
+// 15-bit mode, all 32767 non-zero states; 7-bit mode, 127 states (once the
+// register has had 15 clocks in that mode, all its bits come from the cycle).
+#define LFSR15 32767
+#define LFSR7 127
+static uint16_t sSeq15[LFSR15], sPos15[0x8000];
+static uint16_t sSeq7[LFSR7];
+static uint8_t sPos7[0x8000]; // 0xFF: not in the 7-bit cycle (yet)
+static int sLfsrReady;
+
+static void MakeLfsrTables(void)
+{
+    uint16_t l = 0x7FFF;
+    for (int i = 0; i < LFSR15; i++) {
+        sSeq15[i] = l;
+        sPos15[l] = (uint16_t)i;
+        l = LfsrStep(l, 0);
+    }
+    memset(sPos7, 0xFF, sizeof(sPos7));
+    for (int i = 0; i < 64; i++)
+        l = LfsrStep(l, 1);
+    for (int i = 0; i < LFSR7; i++) {
+        sSeq7[i] = l;
+        sPos7[l] = (uint8_t)i;
+        l = LfsrStep(l, 1);
+    }
+    sLfsrReady = 1;
+}
+
 // Adds the four channels into left/right (GBA-scale units, see sound.c).
 void Cgb_Mix(int32_t *left, int32_t *right, int n, int rate)
 {
@@ -177,6 +216,8 @@ void Cgb_Mix(int32_t *left, int32_t *right, int n, int rate)
         memset(sCh, 0, sizeof(sCh));
         return;
     }
+    if (!sLfsrReady)
+        MakeLfsrTables();
     LatchRegisters(rate);
 
     uint8_t nr50 = Reg(NR50), nr51 = Reg(NR51);
@@ -184,10 +225,36 @@ void Cgb_Mix(int32_t *left, int32_t *right, int n, int rate)
     uint16_t soundcntH = (uint16_t)(gPortRegs[0x82] | (gPortRegs[0x83] << 8));
     static const int kRatio[4] = { 1, 2, 4, 4 }; // 25%, 50%, 100% (3 is invalid)
     int ratio = kRatio[soundcntH & 3];
+    int mulL = volL * ratio, mulR = volR * ratio;
     uint8_t duty1 = sDuty[Reg(NR11) >> 6], duty2 = sDuty[Reg(NR21) >> 6];
     int waveShift = (Reg(NR32) & 0x80) ? -1 : (int[]){ 8, 0, 1, 2 }[(Reg(NR32) >> 5) & 3];
     const uint8_t *wave = &gPortRegs[WAVE_RAM];
     uint32_t seqInc = PhaseInc(512.0, rate);
+    // NR51: which channels go left/right (as masks to add with)
+    int mL[4], mR[4];
+    for (int ch = 0; ch < 4; ch++) {
+        mL[ch] = (nr51 & (0x10 << ch)) ? -1 : 0;
+        mR[ch] = (nr51 & (0x01 << ch)) ? -1 : 0;
+    }
+
+    // Nothing playing (as with DS music): only the frame sequencer moves on.
+    if (!sCh[0].on && !sCh[1].on && !sCh[2].on && !sCh[3].on) {
+        for (int i = 0; i < n; i++) {
+            uint32_t prev = sFrameSeq;
+            sFrameSeq += seqInc;
+            if (sFrameSeq < prev)
+                SequencerStep(rate);
+        }
+        return;
+    }
+
+    // The noise channel's position in its LFSR cycle (-1: stepped one clock at a time)
+    Channel *nc = &sCh[3];
+    const uint16_t *nSeq = nc->width7 ? sSeq7 : sSeq15;
+    int nPeriod = nc->width7 ? LFSR7 : LFSR15;
+    // (A register of 0 stays 0; in 7-bit mode one whose low 7 bits are 0 ends up there.)
+    int nPos = !nc->on || nc->lfsr == 0 ? -1
+               : nc->width7 ? (sPos7[nc->lfsr] == 0xFF ? -1 : sPos7[nc->lfsr]) : sPos15[nc->lfsr];
 
     for (int i = 0; i < n; i++) {
         uint32_t prev = sFrameSeq;
@@ -195,11 +262,19 @@ void Cgb_Mix(int32_t *left, int32_t *right, int n, int rate)
         if (sFrameSeq < prev)
             SequencerStep(rate);
 
-        int out[4] = { 0, 0, 0, 0 };
+        int l = 0, r = 0, o;
         Channel *c = &sCh[0];
-        if (c->on) { c->phase += c->inc; out[0] = ((duty1 >> (c->phase >> 29)) & 1) ? c->volume : -c->volume; }
+        if (c->on) {
+            c->phase += c->inc;
+            o = ((duty1 >> (c->phase >> 29)) & 1) ? c->volume : -c->volume;
+            l += o & mL[0]; r += o & mR[0];
+        }
         c = &sCh[1];
-        if (c->on) { c->phase += c->inc; out[1] = ((duty2 >> (c->phase >> 29)) & 1) ? c->volume : -c->volume; }
+        if (c->on) {
+            c->phase += c->inc;
+            o = ((duty2 >> (c->phase >> 29)) & 1) ? c->volume : -c->volume;
+            l += o & mL[1]; r += o & mR[1];
+        }
         c = &sCh[2];
         if (c->on) {
             c->phase += c->inc;
@@ -209,27 +284,39 @@ void Cgb_Mix(int32_t *left, int32_t *right, int n, int rate)
             if (waveShift < 0) v = v * 3 / 4;
             else if (waveShift == 8) v = 0;
             else v >>= waveShift;
-            out[2] = v;
+            l += v & mL[2]; r += v & mR[2];
         }
-        c = &sCh[3];
-        if (c->on) {
-            c->phase += c->inc;
-            while (c->phase >= 0x10000) {
-                c->phase -= 0x10000;
-                unsigned bit = (c->lfsr ^ (c->lfsr >> 1)) & 1;
-                c->lfsr = (uint16_t)((c->lfsr >> 1) | (bit << 14));
-                if (c->width7) c->lfsr = (uint16_t)((c->lfsr & ~0x40) | (bit << 6));
+        if (nc->on) {
+            nc->phase += nc->inc;
+            unsigned clocks = nc->phase >> 16;
+            nc->phase &= 0xFFFF;
+            if (nPos >= 0) {
+                nPos += (int)clocks;
+                while (nPos >= nPeriod)
+                    nPos -= nPeriod;
+                o = (nSeq[nPos] & 1) ? -nc->volume : nc->volume;
             }
-            out[3] = (c->lfsr & 1) ? -c->volume : c->volume;
+            else {
+                // (7-bit mode, just switched to: until the register is in the cycle)
+                while (clocks-- && nc->lfsr != 0) {
+                    nc->lfsr = LfsrStep(nc->lfsr, 1);
+                    if (sPos7[nc->lfsr] != 0xFF) {
+                        nPos = sPos7[nc->lfsr] + (int)clocks;
+                        while (nPos >= nPeriod)
+                            nPos -= nPeriod;
+                        nc->lfsr = nSeq[nPos];
+                        break;
+                    }
+                }
+                o = (nc->lfsr & 1) ? -nc->volume : nc->volume;
+            }
+            l += o & mL[3]; r += o & mR[3];
         }
 
-        int l = 0, r = 0;
-        for (int ch = 0; ch < 4; ch++) {
-            if (nr51 & (0x10 << ch)) l += out[ch];
-            if (nr51 & (0x01 << ch)) r += out[ch];
-        }
         // NR50 volume (1-8) and the PSG share of the mix (25/50/100%).
-        left[i] += l * volL * ratio / 4;
-        right[i] += r * volR * ratio / 4;
+        left[i] += l * mulL / 4;
+        right[i] += r * mulR / 4;
     }
+    if (nPos >= 0)
+        nc->lfsr = nSeq[nPos];
 }

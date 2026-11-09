@@ -211,6 +211,54 @@ static inline int EntryChanged(const BgCache *c, unsigned e, unsigned palChanged
     return ((palChanged >> (e >> 12)) & 1) || (a < 0x10000 && sCharChanged[a >> 5]);
 }
 
+// How many 32-byte blocks from the start of a and b are the same (of n, n > 0).
+// (Most frames hardly any of VRAM's 64 KB changes: 8 words a step with ldm.)
+int SameBlocks(const uint32_t *a, const uint32_t *b, int n);
+__asm__(
+    "    .pushsection .text.SameBlocks, \"ax\", %progbits\n"
+    "    .arm\n"
+    "    .align 2\n"
+    "    .global SameBlocks\n"
+    "    .type SameBlocks, %function\n"
+    "SameBlocks:\n"
+    "    push {r4-r11, lr}\n"
+    "    mov lr, r2\n"              // lr: blocks left
+    "1:  ldmia r0!, {r3-r6}\n"
+    "    ldmia r1!, {r7-r10}\n"
+    "    eor r3, r3, r7\n"
+    "    eor r4, r4, r8\n"
+    "    eor r5, r5, r9\n"
+    "    eor r6, r6, r10\n"
+    "    orr r11, r3, r4\n"
+    "    orr r11, r11, r5\n"
+    "    orr r11, r11, r6\n"
+    "    ldmia r0!, {r3-r6}\n"
+    "    ldmia r1!, {r7-r10}\n"
+    "    eor r3, r3, r7\n"
+    "    eor r4, r4, r8\n"
+    "    eor r5, r5, r9\n"
+    "    eor r6, r6, r10\n"
+    "    orr r11, r11, r3\n"
+    "    orr r11, r11, r4\n"
+    "    orr r11, r11, r5\n"
+    "    orrs r11, r11, r6\n"
+    "    bne 2f\n"
+    "    subs lr, lr, #1\n"
+    "    bne 1b\n"
+    "2:  sub r0, r2, lr\n"         // blocks the same
+    "    pop {r4-r11, pc}\n"
+    "    .size SameBlocks, .-SameBlocks\n"
+    "    .popsection\n");
+
+// 32 entries (64 bytes, word aligned) the same?
+static inline int Same64(const uint32_t *a, const uint32_t *b)
+{
+    uint32_t d = 0;
+    for (int i = 0; i < 16; i++)
+        d |= a[i] ^ b[i];
+    return d == 0;
+}
+
 void BgCache_Prepare(const uint8_t *regs, int wide)
 {
     if (!sNibPairReady)
@@ -218,19 +266,19 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
     // What changed in VRAM's tile data and the palettes since the last time
     const uint32_t *v = (const uint32_t *)gPortVram;
     uint32_t *copy = sCharCopy;
+    // (only the marks of the last time need clearing)
+    if (sCharFirst <= sCharLast)
+        memset(&sCharChanged[sCharFirst], 0, (size_t)(sCharLast - sCharFirst + 1));
     sCharFirst = 0x10000 / 32;
     sCharLast = -1;
-    for (int b = 0; b < 0x10000 / 32; b++, v += 8, copy += 8) {
-        if (((v[0] ^ copy[0]) | (v[1] ^ copy[1]) | (v[2] ^ copy[2]) | (v[3] ^ copy[3])
-             | (v[4] ^ copy[4]) | (v[5] ^ copy[5]) | (v[6] ^ copy[6]) | (v[7] ^ copy[7])) != 0) {
-            memcpy(copy, v, 32);
-            sCharChanged[b] = 1;
-            if (sCharFirst > b) sCharFirst = b;
-            sCharLast = b;
-        }
-        else {
-            sCharChanged[b] = 0;
-        }
+    for (int b = 0; b < 0x10000 / 32; b++) {
+        b += SameBlocks(v + b * 8, copy + b * 8, 0x10000 / 32 - b);
+        if (b >= 0x10000 / 32)
+            break;
+        memcpy(copy + b * 8, v + b * 8, 32);
+        sCharChanged[b] = 1;
+        if (sCharFirst > b) sCharFirst = b;
+        sCharLast = b;
     }
     unsigned palChanged = 0;
     for (int bank = 0; bank < 16; bank++) {
@@ -317,12 +365,49 @@ void BgCache_Prepare(const uint8_t *regs, int wide)
             if (fade || (c->indexOk && c->color256))
                 memset(c->recolor, 0xFF, sizeof(c->recolor));
         }
-        int slow = (palette && !c->indexOk)
-                   || (sCharFirst <= lastBlock && sCharLast >= (int)(c->charBase >> 5));
+        int palSlow = palette && !c->indexOk;
+        int slow = palSlow || (sCharFirst <= lastBlock && sCharLast >= (int)(c->charBase >> 5));
+        // (the tile numbers whose data may have changed: tileLo + 0..tileSpan)
+        unsigned tileLo = 0, tileSpan = 0;
+        if (slow && !palSlow) {
+            int shift = c->color256 ? 6 : 5;
+            int lo = sCharFirst * 32 - (int)c->charBase, hi = sCharLast * 32 + 31 - (int)c->charBase;
+            if (lo < 0) lo = 0;
+            tileLo = (unsigned)(lo >> shift);
+            tileSpan = (unsigned)(hi >> shift) - tileLo;
+        }
         for (int ty = 0; ty < c->tilesH; ty++) {
             uint32_t *todo = c->todo[ty], *recolor = c->recolor[ty];
             const uint16_t *entry = &c->entry[ty * 64];
             for (int tx = 0; tx < c->tilesW; tx += 2) {
+                // 32 entries at a time first: when they are the same, only
+                // the tiles whose data changed (if any) need marking
+                if (!(tx & 31) && !byBank && !palSlow) {
+                    if (todo[tx >> 5] == 0xFFFFFFFFu) { // (all to be decoded already)
+                        tx += 30;
+                        continue;
+                    }
+                    const uint16_t *src;
+                    if (c->wideMap)
+                        src = &c->wideMap[ty * 64 + tx];
+                    else {
+                        unsigned block = ((ty >= 32) ? ((c->tilesW == 64) ? 2 : 1) : 0) + ((tx >= 32) ? 1 : 0);
+                        unsigned off = c->screenBase + block * 0x800 + (ty & 31) * 64;
+                        src = off + 64 <= 0x10000 ? (const uint16_t *)&gPortVram[off] : NULL;
+                    }
+                    if (src && Same64((const uint32_t *)src, (const uint32_t *)&entry[tx])) {
+                        if (slow) {
+                            for (int k = 0; k < 32; k++) {
+                                unsigned e = src[k];
+                                unsigned tile = (c->edge && e == EDGE_TILE) ? 0 : (e & 0x3FF);
+                                if (tile - tileLo <= tileSpan && EntryChanged(c, e, palChanged))
+                                    todo[(tx + k) >> 5] |= 1u << ((tx + k) & 31);
+                            }
+                        }
+                        tx += 30;
+                        continue;
+                    }
+                }
                 int e0, e1;
                 if (c->wideMap) {
                     e0 = c->wideMap[ty * 64 + tx];
