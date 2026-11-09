@@ -5279,10 +5279,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..55eec492
+index 00000000..350de3ef
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,450 @@
+@@ -0,0 +1,452 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -5321,7 +5321,7 @@ index 00000000..55eec492
 +
 +enum { PAGE_TOP, PAGE_MAIN_SCREEN, PAGE_SUB_SCREEN, PAGE_CONTROLS, PAGE_MUSIC };
 +// First page entries
-+enum { TOP_FRAMESKIP, TOP_DUALCORE, TOP_GPU, TOP_TRIPLE, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
++enum { TOP_FRAMESKIP, TOP_DUALCORE, TOP_GPU, TOP_BUSY, TOP_MAIN_SCREEN, TOP_MAIN_SETTINGS, TOP_SUB_SETTINGS };
 +
 +#define TOP_ENTRIES 7
 +#define MAX_CHOICES 4
@@ -5362,7 +5362,9 @@ index 00000000..55eec492
 +ALIGNED(4) static const u8 sAlways[] = _("Always");
 +ALIGNED(4) static const u8 sDualCore[] = _("Dual Core");
 +ALIGNED(4) static const u8 sGpuDraw[] = _("GPU Drawing");
-+ALIGNED(4) static const u8 sTriple[] = _("Triple Buffer");
++ALIGNED(4) static const u8 sBusy[] = _("Busy Screen");
++ALIGNED(4) static const u8 sWait[] = _("Wait");
++ALIGNED(4) static const u8 sSkip[] = _("Skip");
 +ALIGNED(4) static const u8 sOn[] = _("On");
 +ALIGNED(4) static const u8 sMainScreen[] = _("Main Screen{MOVE_X_POSITION_BY_80}Top{MOVE_X_POSITION_BY_120}Bottom");
 +ALIGNED(4) static const u8 sTop[] = _("Top");
@@ -5515,12 +5517,12 @@ index 00000000..55eec492
 +        PrintStringOnWindow(FRAMESKIP_X(1), y, sOn, win, 0);
 +        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.gpuDrawOff ? 0 : 1), y + 10,
 +                                     GetStringLineWidth(gPortConfig.gpuDrawOff ? sOff : sOn), COLOR_WHITE_2);
-+        y = GetMenuEntryYCoord(&sMenu.input, TOP_TRIPLE);
-+        PrintStringOnWindow(8, y, sTriple, win, 0);
-+        PrintStringOnWindow(FRAMESKIP_X(0), y, sOff, win, 0);
-+        PrintStringOnWindow(FRAMESKIP_X(1), y, sOn, win, 0);
-+        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.tripleBufferOff ? 0 : 1), y + 10,
-+                                     GetStringLineWidth(gPortConfig.tripleBufferOff ? sOff : sOn), COLOR_WHITE_2);
++        y = GetMenuEntryYCoord(&sMenu.input, TOP_BUSY);
++        PrintStringOnWindow(8, y, sBusy, win, 0);
++        PrintStringOnWindow(FRAMESKIP_X(0), y, sWait, win, 0);
++        PrintStringOnWindow(FRAMESKIP_X(1), y, sSkip, win, 0);
++        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.busyWait ? 0 : 1), y + 10,
++                                     GetStringLineWidth(gPortConfig.busyWait ? sWait : sSkip), COLOR_WHITE_2);
 +        y = GetMenuEntryYCoord(&sMenu.input, TOP_MAIN_SCREEN);
 +        PrintStringOnWindow(8, y, sMainScreen, win, 0);
 +        if (sMenu.options->touchScreen)
@@ -5676,8 +5678,8 @@ index 00000000..55eec492
 +                    gPortConfig.gpuDrawOff = !gPortConfig.gpuDrawOff;
 +                    changed = TRUE;
 +                }
-+                else if (index == TOP_TRIPLE) {
-+                    gPortConfig.tripleBufferOff = !gPortConfig.tripleBufferOff;
++                else if (index == TOP_BUSY) {
++                    gPortConfig.busyWait = !gPortConfig.busyWait;
 +                    changed = TRUE;
 +                }
 +                else if (index == TOP_DUALCORE) {

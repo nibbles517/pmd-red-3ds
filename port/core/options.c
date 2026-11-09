@@ -22,7 +22,7 @@ static void SetDefaultConfig(void)
     // Graphics Options
     gPortConfig.frameSkip = Backend_IsNew3DS() ? PORT_FRAMESKIP_OFF : PORT_FRAMESKIP_AUTO;
     gPortConfig.dualCore = 1;
-    gPortConfig.tripleBufferOff = 1; // Triple Buffer: Off (for now)
+    gPortConfig.busyWait = 1; // Busy Screen: Wait (as before)
     gPortConfig.layout[0][0] = PORT_SIZE_FIT; // Main Screen Settings: Size Fit,
     gPortConfig.layout[0][1] = 1;             // Scale Full
     gPortConfig.subScreenDisabled = 0;        // Sub-Screen Settings: Enabled? Yes,
@@ -92,13 +92,13 @@ void Port_LoadConfig(void)
         c.version = 11;
         c.gpuDrawOff = 0;
     }
-    if (c.version == 11) { // before Triple Buffer
+    if (c.version == 11) { // before Busy Screen (then Triple Buffer)
         c.version = 12;
-        c.tripleBufferOff = 1;
+        c.busyWait = 1;
     }
-    if (c.version == 12) { // Triple Buffer: Off at first (On froze a 3DS at first)
+    if (c.version == 12) { // Busy Screen: Wait at first (Triple Buffer, its place's setting before, froze a 3DS)
         c.version = 13;
-        c.tripleBufferOff = 1;
+        c.busyWait = 1;
     }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
@@ -147,9 +147,9 @@ int Port_GpuDraw(void)
     return gPortConfig.gpuDrawOff == 0;
 }
 
-int Port_TripleBuffer(void)
+int Port_BusySkip(void)
 {
-    return gPortConfig.tripleBufferOff == 0;
+    return gPortConfig.busyWait == 0;
 }
 
 extern bool8 gPortGroundRunning; // subscreen.c
@@ -167,10 +167,10 @@ const char *Port_SettingsSummary(void)
     static const char *const sLayouts[4] = { "Blue", "Sky", "Log", "M+T" };
     static const char *const sSkips[3] = { "Off", "Auto", "Always" };
     static char buf[64];
-    snprintf(buf, sizeof(buf), "size=%s sub=%s skip=%s dual=%s triple=%s", sSizes[gPortConfig.layout[0][0] & 3],
+    snprintf(buf, sizeof(buf), "size=%s sub=%s skip=%s dual=%s busy=%s", sSizes[gPortConfig.layout[0][0] & 3],
              gPortConfig.subScreenDisabled ? "off" : sLayouts[gPortConfig.layoutSubScreen & 3],
              sSkips[gPortConfig.frameSkip % 3], gPortConfig.dualCore ? "On" : "Off",
-             gPortConfig.tripleBufferOff ? "Off" : "On");
+             gPortConfig.busyWait ? "Wait" : "Skip");
     return buf;
 }
 
