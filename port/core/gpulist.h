@@ -128,6 +128,7 @@ uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key, uint3
 // The OBJ tiles (sprite VRAM, 1024 of 32 bytes): the frame each last changed
 // (GpuList_ObjTiles compares them with a copy: once a frame, before the sprites)
 extern uint32_t gGpuObjTileChanged[1024];
+int GpuList_ObjOverlap(const GpuQuad *a, const GpuQuad *b);
 void GpuList_ObjTiles(const uint8_t *objVram);
 static inline uint32_t GpuObjLook(unsigned tile, int shape, int size, int color256, unsigned bank, int oneD)
 {

@@ -114,6 +114,8 @@ static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, in
     }
     else {
         sListStats.why[l->fallback]++;
+        if (listMode == 2 && sListStats.why[l->fallback] <= 8) // (the harness's check: which frames)
+            Backend_Log("gpu-list: frame %lu not listed: %s", (unsigned long)sFrames, gGpuWhy[l->fallback]);
         DrawFromCopies(lines, dst, stride);
     }
     if (listMode != 3 && sListStats.frames % 300 == 0) { // (the 3DS: in its own meter's lines)

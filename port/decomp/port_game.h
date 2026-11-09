@@ -48,7 +48,7 @@ struct PortConfig
     u8 sfxStyle;            // Sound Effects: PORT_MUSIC_GBA, PORT_MUSIC_DS (version 9)
     u8 sfxVolume;           // the DS sound effects' volume, in tens of percent (version 10; 10 at first)
     u8 gpuDrawOff;          // Graphics Options > GPU Drawing: 0 On, 1 Off (version 11)
-    u8 tripleBufferOff;     // Graphics Options > Triple Buffer: 0 On, 1 Off (version 12)
+    u8 tripleBufferOff;     // Graphics Options > Triple Buffer: 0 On, 1 Off (version 12; Off at first, version 13)
 };
 
 extern struct PortConfig gPortConfig;

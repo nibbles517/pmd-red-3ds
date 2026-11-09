@@ -214,6 +214,28 @@ void GpuList_ObjTiles(const uint8_t *objVram)
     }
 }
 
+// Whether sprite rectangles a and b (quads of the sprite texture) have a
+// shown pixel in the same place: the GBA shows one sprite's pixel there (the
+// front one's), the list draws both (a blended one over the other would blend
+// with it, not with what is under the sprites).
+int GpuList_ObjOverlap(const GpuQuad *a, const GpuQuad *b)
+{
+    int x0 = a->dx > b->dx ? a->dx : b->dx, x1 = a->dx + a->w < b->dx + b->w ? a->dx + a->w : b->dx + b->w;
+    int y0 = a->dy > b->dy ? a->dy : b->dy, y1 = a->dy + a->h < b->dy + b->h ? a->dy + a->h : b->dy + b->h;
+    for (int y = y0; y < y1; y++) {
+        int ja = y - a->dy, jb = y - b->dy;
+        const uint16_t *ra = gGpuObj[a->sy + ((a->flags & GQ_VFLIP) ? a->h - 1 - ja : ja)];
+        const uint16_t *rb = gGpuObj[b->sy + ((b->flags & GQ_VFLIP) ? b->h - 1 - jb : jb)];
+        for (int x = x0; x < x1; x++) {
+            int ia = x - a->dx, ib = x - b->dx;
+            if (!(ra[a->sx + ((a->flags & GQ_HFLIP) ? a->w - 1 - ia : ia)] & 0x8000)
+                && !(rb[b->sx + ((b->flags & GQ_HFLIP) ? b->w - 1 - ib : ib)] & 0x8000))
+                return 1;
+        }
+    }
+    return 0;
+}
+
 uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key, uint32_t look, uint32_t changed,
                       uint16_t bank, int *made)
 {

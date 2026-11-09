@@ -1369,6 +1369,8 @@ void Ppu_RenderLine(int line, uint16_t *dst)
 // background's line as a piece of its cache (or as pixels), cut to where the
 // windows show it. Returns 0 (with gGpuList.fallback set) if the line uses
 // what the list can't express; the frame is then drawn here after all.
+static int sListSemi; // (the frame's sprites have semi-transparent ones: Ppu_ListObjects)
+
 int Ppu_ListLine(int line)
 {
     static uint8_t wm[W] __attribute__((aligned(4)));
@@ -1396,7 +1398,7 @@ int Ppu_ListLine(int line)
         sAlpha0 = bldalpha;
     }
     else if ((dispcnt & 0x1040) != sObjBits) { l->fallback = GPU_WHY_OBJ_CHANGE; return 0; }
-    else if (bldcnt != sBld0 || (effect == 1 && bldalpha != sAlpha0)) { l->fallback = GPU_WHY_EFFECT; return 0; }
+    else if (bldcnt != sBld0 || ((effect == 1 || sListSemi) && bldalpha != sAlpha0)) { l->fallback = GPU_WHY_EFFECT; return 0; }
 
     // The line's window mask, as runs of the same value (the last line's,
     // when what makes the mask is the same)
@@ -1562,9 +1564,11 @@ int Ppu_ListObjects(int lines)
 {
     GpuList *l = &gGpuList;
     uint16_t dispcnt = R16(0x00);
+    sListSemi = 0;
     if (!(dispcnt & 0x1000))
         return 1;
     int oneD = (dispcnt >> 6) & 1;
+    int firstQuad = l->quadCount, anyBlend = 0;
     uint16_t mosaic = R16(0x4C);
     uint16_t bldcnt = R16(0x50);
     int objFlags = ((((bldcnt >> 6) & 3) == 1 && (bldcnt & 0x10)) ? GQ_BLEND : 0) | ((bldcnt & 0x1000) ? GQ_SECOND : 0);
@@ -1601,7 +1605,18 @@ int Ppu_ListObjects(int lines)
         if (mode == 2)
             continue; // object window: only with windows (not listed)
         if (affine) { l->fallback = GPU_WHY_OBJ_AFFINE; return 0; }
-        if (mode == 1) { l->fallback = GPU_WHY_OBJ_SEMI; return 0; }
+        // Semi-transparent: always a first target, alpha blending (whatever
+        // the effect, and the windows' effect bit). Also a second target:
+        // a first target background in front of it would blend with it (the
+        // GPU's stencil is cleared where a first target blended): not listed.
+        if (mode == 1 && (bldcnt & 0x1000) && ((bldcnt >> 6) & 3) == 1) {
+            int objPrio = (o[5] >> 2) & 3;
+            for (int b = 0; b < 4; b++)
+                if (((bldcnt >> b) & 1) && (dispcnt & (0x100 << b)) && (R16(0x08 + b * 2) & 3) < objPrio) {
+                    l->fallback = GPU_WHY_OBJ_SEMI;
+                    return 0;
+                }
+        }
         if (((a0 >> 12) & 1) && (mosaic & 0xFF00)) { l->fallback = GPU_WHY_OBJ_MOSAIC; return 0; }
 
         uint16_t a2 = (uint16_t)(o[4] | (o[5] << 8));
@@ -1611,7 +1626,11 @@ int Ppu_ListObjects(int lines)
         unsigned palBank = (a2 >> 12) & 0xF;
         unsigned rowStride = oneD ? (unsigned)(w >> 3) * (color256 ? 2 : 1) : 32;
         unsigned tileStep = color256 ? 2 : 1;
-        int flags = objFlags | (((a1 >> 12) & 1) ? GQ_HFLIP : 0) | (((a1 >> 13) & 1) ? GQ_VFLIP : 0);
+        int flags = objFlags | (mode == 1 ? GQ_BLEND : 0) | (((a1 >> 12) & 1) ? GQ_HFLIP : 0) | (((a1 >> 13) & 1) ? GQ_VFLIP : 0);
+        if (mode == 1)
+            sListSemi = 1;
+        if (flags & GQ_BLEND)
+            anyBlend = 1;
         // The last frame its tiles changed (its slot's pixels are made again after it)
         uint32_t changed = 0;
         for (int ty = 0; ty < h; ty += 8)
@@ -1640,5 +1659,23 @@ int Ppu_ListObjects(int lines)
             }
         }
     }
+    // A blended sprite's shown pixels over another sprite's (one drawn before
+    // it: behind) can't be listed
+    if (anyBlend)
+        for (int i = firstQuad; i < l->quadCount; i++) {
+            const GpuQuad *a = &l->quads[i];
+            if (!(a->flags & GQ_BLEND))
+                continue;
+            for (int j = firstQuad; j < l->quadCount; j++) {
+                const GpuQuad *b = &l->quads[j];
+                if (j == i || (b->key & 1023) < (a->key & 1023) || ((b->key & 1023) == (a->key & 1023) && j > i))
+                    continue; // (drawn after it: in front)
+                if (b->dx < a->dx + a->w && a->dx < b->dx + b->w && b->dy < a->dy + a->h && a->dy < b->dy + b->h
+                    && GpuList_ObjOverlap(a, b)) {
+                    l->fallback = GPU_WHY_OBJ_SEMI;
+                    return 0;
+                }
+            }
+        }
     return 1;
 }

@@ -8,7 +8,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 12
+#define PORT_CONFIG_VERSION 13
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19, .sfxVolume = 10 };
 
 // The settings before any are chosen (no config file yet). Those kept in the
@@ -22,6 +22,7 @@ static void SetDefaultConfig(void)
     // Graphics Options
     gPortConfig.frameSkip = Backend_IsNew3DS() ? PORT_FRAMESKIP_OFF : PORT_FRAMESKIP_AUTO;
     gPortConfig.dualCore = 1;
+    gPortConfig.tripleBufferOff = 1; // Triple Buffer: Off (for now)
     gPortConfig.layout[0][0] = PORT_SIZE_FIT; // Main Screen Settings: Size Fit,
     gPortConfig.layout[0][1] = 1;             // Scale Full
     gPortConfig.subScreenDisabled = 0;        // Sub-Screen Settings: Enabled? Yes,
@@ -91,9 +92,13 @@ void Port_LoadConfig(void)
         c.version = 11;
         c.gpuDrawOff = 0;
     }
-    if (c.version == 11) { // before Triple Buffer (On)
+    if (c.version == 11) { // before Triple Buffer
         c.version = 12;
-        c.tripleBufferOff = 0;
+        c.tripleBufferOff = 1;
+    }
+    if (c.version == 12) { // Triple Buffer: Off at first (On froze a 3DS at first)
+        c.version = 13;
+        c.tripleBufferOff = 1;
     }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
