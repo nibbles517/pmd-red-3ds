@@ -8,7 +8,7 @@
 #include "../core/port.h"
 #include "port_game.h"
 
-#define PORT_CONFIG_VERSION 11
+#define PORT_CONFIG_VERSION 12
 struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19, .sfxVolume = 10 };
 
 // The settings before any are chosen (no config file yet). Those kept in the
@@ -91,6 +91,10 @@ void Port_LoadConfig(void)
         c.version = 11;
         c.gpuDrawOff = 0;
     }
+    if (c.version == 11) { // before Triple Buffer (On)
+        c.version = 12;
+        c.tripleBufferOff = 0;
+    }
     if (c.version == PORT_CONFIG_VERSION)
         gPortConfig = c;
     if (gPortConfig.musicStyle > PORT_MUSIC_DS)
@@ -138,6 +142,11 @@ int Port_GpuDraw(void)
     return gPortConfig.gpuDrawOff == 0;
 }
 
+int Port_TripleBuffer(void)
+{
+    return gPortConfig.tripleBufferOff == 0;
+}
+
 extern bool8 gPortGroundRunning; // subscreen.c
 
 const char *Port_SceneName(void)
@@ -153,9 +162,10 @@ const char *Port_SettingsSummary(void)
     static const char *const sLayouts[4] = { "Blue", "Sky", "Log", "M+T" };
     static const char *const sSkips[3] = { "Off", "Auto", "Always" };
     static char buf[64];
-    snprintf(buf, sizeof(buf), "size=%s sub=%s skip=%s dual=%s", sSizes[gPortConfig.layout[0][0] & 3],
+    snprintf(buf, sizeof(buf), "size=%s sub=%s skip=%s dual=%s triple=%s", sSizes[gPortConfig.layout[0][0] & 3],
              gPortConfig.subScreenDisabled ? "off" : sLayouts[gPortConfig.layoutSubScreen & 3],
-             sSkips[gPortConfig.frameSkip % 3], gPortConfig.dualCore ? "On" : "Off");
+             sSkips[gPortConfig.frameSkip % 3], gPortConfig.dualCore ? "On" : "Off",
+             gPortConfig.tripleBufferOff ? "Off" : "On");
     return buf;
 }
 

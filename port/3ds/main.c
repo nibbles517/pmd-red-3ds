@@ -357,6 +357,8 @@ static bool GpuPictureInit(GpuPicture *p)
     return true;
 }
 
+static bool OutInit(void);
+
 static void GpuInit(void)
 {
     FILE *flag = fopen(CPU_VIDEO_FLAG, "r");
@@ -379,8 +381,12 @@ static void GpuInit(void)
         C3D_Fini();
         return;
     }
-    C3D_RenderTargetSetOutput(sTargetTop, GFX_TOP, GFX_LEFT, SCREEN_TRANSFER_FLAGS);
-    C3D_RenderTargetSetOutput(sTargetBottom, GFX_BOTTOM, GFX_LEFT, SCREEN_TRANSFER_FLAGS);
+    // (not linked to the screens: GpuDrawFrame copies the pictures out itself, OutQueue)
+    if (!OutInit()) {
+        Backend_Log("video: CPU (no memory for the screens' buffers)");
+        C3D_Fini();
+        return;
+    }
 
     shaderProgramInit(&sShader);
     shaderProgramSetVsh(&sShader, &sShaderDvlb->DVLE[0]);
@@ -1150,6 +1156,188 @@ static void GpuWaitForSwap(gfxScreen_t screen)
     sGpuCopiedTo[screen] = NULL;
 }
 
+// --- The screens' output ------------------------------------------------------
+//
+// Each frame's pictures are copied from the render targets to the screens'
+// buffers by the GPU (display transfers, in the frame's queue), and a screen
+// shows its new buffer once its copy is done: the GSP's PPF event, one per
+// transfer, in the order queued. OutQueue notes what each transfer is for.
+//
+// The second screen, and the main one with Triple Buffer off, use libctru's
+// two buffers: a new picture can only go into the one not shown, so a frame
+// waits until the last swap happened (GpuWaitForSwap). After a late frame
+// (no VBlank waited for) that swap is still pending: the next frame waited up
+// to a whole refresh, and was late too.
+//
+// Triple Buffer: the main screen has three buffers of its own. There is always
+// one neither shown nor waiting to be shown, so a frame never waits. A picture
+// done while the last one still waits for its VBlank waits in turn ("ready"),
+// replaced by a newer one if that comes first.
+
+enum { OUT_NONE, OUT_SWAP, OUT_TRIPLE }; // (OutQueue's actions; | screen << 4, | buffer << 6)
+#define OUT_RING 64
+static u8 sOutAction[OUT_RING];
+static volatile u32 sOutQueued, sOutDone; // transfers queued, and done (PPF events seen)
+static LightLock sOutLock;
+
+#define TRI_BYTES (400 * 240 * 2) // (either screen: RGB565)
+static u8 *sTri[3];
+static int sTriScreen = -1;   // the screen they're for (-1: not in use)
+static int sTriShown = -1, sTriPend = -1, sTriReady = -1, sTriFlight = -1; // buffer numbers
+static u8 sTriSlot;           // the GSP's framebuffer slot to present into next (alternating)
+static u32 sTriDropped;       // pictures replaced before shown (port.log)
+
+static void TriPresent(int b)
+{
+    u32 mode = GSP_RGB565_OES | (3 << 8); // (VRAM, as libctru's own)
+    if (sTriScreen == GFX_TOP)
+        mode |= BIT(6); // (2D: both eyes the same buffer)
+    gspPresentBuffer((unsigned)sTriScreen, sTriSlot, sTri[b], sTri[b], 240 * 2, mode);
+    sTriSlot ^= 1;
+    sTriPend = b;
+}
+
+// The buffer presented last is on the screen once the GSP took it; then a
+// picture waiting goes next. (sOutLock held)
+static void TriPromote(void)
+{
+    if (sTriScreen < 0)
+        return;
+    if (sTriPend >= 0 && !gspIsPresentPending((unsigned)sTriScreen)) {
+        sTriShown = sTriPend;
+        sTriPend = -1;
+    }
+    if (sTriPend < 0 && sTriReady >= 0) {
+        int b = sTriReady;
+        sTriReady = -1;
+        TriPresent(b);
+    }
+}
+
+static void OutDo(u8 action)
+{
+    int screen = (action >> 4) & 3, b = action >> 6;
+    switch (action & 15) {
+        case OUT_SWAP:
+            gfxScreenSwapBuffers((gfxScreen_t)screen, false);
+            break;
+        case OUT_TRIPLE:
+            if (screen != sTriScreen || b != sTriFlight)
+                break; // (from before a change of screen)
+            sTriFlight = -1;
+            TriPromote();
+            if (sTriPend < 0)
+                TriPresent(b);
+            else {
+                if (sTriReady >= 0)
+                    sTriDropped++;
+                sTriReady = b;
+            }
+            break;
+    }
+}
+
+static void OnPpf(void *unused)
+{
+    (void)unused;
+    LightLock_Lock(&sOutLock);
+    if (sOutDone != sOutQueued) {
+        u8 a = sOutAction[sOutDone % OUT_RING];
+        sOutDone++;
+        OutDo(a);
+    }
+    LightLock_Unlock(&sOutLock);
+}
+
+static bool OutInit(void)
+{
+    LightLock_Init(&sOutLock);
+    for (int i = 0; i < 3; i++) {
+        sTri[i] = vramAlloc(TRI_BYTES);
+        if (sTri[i] == NULL)
+            return false;
+        memset(sTri[i], 0, TRI_BYTES); // (VRAM: the CPU can write it directly)
+    }
+    gspSetEventCallback(GSPGPU_EVENT_PPF, OnPpf, NULL, false);
+    return true;
+}
+
+// A display transfer in the frame's queue, and what to do when it's done
+static void OutQueue(u32 *in, u32 inDim, u32 *out, u32 outDim, u32 flags, u8 action)
+{
+    LightLock_Lock(&sOutLock);
+    sOutAction[sOutQueued % OUT_RING] = action;
+    sOutQueued++;
+    LightLock_Unlock(&sOutLock);
+    C3D_SyncDisplayTransfer(in, inDim, out, outDim, flags);
+}
+
+// After C3D_FrameBegin (the last frame's queue is done): its transfers' events
+// handled too (they come from the GSP's event thread, maybe a moment later).
+// Should one never come, what it was for is done here.
+static void OutSync(void)
+{
+    u64 giveUp = svcGetSystemTick() + SYSCLOCK_ARM11 / 250; // 4 ms
+    while (sOutDone != sOutQueued && svcGetSystemTick() < giveUp)
+        svcSleepThread(100000);
+    LightLock_Lock(&sOutLock);
+    if (sOutDone != sOutQueued) {
+        static int sLogged;
+        if (sLogged++ < 10)
+            Backend_Log("screen output: %u transfer events missing", (unsigned)(sOutQueued - sOutDone));
+        while (sOutDone != sOutQueued) {
+            u8 a = sOutAction[sOutDone % OUT_RING];
+            sOutDone++;
+            OutDo(a);
+        }
+    }
+    LightLock_Unlock(&sOutLock);
+}
+
+// Triple Buffer on (GPU only) for the main screen, or off: set up again when
+// that changes, or the game's picture moves to the other screen.
+static void TriSetScreen(int screen)
+{
+    LightLock_Lock(&sOutLock);
+    if (screen != sTriScreen) {
+        sTriScreen = screen;
+        sTriShown = sTriPend = sTriReady = sTriFlight = -1; // (the screen shows one of libctru's)
+    }
+    LightLock_Unlock(&sOutLock);
+}
+
+// Between frames: a picture waiting goes to the screen as soon as it can.
+static void TriService(void)
+{
+    if (sTriScreen < 0)
+        return;
+    LightLock_Lock(&sOutLock);
+    TriPromote();
+    LightLock_Unlock(&sOutLock);
+}
+
+// A buffer for the next picture: neither shown, nor about to be, nor being
+// copied into; a picture ready but not yet presented gives way. (-1: none)
+static int TriPick(void)
+{
+    LightLock_Lock(&sOutLock);
+    TriPromote();
+    int b;
+    for (b = 0; b < 3; b++)
+        if (b != sTriShown && b != sTriPend && b != sTriReady && b != sTriFlight)
+            break;
+    if (b == 3 && sTriReady >= 0) {
+        b = sTriReady;
+        sTriReady = -1;
+        sTriDropped++;
+    }
+    if (b == 3)
+        b = -1;
+    sTriFlight = b;
+    LightLock_Unlock(&sOutLock);
+    return b;
+}
+
 // The pictures on the screens, those that changed since they were last drawn
 // (a new picture, place, Scale setting or fade level). A screen with nothing
 // new keeps showing what it shows: no GPU work, no swap.
@@ -1163,6 +1351,20 @@ static void GpuDrawFrame(void)
     if (!drawMain && !drawSub)
         return;
     C3D_FrameBegin(0); // (waits for the last frame's copies)
+    OutSync();
+    bool triple = Port_TripleBuffer();
+    TriSetScreen(triple ? (int)mainScreen : -1);
+    int triBuf = -1;
+    if (drawMain && triple) {
+        triBuf = TriPick();
+        if (triBuf < 0) { // (can't be: the last frame's copy is done)
+            drawMain = false;
+            if (!drawSub) {
+                C3D_FrameEnd(GX_CMDLIST_FLUSH);
+                return;
+            }
+        }
+    }
     // The pictures' copies into their textures: in the frame's queue, before
     // its drawing (C3D_SyncDisplayTransfer inside a frame only queues it).
     // Waiting for each copy outside a frame cost the second screen ~4 ms
@@ -1170,11 +1372,11 @@ static void GpuDrawFrame(void)
     GpuPicture *pics[2] = { &sGpuMain, &sGpuSub };
     for (int i = 0; i < 2; i++)
         if (pics[i]->transfer) {
-            C3D_SyncDisplayTransfer((u32 *)pics[i]->stage, GX_BUFFER_DIM(TEX_W, TEX_H), (u32 *)pics[i]->tex.data,
-                                    GX_BUFFER_DIM(TEX_W, TEX_H), TEX_TRANSFER_FLAGS);
+            OutQueue((u32 *)pics[i]->stage, GX_BUFFER_DIM(TEX_W, TEX_H), (u32 *)pics[i]->tex.data,
+                     GX_BUFFER_DIM(TEX_W, TEX_H), TEX_TRANSFER_FLAGS, OUT_NONE);
             pics[i]->transfer = false;
         }
-    if (drawMain)
+    if (drawMain && !triple)
         GpuWaitForSwap(mainScreen);
     if (drawSub)
         GpuWaitForSwap(subScreen);
@@ -1199,7 +1401,18 @@ static void GpuDrawFrame(void)
             GpuDrawPicture(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, &sGpuMain);
         sGpuMain.dirty = false;
         sGpuMain.level = level;
-        sGpuCopiedTo[mainScreen] = gfxGetFramebuffer(mainScreen, GFX_LEFT, NULL, NULL);
+        C3D_FrameBuf *fb = &(sBottom ? sTargetBottom : sTargetTop)->frameBuf;
+        u32 dim = GX_BUFFER_DIM((u32)fb->width, (u32)fb->height);
+        if (triple) {
+            OutQueue((u32 *)fb->colorBuf, dim, (u32 *)sTri[triBuf], dim, SCREEN_TRANSFER_FLAGS,
+                     (u8)(OUT_TRIPLE | (mainScreen << 4) | (triBuf << 6)));
+            sGpuCopiedTo[mainScreen] = NULL;
+        }
+        else {
+            sGpuCopiedTo[mainScreen] = gfxGetFramebuffer(mainScreen, GFX_LEFT, NULL, NULL);
+            OutQueue((u32 *)fb->colorBuf, dim, (u32 *)sGpuCopiedTo[mainScreen], dim, SCREEN_TRANSFER_FLAGS,
+                     (u8)(OUT_SWAP | (mainScreen << 4)));
+        }
     }
     if (drawSub) {
         C3D_TexEnvColor(env, 0xFF000000 | (subLevel << 16) | (subLevel << 8) | subLevel);
@@ -1208,6 +1421,10 @@ static void GpuDrawFrame(void)
         sGpuSub.dirty = false;
         sGpuSub.level = subLevel;
         sGpuCopiedTo[subScreen] = gfxGetFramebuffer(subScreen, GFX_LEFT, NULL, NULL);
+        C3D_FrameBuf *fb = &(sBottom ? sTargetTop : sTargetBottom)->frameBuf;
+        u32 dim = GX_BUFFER_DIM((u32)fb->width, (u32)fb->height);
+        OutQueue((u32 *)fb->colorBuf, dim, (u32 *)sGpuCopiedTo[subScreen], dim, SCREEN_TRANSFER_FLAGS,
+                 (u8)(OUT_SWAP | (subScreen << 4)));
     }
     C3D_FrameEnd(GX_CMDLIST_FLUSH); // (only the command list: the pictures were flushed)
 }
@@ -1487,6 +1704,11 @@ static void MeterEndFrame(void)
             memcpy(sGlLastWhy, why, sizeof(why));
             sGlUploadTicks = 0;
         }
+        if (sTriScreen >= 0 && n < (int)sizeof(line)) { // Triple Buffer: pictures replaced before shown
+            static u32 sLastDropped;
+            n += snprintf(line + n, sizeof(line) - n, " | triple: dropped %lu", (unsigned long)(sTriDropped - sLastDropped));
+            sLastDropped = sTriDropped;
+        }
         LogLine(line);
     }
     memset(sPartTicks, 0, sizeof(sPartTicks));
@@ -1738,11 +1960,13 @@ static void WaitForFrame(void)
     sLate = now > sDeadline;
     if (sLate && now - sDeadline > 2 * FRAME_TICKS)
         sDeadline = now; // too far behind to catch up: carry on from now
+    TriService(); // (a picture waiting: presented as soon as the last one is shown)
     if (sLate) {
         sDeadline += FRAME_TICKS;
         return;
     }
     gspWaitForVBlank();
+    TriService();
     sDeadline = svcGetSystemTick() + FRAME_TICKS;
 }
 

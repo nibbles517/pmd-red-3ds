@@ -67,6 +67,7 @@ bool Port_WantsBottomScreen(void); // Others > Screen/Layout Options > Main Scre
 bool Port_WideSize(void);          // ... > Main Screen Settings > Size is DS or Fit (port_view.h)
 void Port_LoadConfig(void);
 int Port_FrameSkipMode(void);
+int Port_TripleBuffer(void); // Graphics Options > Triple Buffer (the backend's main screen)
 int Port_GpuDraw(void);             // Graphics Options > GPU Drawing: On (the drawing list on the GPU)
 int Port_DualCore(void);            // Graphics Options > Dual Core: On (the DS sound on the second core)       // Performance Settings > Frame Skip: 0 Off, 1 Auto, 2 Always
 

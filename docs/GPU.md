@@ -153,6 +153,23 @@ The harness's profile of 60 frames walking in a dungeon (Fit): about a
 third fewer instructions in all than before these, half as many describing
 lines.
 
+## Screen output and Triple Buffer
+
+The render targets aren't linked to the screens: `GpuDrawFrame` queues each
+picture's copy (display transfer) itself, `OutQueue` noting what it's for, and
+the GSP's PPF event for it (one per transfer, in order: `OnPpf`) swaps the
+screen. The second screen, and the main one with Triple Buffer off, use
+libctru's two buffers, so a frame first waits for the last swap
+(`GpuWaitForSwap`); after a late frame that swap is still pending and the next
+frame waited up to a whole refresh (`flush` ~12 ms in port.log), late too.
+
+Graphics Options > Triple Buffer (On by default): the main screen has three
+VRAM buffers of its own. One is always neither shown nor waiting to be shown,
+so a frame never waits; a picture done while the last still waits for its
+VBlank waits in turn and goes out at the next chance (`TriService`, around
+the VBlank wait), replaced if a newer one is done first (`triple: dropped` in
+port.log).
+
 ## Next stages
 
 2. **Tuning on the hardware** (stage 2 is built): what port.log shows the
