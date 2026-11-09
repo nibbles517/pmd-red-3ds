@@ -2197,6 +2197,33 @@ index 18b83d51..acdbcdd2 100644
          while (arrId < 0) {
              arrId += MESSAGE_LOG_STRINGS_COUNT;
          }
+diff --git a/src/dungeon_mon_sprite_render.c b/src/dungeon_mon_sprite_render.c
+index ffca60be..23574331 100644
+--- a/src/dungeon_mon_sprite_render.c
++++ b/src/dungeon_mon_sprite_render.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "dungeon_mon_sprite_render.h"
+ #include "constants/direction.h"
+@@ -292,7 +295,14 @@ void UpdateMonsterSprite(Entity *entity)
+ 
+     xSprite = entInfo->pixelPos.x - gDungeon->unk181e8.cameraPixelPos.x;
+     ySprite = entInfo->pixelPos.y - gDungeon->unk181e8.cameraPixelPos.y;
++#ifdef PLATFORM_3DS
++    // (the wide view: shadows all over the wider, taller screen)
++    if (xSprite >= (PORT_WIDE_SIZE ? -32 - WIDE_OX : -32) && ySprite >= -32
++        && xSprite <= (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX + 31 : 271) && ySprite <= (PORT_WIDE_SIZE ? SCREEN_H + 31 : 191)
++        && shadowIndex != 6 && entity->unk22 == 0) {
++#else
+     if (xSprite >= -32 && ySprite >= -32 && xSprite <= 271 && ySprite <= 191 && shadowIndex != 6 && entity->unk22 == 0) {
++#endif
+         struct unkStruct_202ED28 *spriteStructPtr = &gUnknown_202ED28[var_34][shadowIndex];
+         if (entInfo->unk156 != 0) {
+             SpriteSetX(&spriteStructPtr->sprite, xSprite + spriteStructPtr->pos.x);
 diff --git a/src/dungeon_name_banner.c b/src/dungeon_name_banner.c
 index 7a4e7b57..97d66197 100644
 --- a/src/dungeon_name_banner.c
@@ -2239,7 +2266,7 @@ index 7a4e7b57..97d66197 100644
          }
  
 diff --git a/src/dungeon_pokemon_sprites.c b/src/dungeon_pokemon_sprites.c
-index b965ec4a..8641ab7f 100644
+index b965ec4a..3efd9cd9 100644
 --- a/src/dungeon_pokemon_sprites.c
 +++ b/src/dungeon_pokemon_sprites.c
 @@ -1,4 +1,7 @@
@@ -2255,7 +2282,7 @@ index b965ec4a..8641ab7f 100644
      posY = (pos->y - gfxInfo->height * 4 - posScreen->y) + posOffset->y;
      ySubbed = posY - 16;
 +#ifdef PLATFORM_3DS
-+    if (posX >= -32 && posY >= -32 && posX < (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : 240) && posY < (PORT_WIDE_SIZE ? SCREEN_H : 160)) {
++    if (posX >= (PORT_WIDE_SIZE ? -32 - WIDE_OX : -32) && posY >= -32 && posX < (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : 240) && posY < (PORT_WIDE_SIZE ? SCREEN_H : 160)) {
 +#else
      if (posX >= -32 && posY >= -32 && posX < 240 && posY < 160) {
 +#endif
@@ -2548,7 +2575,7 @@ index 60311546..1c3f273b 100644
  
              switch (GetEntityType(ent)) {
 diff --git a/src/dungeon_vram.c b/src/dungeon_vram.c
-index 99689873..05566409 100644
+index 99689873..bc202334 100644
 --- a/src/dungeon_vram.c
 +++ b/src/dungeon_vram.c
 @@ -1,4 +1,7 @@
@@ -2634,13 +2661,38 @@ index 99689873..05566409 100644
      y = y1 - y2;
  
 +#ifdef PLATFORM_3DS
-+    if (x >= -32 && y >= -8 && x < (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : 240) && y < (PORT_WIDE_SIZE ? SCREEN_H : 160)) {
++    if (x >= (PORT_WIDE_SIZE ? -32 - WIDE_OX : -32) && y >= -8 && x < (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : 240) && y < (PORT_WIDE_SIZE ? SCREEN_H : 160)) {
 +#else
      if (x >= -32 && y >= -8 && x < 240 && y < 160) {
 +#endif
          SpriteSetY(&gUnknown_202EDDC, y);
          SpriteSetAffine1(&gUnknown_202EDDC, 0);
          SpriteSetAffine2(&gUnknown_202EDDC, 0);
+diff --git a/src/effect_main.c b/src/effect_main.c
+index 94185342..7c26b40a 100644
+--- a/src/effect_main.c
++++ b/src/effect_main.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "code_8099360.h"
+ #include "effect_main.h"
+@@ -278,7 +281,12 @@ static bool8 sub_800DD0C(struct unkStruct_203B0CC_sub *param_1, DungeonPos *posA
+             y = param_1->unkC.pos1.y - posArg->y + pos.y;
+             param_1->unkC.pos1.x += param_1->unkCC.x;
+             param_1->unkC.pos1.y += param_1->unkCC.y;
++#ifdef PLATFORM_3DS
++            if (PORT_WIDE_SIZE ? (x > -64 - WIDE_OX && x < SCREEN_W - WIDE_OX + 64 && y > -64 && y < SCREEN_H + 64)
++                               : (x > -64 && x < 304 && y > -64 && y < 224)) { // (the wide view: all over it)
++#else
+             if (x > -64 && x < 304 && y > -64 && y < 224) {
++#endif
+                 DoAxFrame_800558C(axData,x,y,unkY,param_1->paletteNum,&param_1->unkC.spriteMasks);
+             }
+         }
 diff --git a/src/flash.c b/src/flash.c
 index 172f2be9..c3dfe0d5 100644
 --- a/src/flash.c
@@ -2814,10 +2866,10 @@ index f3807983..fa116197 100644
      UpdateAnimatedColors(FadeScreen(), gFriendAreasMapPtr->unk4C4C, 0xB0, 16, gFriendAreasMapPtr->brightness, NULL);
      CopyWindowBgBuffer(NULL, COPY_WINDOW_BG_BUFFER_WIN0);
 diff --git a/src/graphics_memory.c b/src/graphics_memory.c
-index 1179e657..025fbb27 100644
+index 1179e657..2f5761d8 100644
 --- a/src/graphics_memory.c
 +++ b/src/graphics_memory.c
-@@ -4,6 +4,9 @@
+@@ -4,7 +4,13 @@
  #include "cpu.h"
  #include "def_filearchives.h"
  #include "file_system.h"
@@ -2825,9 +2877,13 @@ index 1179e657..025fbb27 100644
 +#include "game_options.h"
 +#endif
  #include "graphics_memory.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
  #include "text_1.h"
  
-@@ -31,7 +34,11 @@ static EWRAM_DATA u32 gUnknown_202D2A0 = 0;
+ struct FontData
+@@ -31,7 +37,11 @@ static EWRAM_DATA u32 gUnknown_202D2A0 = 0;
  
  static EWRAM_INIT bool8 sUnknown_203B090 = FALSE; // Only written to.
  
@@ -2839,7 +2895,7 @@ index 1179e657..025fbb27 100644
  
  // arm9.bin::0200A178
  void InitGraphics(void)
-@@ -110,6 +117,25 @@ void InitFontPalette(void)
+@@ -110,6 +120,25 @@ void InitFontPalette(void)
      CloseFile(fontpalFile);
  }
  
@@ -2865,6 +2921,28 @@ index 1179e657..025fbb27 100644
  // arm9.bin::0200A00C
  void ResetVramPalOAM(void)
  {
+@@ -322,6 +351,13 @@ bool8 sub_8009A7C(struct EfbFileData *a0, s32 a1, s32 a2, s32 a3, bool8 a4, s32
+     }
+ 
+     ScheduleBgTilemapCopy(gUnknown_202D2A0);
++#ifdef PLATFORM_3DS
++    // Wide view (DS, Fit and 3DS sizes): this full-screen picture (weather's
++    // sun rays...) is the GBA screen's size; repeated over the whole screen,
++    // one copy in the middle, as the move effects' on BG2 (ppu.c), until
++    // sub_8009BE4 clears it.
++    gPortTileBg[gUnknown_202D2A0] = 1;
++#endif
+     return TRUE;
+ }
+ 
+@@ -345,4 +381,7 @@ void sub_8009BE4(void)
+     }
+ 
+     ScheduleBgTilemapCopy(gUnknown_202D2A0);
++#ifdef PLATFORM_3DS
++    gPortTileBg[gUnknown_202D2A0] = 0; // (the picture's gone: drawn as the text layer again)
++#endif
+ }
 diff --git a/src/ground_bg.c b/src/ground_bg.c
 index 069cfc94..fd9ccc6c 100644
 --- a/src/ground_bg.c
@@ -6530,7 +6608,7 @@ index ee2ca650..032da776 100644
  {
      return WriteSaveSector(a, src, size);
 diff --git a/src/sprite.c b/src/sprite.c
-index 812df38d..68c59fea 100644
+index 812df38d..4f716172 100644
 --- a/src/sprite.c
 +++ b/src/sprite.c
 @@ -1,4 +1,11 @@
@@ -6557,9 +6635,15 @@ index 812df38d..68c59fea 100644
  EWRAM_DATA static s32 sSpriteCount = {0}; // R=20266A8
  UNUSED EWRAM_DATA static u32 sUnused2 = {0}; // R=20266AC
  
-@@ -233,7 +245,11 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
+@@ -231,9 +243,17 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
+     pos = SpriteGetX(sprite);
+     pos += axData->pos.x - 0x100;
  
++#ifdef PLATFORM_3DS
++    if (pos < (PORT_WIDE_SIZE ? -64 - WIDE_OX : -64)) // (the wide view: past the GBA screen's left too)
++#else
      if (pos < -64)
++#endif
          return;
 +#ifdef PLATFORM_3DS
 +    if (pos >= (PORT_WIDE_SIZE ? SCREEN_W - WIDE_OX : DISPLAY_WIDTH)) // the wide view reaches past the GBA screen
@@ -6569,7 +6653,7 @@ index 812df38d..68c59fea 100644
          return;
  
      SpriteSetX(sprite, pos);
-@@ -242,10 +258,17 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
+@@ -242,10 +262,17 @@ void AddAxSprite(const ax_pose *axPose, const axdata1 *axData, const ax_sprite *
      pos += axData->pos.y - 0x200;
      if (pos < -64)
          return;
@@ -6587,7 +6671,7 @@ index 812df38d..68c59fea 100644
  
      // Set paletteNum
      if (!SpriteGetUnk6_1(sprite)) {
-@@ -286,6 +309,9 @@ void AddSprite(SpriteOAM *a0, s32 a1, ax_sprite *a2, unkStruct_2039DB0 *spriteMa
+@@ -286,6 +313,9 @@ void AddSprite(SpriteOAM *a0, s32 a1, ax_sprite *a2, unkStruct_2039DB0 *spriteMa
      }
  
      yPos = spr->unk6 >> SPRITEOAM_SHIFT_WORKING_Y;
@@ -6597,7 +6681,7 @@ index 812df38d..68c59fea 100644
      nullsub_3(yPos, 0);
      yPos &= SPRITEOAM_MAX_Y;
      spr->attrib1 &= ~SPRITEOAM_MASK_Y;
-@@ -350,6 +376,10 @@ void CopySpritesToOam(void)
+@@ -350,6 +380,10 @@ void CopySpritesToOam(void)
              // Set y/affineMode/objMode/mosaic/bpp/shape
              oam--;
              *oam = spr->attrib1;
@@ -6608,7 +6692,7 @@ index 812df38d..68c59fea 100644
  
              count++;
          }
-@@ -368,7 +398,7 @@ void CopySpritesToOam(void)
+@@ -368,7 +402,7 @@ void CopySpritesToOam(void)
          *oam = 0;
          // Set y/affineMode/objMode/mosaic/bpp/shape
          oam--;
@@ -6617,7 +6701,7 @@ index 812df38d..68c59fea 100644
      }
  
      sOAMSpriteCount = count;
-@@ -379,7 +409,7 @@ void SetSavingIconCoords(DungeonPos *pos)
+@@ -379,7 +413,7 @@ void SetSavingIconCoords(DungeonPos *pos)
  {
      if (pos == NULL) {
          sUnknown_2025694.x = 0;
@@ -6626,7 +6710,7 @@ index 812df38d..68c59fea 100644
      }
      else {
          sUnknown_2025694.x = pos->x;
-@@ -400,7 +430,7 @@ void BlinkSavingIcon(void)
+@@ -400,7 +434,7 @@ void BlinkSavingIcon(void)
      if (uVar1 & 16) {
          // Set y to 160
          // Set affineMode/objMode/mosaic/bpp/shape to 0
