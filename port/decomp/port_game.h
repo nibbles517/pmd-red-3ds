@@ -117,6 +117,10 @@ int Port_MusicMapSave(const int *songs, const char *const *names, int count);
 int Port_SfxMapGet(int se);
 void Port_SfxMapSet(int se, int track);
 int Port_SfxMapSave(const int *ses, int count);
+// A DS sound effect's own volume, percent (sfx-map.txt; 100 at first)
+int Port_SfxGainGet(int track);
+void Port_SfxGainSet(int track, int percent);
+extern s16 gPortMatchBgm; // Sound Effect Matching: the DS song playing under the effects (-1: none)
 // Music Style: DS (music.c): slot 0 the background music, 1 a fanfare
 void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64);
 int Port_MusicSlotDone(int slot);

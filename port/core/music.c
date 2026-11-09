@@ -33,6 +33,7 @@ typedef struct {
     uint8_t isEffect; // a sound effect: entry index of sequence archive arc
     uint16_t arc;
     uint16_t index;
+    uint8_t gain;     // a sound effect's own volume, percent (sfx-map.txt "VOL" lines; 100 at first)
     char label[LABEL_LEN];
 } Track;
 
@@ -517,7 +518,9 @@ int Port_MusicMapSave(const int *songs, const char *const *names, int count)
 // the DS version kept the GBA's numbering), when the ROM has that entry.
 // sfx-map.txt, which Sound Effect Matching (options_menu1.c) writes, changes
 // those it names: "SE <id> = E<archive>.<entry>" ("= NONE" lines are left
-// as built in). (Not played in the game yet: only matched.)
+// as built in). "VOL E<archive>.<entry> = <percent>" sets a DS sound effect's
+// own volume (100 at first): Sound Effect Matching balances them, against a
+// song of the player's choice playing at the same time.
 
 #define SFX_FIRST 300
 #define SFX_LAST 999
@@ -532,8 +535,12 @@ static int FindEffect(int arc, int index)
     return -1;
 }
 
+#define SFX_GAIN_MAX 250
+
 static void LoadSfxMap(void)
 {
+    for (int i = 0; i < sCount; i++)
+        sTracks[i].gain = 100;
     for (int i = 0; i <= SFX_LAST - SFX_FIRST; i++)
         sSfxMap[i] = (int16_t)FindEffect(0, SFX_FIRST + i); // (the built-in matches)
     void *f = Backend_FileOpen(SFX_FILE);
@@ -547,15 +554,32 @@ static void LoadSfxMap(void)
             char *next = strchr(line, '\n');
             if (next != NULL)
                 *next++ = '\0';
-            int se, arc, idx;
+            int se, arc, idx, pct;
             if (sscanf(line, "SE %d = E%d.%d", &se, &arc, &idx) == 3 && se >= SFX_FIRST && se <= SFX_LAST)
                 sSfxMap[se - SFX_FIRST] = (int16_t)FindEffect(arc, idx);
+            else if (sscanf(line, "VOL E%d.%d = %d", &arc, &idx, &pct) == 3) {
+                int t = FindEffect(arc, idx);
+                if (t >= 0)
+                    sTracks[t].gain = (uint8_t)(pct < 0 ? 0 : pct > SFX_GAIN_MAX ? SFX_GAIN_MAX : pct);
+            }
             line = next;
         }
         Backend_Log("music: %s loaded", SFX_FILE);
     }
     free(text);
     Backend_FileClose(f);
+}
+
+// A DS sound effect's own volume (percent; 100 for anything else)
+int Port_SfxGainGet(int track)
+{
+    return sOpen && track >= 0 && track < sCount && sTracks[track].isEffect ? sTracks[track].gain : 100;
+}
+
+void Port_SfxGainSet(int track, int percent)
+{
+    if (sOpen && track >= 0 && track < sCount && sTracks[track].isEffect)
+        sTracks[track].gain = (uint8_t)(percent < 0 ? 0 : percent > SFX_GAIN_MAX ? SFX_GAIN_MAX : percent);
 }
 
 int Port_SfxMapGet(int se)
@@ -572,7 +596,7 @@ void Port_SfxMapSet(int se, int track)
 // Writes every match (the sound effects ses[0..count-1]) to sfx-map.txt.
 int Port_SfxMapSave(const int *ses, int count)
 {
-    size_t cap = (size_t)count * 64 + 256, len = 0;
+    size_t cap = (size_t)count * 64 + (size_t)sCount * 48 + 256, len = 0;
     char *text = malloc(cap);
     if (text == NULL)
         return 0;
@@ -586,6 +610,12 @@ int Port_SfxMapSave(const int *ses, int count)
             len += (size_t)snprintf(text + len, cap - len, "SE %d = E%02u.%03u  # %s\n", ses[i],
                                     (unsigned)sTracks[t].arc, (unsigned)sTracks[t].index, sTracks[t].label);
     }
+    // the DS sound effects' own volumes (those not 100%)
+    len += (size_t)snprintf(text + len, cap - len, "# DS sound effect volumes (percent)\n");
+    for (int t = sSongCount; t < sCount && len < cap; t++)
+        if (sTracks[t].isEffect && sTracks[t].gain != 100)
+            len += (size_t)snprintf(text + len, cap - len, "VOL E%02u.%03u = %u  # %s\n", (unsigned)sTracks[t].arc,
+                                    (unsigned)sTracks[t].index, (unsigned)sTracks[t].gain, sTracks[t].label);
     if (len > cap)
         len = cap;
     int ok = Backend_FileWrite(SFX_FILE, text, (uint32_t)len);
@@ -707,7 +737,7 @@ int Port_MusicPlay(int i)
     if (g == NULL)
         return 0;
     ApplyTiming(g);
-    song_set_volume(g, sTracks[i].isEffect ? sSfxVolume : sVolume);
+    song_set_volume(g, sTracks[i].isEffect ? sSfxVolume * sTracks[i].gain / 100 : sVolume);
     sSong = g;
     sFound.done[JOB_PLAYER] = sJobFound.done[JOB_PLAYER] = 0;
     sFound.posMs = sJobFound.posMs = 0;
@@ -816,14 +846,16 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     // core while the game runs (Dual Core), else now
     ApplySlots(); // (the tracks the game asked for since)
     if (sSong != NULL)
-        song_set_volume(sSong, sPlaying >= 0 && sPlaying < sCount && sTracks[sPlaying].isEffect ? sSfxVolume : sVolume);
+        song_set_volume(sSong, sPlaying >= 0 && sPlaying < sCount && sTracks[sPlaying].isEffect
+                                   ? sSfxVolume * sTracks[sPlaying].gain / 100 : sVolume);
     int any = 0;
     sJobSong[JOB_PLAYER] = sPaused ? NULL : sSong;
     any |= sJobSong[JOB_PLAYER] != NULL;
     for (int k = 0; k < SLOTS; k++) {
         Slot *s = &sSlots[k];
         if (s->song != NULL)
-            song_set_volume(s->song, (k >= SLOT_SFX ? sSfxVolume : sVolume) * s->volume64 / 64);
+            song_set_volume(s->song, k >= SLOT_SFX ? sSfxVolume * s->volume64 / 64 * Port_SfxGainGet(s->track) / 100
+                                                   : sVolume * s->volume64 / 64);
         sJobSong[JOB_SLOT0 + k] = s->paused ? NULL : s->song;
         any |= sJobSong[JOB_SLOT0 + k] != NULL;
     }
