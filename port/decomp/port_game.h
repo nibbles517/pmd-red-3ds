@@ -61,12 +61,13 @@ bool8 Port_YHeld(void); // port/core/frame.c
 // Set (to 2) every frame the player walks freely, with no menu open: X is
 // then B (port/core/frame.c)
 extern u8 gPortFieldControl;
-enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_FIT, PORT_SIZE_3DS }; // 3DS: not yet (as GBA)
+enum { PORT_SIZE_GBA, PORT_SIZE_DS, PORT_SIZE_FIT, PORT_SIZE_3DS }; // 3DS: main screen only
 enum { PORT_SUB_LAYOUT_BLUE, PORT_SUB_LAYOUT_SKY, PORT_SUB_LAYOUT_LOG, PORT_SUB_LAYOUT_MT };
-// Main Screen Settings > Size is DS or Fit: the 256x192 or 320x240 picture
-// and the wide view (port_view.h). Everything for it is off in the other sizes.
+// Main Screen Settings > Size is DS, Fit or 3DS: the 256x192, 320x240 or
+// 400x240 picture and the wide view (port_view.h). Everything for it is off in
+// GBA size.
 #define PORT_DS_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS)
-#define PORT_WIDE_SIZE (gPortConfig.layout[0][0] == PORT_SIZE_DS || gPortConfig.layout[0][0] == PORT_SIZE_FIT)
+#define PORT_WIDE_SIZE (gPortConfig.layout[0][0] >= PORT_SIZE_DS && gPortConfig.layout[0][0] <= PORT_SIZE_3DS)
 // The dungeon camera keeps the leader at the screen's middle line, plus 12
 // lower, as on the DS (y 108 of 192, 132 of 240; the GBA's 96 of 160 in GBA
 // size); the corridor light circles move with it. In GBA lines past 96:

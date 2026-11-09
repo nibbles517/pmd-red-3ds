@@ -5350,7 +5350,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..350de3ef
+index 00000000..ee82f957
 --- /dev/null
 +++ b/src/port_screen_menu.c
 @@ -0,0 +1,452 @@
@@ -5531,7 +5531,7 @@ index 00000000..350de3ef
 +}
 +
 +// Settings (setting, or one of its choices) that do nothing yet are shown in
-+// red: Touch Screen; the 3DS size.
++// red: Touch Screen; the 3DS size for the second screen.
 +static bool8 IsPlaceholder(s32 setting, s32 choice)
 +{
 +    if (setting == SETTING_TOUCH)
@@ -5539,7 +5539,7 @@ index 00000000..350de3ef
 +    if (setting == SETTING_MUSIC_STYLE || setting == SETTING_SFX_STYLE) // another game's ROM: not to be chosen
 +        return sMenu.musicLocked;
 +    if (setting == SETTING_SIZE)
-+        return choice == PORT_SIZE_3DS;
++        return choice == PORT_SIZE_3DS && sMenu.page == PAGE_SUB_SCREEN;
 +    return FALSE;
 +}
 +

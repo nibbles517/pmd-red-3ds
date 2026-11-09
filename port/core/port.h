@@ -111,6 +111,7 @@ int Backend_GpuListMode(void);
 void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int oy);
 // ... or only its textures sent (the screen keeps what it shows: frame.c, coming out of black)
 void Backend_UploadList(const void *list);
+int Backend_GameOnBottom(void); // the game's picture is on the bottom screen now (3DS size: Fit there)
 // Dual Core: runs fn(arg) on the second CPU core (or at once, if there is
 // none); Backend_WaitAsync waits for it to return. Jobs given while one is
 // running are done after it, in order (Backend_WaitAsync: all of them).

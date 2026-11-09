@@ -1793,6 +1793,11 @@ static void PrintStatus(void)
         printf("\n\x1b[33mNo sound: sdmc:/3ds/dspfirm.cdc missing.\x1b[0m\n");
 }
 
+int Backend_GameOnBottom(void)
+{
+    return sBottom;
+}
+
 // Puts the game's picture on one screen; the other gets the second screen.
 static void SetGameScreen(int bottom)
 {

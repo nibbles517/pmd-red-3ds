@@ -2,7 +2,8 @@
 // patched game code, so plain C with stdint only).
 //
 // Main Screen Settings > Size: DS, a 256x192 picture; Fit, 320x240 (the
-// bottom screen's size). Most of the game draws its 240x160 picture in the
+// bottom screen's size); 3DS, 400x240 (the top screen's; Fit while the game
+// is on the bottom screen). Most of the game draws its 240x160 picture in the
 // middle of it, with a black border. Dungeon floors and ground maps use the
 // wide view: the game draws more of the world around the same spot, the GBA
 // screen's (0,0) at screen (WIDE_OX, 0), the camera keeping the player near
@@ -12,9 +13,9 @@
 
 #include <stdint.h>
 
-#define SCREEN_W_MAX 320
+#define SCREEN_W_MAX 400
 #define SCREEN_H_MAX 240
-// The current size (DS or Fit; 256x192 in GBA size), kept up to date by
+// The current size (DS, Fit or 3DS; 256x192 in GBA size), kept up to date by
 // Port_UpdateScreenSize() (port/core/options.c) whenever the settings change.
 extern int gPortScreenW, gPortScreenH;
 void Port_UpdateScreenSize(void);

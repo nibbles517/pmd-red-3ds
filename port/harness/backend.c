@@ -68,6 +68,12 @@ int Backend_GpuListMode(void) { return (int)IO[IO_GPULIST]; }
 void Backend_PresentList(const void *list, int frameW, int frameH, int ox, int oy) { (void)list; (void)frameW; (void)frameH; (void)ox; (void)oy; }
 void Backend_UploadList(const void *list) { (void)list; }
 
+int Backend_GameOnBottom(void)
+{
+    return 0; // (the top screen: 3DS size is 400x240)
+}
+
+
 void Backend_Present(const uint16_t *frame, int width, int height)
 {
     static const uint16_t *sLast;

@@ -79,7 +79,7 @@ void Ppu_SetView(int wide)
     sW = wide ? sViewW : GBA_W;
     sOx = wide ? sViewOx : 0;
     sGs = sW > 256 ? 4 : 3;
-    sObjXWrap = sW > 256 ? 320 : 256;
+    sObjXWrap = sW > 320 ? 344 : sW > 256 ? 320 : 256; // (OAM x 0-511: at and past this, left of the GBA screen)
 }
 #define TRANSPARENT 0x8000u
 

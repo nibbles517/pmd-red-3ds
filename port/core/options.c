@@ -131,14 +131,16 @@ int Port_ConfigSaveSlot(void)
     return gPortConfig.saveSlot;
 }
 
-// The picture's size (port_view.h): 320x240 in Fit size, else 256x192.
+// The picture's size (port_view.h): 320x240 in Fit size, 400x240 in 3DS size
+// (the top screen's; Fit while the game is on the bottom screen), else 256x192.
 int gPortScreenW = 256, gPortScreenH = 192;
 
 void Port_UpdateScreenSize(void)
 {
-    bool8 fit = gPortConfig.layout[0][0] == PORT_SIZE_FIT;
-    gPortScreenW = fit ? 320 : 256;
-    gPortScreenH = fit ? 240 : 192;
+    int size = gPortConfig.layout[0][0];
+    bool8 tall = size == PORT_SIZE_FIT || size == PORT_SIZE_3DS;
+    gPortScreenW = size == PORT_SIZE_3DS && !Backend_GameOnBottom() ? 400 : tall ? 320 : 256;
+    gPortScreenH = tall ? 240 : 192;
 }
 
 int Port_DualCore(void)
@@ -192,7 +194,7 @@ void Port_SaveConfig(void)
 // the DS version uses for its touch screen option, which the GBA game never
 // reads: clear (new games, saves from a GBA) means the bottom screen, as on
 // the DS; set means the top screen.
-// Main Screen Settings > Size: DS or Fit (port_view.h). GBA keeps the 240x160 picture.
+// Main Screen Settings > Size: DS, Fit or 3DS (port_view.h). GBA keeps the 240x160 picture.
 bool Port_WideSize(void)
 {
     return PORT_WIDE_SIZE;
