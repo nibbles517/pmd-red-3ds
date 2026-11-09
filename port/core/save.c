@@ -37,6 +37,7 @@ void Port_FlashWrite(uint32_t offset, const void *src, uint32_t size)
         size = FLASH_SIZE - offset;
     memcpy(&sFlash[offset], src, size);
     Backend_StoreSave(sFlash, sizeof(sFlash));
+    Port_RunOptionsSaved(); // (a New Game's run options: its Save Data's now)
 }
 
 void Port_FlashErase(void)
@@ -54,4 +55,5 @@ void Port_ChangeSaveSlot(int slot)
     memset(sFlash, 0xFF, sizeof(sFlash));
     if (!Backend_LoadSave(sFlash, sizeof(sFlash)))
         memset(sFlash, 0xFF, sizeof(sFlash));
+    Port_RunOptionsUseSlot(slot);
 }

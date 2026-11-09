@@ -5378,10 +5378,10 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
-index 00000000..a2e4e00b
+index 00000000..4fd5afd5
 --- /dev/null
 +++ b/src/port_new_run.c
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,161 @@
 +// 3DS port: the run options, chosen once when a new adventure starts.
 +//
 +// After New Game (main_loops.c), before the personality quiz: a window over
@@ -5389,7 +5389,8 @@ index 00000000..a2e4e00b
 +// finish. Then the game's own message box asks "Are you ready? You will not be
 +// able to change these selections after this!" with its small Yes/No window
 +// (as the options menu's old "Change settings?"): Yes goes on to the quiz, No
-+// or B back to the options. The options do nothing yet (gPortRunOptions).
++// or B back to the options. The options do nothing yet (gPortRunOptions). They
++// can't be changed in the game after that; config.ini keeps them per Save Data.
 +#include <string.h>
 +#include "global.h"
 +#include "globaldata.h"
@@ -5408,7 +5409,8 @@ index 00000000..a2e4e00b
 +
 +#ifdef PLATFORM_3DS
 +
-+u8 gPortRunOptions[PORT_RUN_OPTIONS];
++// (gPortRunOptions: port/core/options.c, which keeps each Save Data's in
++// config.ini)
 +
 +enum { ANSWER_YES = 1, ANSWER_NO };
 +
@@ -5508,8 +5510,10 @@ index 00000000..a2e4e00b
 +
 +            if (sub_80144A4(&answer) != 0)
 +                continue; // (still asking)
-+            if (answer == ANSWER_YES)
++            if (answer == ANSWER_YES) {
++                Port_RunOptionsChosen(); // (its Save Data's at the first save)
 +                break;
++            }
 +            asking = FALSE;
 +            ShowOptions(0);
 +            continue;

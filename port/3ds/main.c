@@ -2023,12 +2023,12 @@ bool Backend_LoadConfig(uint8_t *data, uint32_t size)
     return n > 0;
 }
 
+// The settings are in config.ini now (options.c, through Backend_FileWrite);
+// config.bin is only read, once, when there is no config.ini yet.
 void Backend_StoreConfig(const uint8_t *data, uint32_t size)
 {
-    FILE *f = fopen(CONFIG_PATH, "wb");
-    if (!f) { Backend_Log("config: cannot open for writing"); return; }
-    fwrite(data, 1, size, f);
-    fclose(f);
+    (void)data;
+    (void)size;
 }
 
 static void FlushSave(void);

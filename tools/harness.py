@@ -163,6 +163,11 @@ class Harness:
                 ids.append(v)
         return ids
 
+    def ini_config(self):
+        # --config FILE.ini: the text settings file (config.ini); else the
+        # older binary one (config.bin), and config.ini is not read or written
+        return bool(self.args.config) and self.args.config.lower().endswith('.ini')
+
     def save_path(self):
         slot = getattr(self, 'save_slot', 0)
         if not self.args.save or slot == 0:
@@ -278,6 +283,8 @@ class Harness:
                 name = bytes(uc.mem_read(buf, length)).decode('latin-1')
                 folder = self.args.data or (os.path.dirname(self.args.save) if self.args.save else '.')
                 path = os.path.join(folder, name)
+                if name == 'config.ini':  # the settings: --config FILE.ini (else none)
+                    path = self.args.config if self.ini_config() else ''
                 self.regs[8] = 0
                 if os.path.isfile(path):
                     self.files = getattr(self, 'files', {})
@@ -299,7 +306,11 @@ class Harness:
             elif value == 10:  # data file write (Music Matching)
                 name = bytes(uc.mem_read(self.regs[20], self.regs[19])).decode('latin-1')
                 folder = self.args.data or (os.path.dirname(self.args.save) if self.args.save else '.')
-                open(os.path.join(folder, name), 'wb').write(bytes(uc.mem_read(buf, length)))
+                path = os.path.join(folder, name)
+                if name == 'config.ini':
+                    path = self.args.config if self.ini_config() else None
+                if path:
+                    open(path, 'wb').write(bytes(uc.mem_read(buf, length)))
                 self.regs[8] = 1
             elif value == 2:
                 ok = 0
@@ -308,11 +319,11 @@ class Harness:
                     uc.mem_write(buf, d)
                     ok = 1
                 self.regs[8] = ok
-            elif value == 3 and self.args.config:
+            elif value == 3 and self.args.config and not self.ini_config():
                 open(self.args.config, 'wb').write(bytes(uc.mem_read(buf, length)))
             elif value == 4:
                 ok = 0
-                if self.args.config and os.path.exists(self.args.config):
+                if self.args.config and not self.ini_config() and os.path.exists(self.args.config):
                     d = open(self.args.config, 'rb').read()[:length]
                     if len(d) > 0:
                         uc.mem_write(buf, d.ljust(length, b'\0'))
@@ -443,7 +454,7 @@ def main():
     ap.add_argument('--out', default='build/shots')
     ap.add_argument('--save')
     ap.add_argument('--data', help='folder of the data files (pmd-blue.nds); default: the --save folder')
-    ap.add_argument('--config', help='the port settings file (config.bin)')
+    ap.add_argument('--config', help='the port settings file: FILE.ini (config.ini), or the older config.bin')
     ap.add_argument('--wav')
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')

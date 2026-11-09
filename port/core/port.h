@@ -148,6 +148,11 @@ void Backend_SetSaveSlot(int slot);
 // another save file from now on (port/core/save.c).
 void Port_ChangeSaveSlot(int slot);
 int Port_ConfigSaveSlot(void); // options.c
+// options.c: each Save Data's run options (config.ini); New Game's wait for
+// that adventure's first save
+void Port_RunOptionsUseSlot(int slot);
+void Port_RunOptionsChosen(void);
+void Port_RunOptionsSaved(void);
 // Music Options (music.c): Sound_EndFrame's frame, with the DS track playing
 // added; returns the samples in out2 (at *outRate), or 0 for none playing.
 int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *outRate);
