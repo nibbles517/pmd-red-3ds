@@ -899,6 +899,10 @@ static bool8 DrawTeamPanel(void)
                     DrawRowSymbols(row, y0);
             }
             sTrackBox = FALSE;
+            // (the clip back at once: the next rows' text is drawn in this loop;
+            // left at none, a partner's text drawn after the leader's sprite
+            // changed was never drawn, until it changed again)
+            sClipX0 = 0; sClipY0 = 0; sClipX1 = 0x7FFF; sClipY1 = 0x7FFF;
             if (sBoxX0 < sBoxX1) {
                 b[0] = sBoxX0; b[1] = sBoxY0; b[2] = sBoxX1; b[3] = sBoxY1;
                 if (area[0] > b[0]) area[0] = b[0];
