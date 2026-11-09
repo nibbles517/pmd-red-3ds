@@ -33,7 +33,7 @@ typedef struct {
     uint8_t isEffect; // a sound effect: entry index of sequence archive arc
     uint16_t arc;
     uint16_t index;
-    uint8_t gain;     // a sound effect's own volume, percent (sfx-map.txt "VOL" lines; 100 at first)
+    uint16_t gain;    // a sound effect's own volume, percent (sfx-map.txt "VOL" lines; 100 at first)
     char label[LABEL_LEN];
 } Track;
 
@@ -535,7 +535,7 @@ static int FindEffect(int arc, int index)
     return -1;
 }
 
-#define SFX_GAIN_MAX 250
+#define SFX_GAIN_MAX 500
 
 static void LoadSfxMap(void)
 {
@@ -560,7 +560,7 @@ static void LoadSfxMap(void)
             else if (sscanf(line, "VOL E%d.%d = %d", &arc, &idx, &pct) == 3) {
                 int t = FindEffect(arc, idx);
                 if (t >= 0)
-                    sTracks[t].gain = (uint8_t)(pct < 0 ? 0 : pct > SFX_GAIN_MAX ? SFX_GAIN_MAX : pct);
+                    sTracks[t].gain = (uint16_t)(pct < 0 ? 0 : pct > SFX_GAIN_MAX ? SFX_GAIN_MAX : pct);
             }
             line = next;
         }
@@ -579,7 +579,7 @@ int Port_SfxGainGet(int track)
 void Port_SfxGainSet(int track, int percent)
 {
     if (sOpen && track >= 0 && track < sCount && sTracks[track].isEffect)
-        sTracks[track].gain = (uint8_t)(percent < 0 ? 0 : percent > SFX_GAIN_MAX ? SFX_GAIN_MAX : percent);
+        sTracks[track].gain = (uint16_t)(percent < 0 ? 0 : percent > SFX_GAIN_MAX ? SFX_GAIN_MAX : percent);
 }
 
 int Port_SfxMapGet(int se)

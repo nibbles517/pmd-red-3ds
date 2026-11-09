@@ -14,7 +14,7 @@
 #define SOFT_KNEE 24576
 
 #define GAIN_UNITY 256 /* gains are 8.8 fixed point */
-#define GAIN_MAX (GAIN_UNITY * 4)
+#define GAIN_MAX (GAIN_UNITY * 16) /* (a sound effect's own volume can be up to 500%, times the effects' volume) */
 
 static inline int16_t soft_clip(int32_t s) {
     const int32_t room = 32767 - SOFT_KNEE;
