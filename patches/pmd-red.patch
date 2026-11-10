@@ -4134,7 +4134,7 @@ index 79fd9c0d..0a1feab2 100644
          return FALSE;
      }
 diff --git a/src/items.c b/src/items.c
-index a2ebfc31..241ca022 100644
+index a2ebfc31..e0ce79d2 100644
 --- a/src/items.c
 +++ b/src/items.c
 @@ -16,6 +16,33 @@
@@ -4233,6 +4233,27 @@ index a2ebfc31..241ca022 100644
  }
  
  // arm9.bin::02060BD0
+@@ -1071,7 +1098,20 @@ void ChooseKecleonShopInventory(u8 index)
+     for (i = 0; i < MAX_KECLEON_ITEM_SHOP_ITEMS; i++)
+         InitKecleonShopItem(i);
+ 
++#ifdef PLATFORM_3DS
++    i = 0;
++    // Run options Increased Sitrus Berries / Life Seeds / Vitamins (any of
++    // them): a chance of a Plain Ribbon in the first slot (4% in the first 3
++    // story tiers, 1% post-game), the other 7 rolled as usual
++    if ((gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] || gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE]
++         || gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN]) && RandInt(100) < (index == 3 ? 1 : 4)) {
++        AddKecleonShopItem(ITEM_PLAIN_RIBBON);
++        i = 1;
++    }
++    for (; i < MAX_KECLEON_ITEM_SHOP_ITEMS; i++) {
++#else
+     for (i = 0; i < MAX_KECLEON_ITEM_SHOP_ITEMS; i++) {
++#endif
+         s32 rand_1 = RandInt(9999);
+         s32 rand_2 = RandInt(9999);
+ 
 diff --git a/src/kecleon_bros4.c b/src/kecleon_bros4.c
 index 13f60671..7e437b54 100644
 --- a/src/kecleon_bros4.c
