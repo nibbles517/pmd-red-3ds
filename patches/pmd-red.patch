@@ -287,10 +287,10 @@ index d927bef9..a098cfde 100644
 \ No newline at end of file
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..296429d9
+index 00000000..08020099
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,22 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -299,12 +299,15 @@ index 00000000..296429d9
 +extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On; each Save Data's in config.ini
 +// What they do (index in gPortRunOptions):
 +// (dungeon_floor_spawns.c) Increased Sitrus Berries: a rolled Oran Berry is a
-+// Sitrus Berry 1% of the time; Increased Life Seeds: a rolled Reviver Seed is
-+// a Life Seed 1% of the time; Increased Vitamins: a rolled Max Elixir is
-+// Protein, Iron, Calcium or Zinc (25% each) 1% of the time
++// Sitrus Berry 2% of the time; Increased Life Seeds: a rolled Reviver Seed is
++// a Life Seed 2% of the time; Increased Vitamins: a rolled Max Elixir is
++// Protein, Iron, Calcium or Zinc (25% each) 2% of the time
 +#define PORT_RUN_ORAN_TO_SITRUS 0
 +#define PORT_RUN_REVIVER_TO_LIFE 1
 +#define PORT_RUN_ELIXIR_TO_VITAMIN 2
++// Blue Exclusive Pokémon: Blue Rescue Team's exclusives (Magikarp, Lapras...)
++// count as unlocked, without Wonder Mail (exclusive_pokemon.c)
++#define PORT_RUN_BLUE_EXCLUSIVES 3
 +// Normalized Shop Prices: items.c prices items by data/port_shop_prices.h
 +#define PORT_RUN_SHOP_PRICES 7
 +void PortNewRun_Run(void (*frameActions)(u32));
@@ -883,7 +886,7 @@ index 28b04fb0..368ffdc7 100644
 +#endif
  }
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
-index 4506e559..e3621417 100644
+index 4506e559..6cf95795 100644
 --- a/src/dungeon_floor_spawns.c
 +++ b/src/dungeon_floor_spawns.c
 @@ -18,6 +18,9 @@
@@ -903,14 +906,14 @@ index 4506e559..e3621417 100644
 +#ifdef PLATFORM_3DS
 +            // Run options 1 and 2: an Oran Berry or a Reviver Seed rolled here
 +            // (floor, shop, Monster House, buried, held, Pickup...) is a
-+            // Sitrus Berry or a Life Seed 1 time in 100
-+            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) == 0)
++            // Sitrus Berry or a Life Seed 2 times in 100
++            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) < 2)
 +                return ITEM_SITRUS_BERRY;
-+            if (i == ITEM_REVIVER_SEED && gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE] && DungeonRandInt(100) == 0)
++            if (i == ITEM_REVIVER_SEED && gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE] && DungeonRandInt(100) < 2)
 +                return ITEM_LIFE_SEED;
-+            // Run option 3: a Max Elixir is a vitamin 1 time in 100: Protein,
++            // Run option 3: a Max Elixir is a vitamin 2 times in 100: Protein,
 +            // Iron, Calcium or Zinc, as likely each
-+            if (i == ITEM_MAX_ELIXIR && gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && DungeonRandInt(100) == 0) {
++            if (i == ITEM_MAX_ELIXIR && gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && DungeonRandInt(100) < 2) {
 +                static const u8 sVitamins[4] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC };
 +                return sVitamins[DungeonRandInt(4)];
 +            }
@@ -2693,6 +2696,33 @@ index 94185342..7c26b40a 100644
                  DoAxFrame_800558C(axData,x,y,unkY,param_1->paletteNum,&param_1->unkC.spriteMasks);
              }
          }
+diff --git a/src/exclusive_pokemon.c b/src/exclusive_pokemon.c
+index f0d5144c..02d25b30 100644
+--- a/src/exclusive_pokemon.c
++++ b/src/exclusive_pokemon.c
+@@ -1,6 +1,9 @@
+ #include "global.h"
+ #include "globaldata.h"
+ #include "exclusive_pokemon.h"
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#endif
+ #include "dungeon_data.h"
+ 
+ EWRAM_INIT ExclusivePokemonData *gExclusiveMonPtr = { NULL };
+@@ -125,6 +128,12 @@ bool8 IsExclusivePokemonUnlocked(s32 pokeID)
+     s32 i;
+     s32 pokeID_s32 = (s16) pokeID;
+ 
++#ifdef PLATFORM_3DS
++    // Run option Blue Exclusive Pokémon: all of them unlocked (the save's
++    // own unlocks kept as they are)
++    if (gPortRunOptions[PORT_RUN_BLUE_EXCLUSIVES])
++        return TRUE;
++#endif
+     for (i = 0; i < NUM_EXCLUSIVE_POKEMON; i++) {
+         if (gExclusivePokemon[i].poke_id == pokeID_s32)
+             return gExclusiveMonPtr->exclusives[i];
 diff --git a/src/flash.c b/src/flash.c
 index 172f2be9..c3dfe0d5 100644
 --- a/src/flash.c
@@ -5892,7 +5922,7 @@ index 926d28d1..684b3d20 100644
      RunPaletteFadeFunctions();
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
-index 00000000..dac6265d
+index 00000000..6dade3ba
 --- /dev/null
 +++ b/src/port_new_run.c
 @@ -0,0 +1,161 @@
@@ -5953,7 +5983,7 @@ index 00000000..dac6265d
 +ALIGNED(4) static const u8 sHelp[] = _("{COLOR CYAN}Left/Right{RESET}: Off or On   {COLOR CYAN}START{RESET}: Done");
 +ALIGNED(4) static const u8 sReady[] = _("Are you ready? You will not be able to\nchange these selections after this!");
 +static const u8 *const sNames[PORT_RUN_OPTIONS] = {
-+    _("Increased Sitrus Berries"), _("Increased Life Seeds"), _("Increased Vitamins"), _("Option 4"),
++    _("Increased Sitrus Berries"), _("Increased Life Seeds"), _("Increased Vitamins"), _("Blue Exclusive Pokémon"),
 +    _("Option 5"), _("Option 6"), _("Option 7"), _("Normalized Shop Prices"), // (and options.c sRunOptionNames)
 +};
 +#define CHOICE_X(i) (144 + (i) * 40)

@@ -306,7 +306,7 @@ static const char *const sIniStyles[] = { "GBA", "DS", NULL };
 static const char *const sIniSlots[] = { "1", "2", "3", NULL };
 // The run options, by their names in the menu (port_new_run.c sNames)
 static const char *const sRunOptionNames[PORT_RUN_OPTIONS] = {
-    "Increased Sitrus Berries", "Increased Life Seeds", "Increased Vitamins", "Option 4",
+    "Increased Sitrus Berries", "Increased Life Seeds", "Increased Vitamins", "Blue Exclusive Pok\xC3\xA9mon",
     "Option 5", "Option 6", "Option 7", "Normalized Shop Prices",
 };
 
@@ -413,7 +413,8 @@ static void IniLoad(const char *text, uint32_t len)
             for (int i = 0; i < PORT_RUN_OPTIONS; i++) {
                 char key[16];
                 snprintf(key, sizeof(key), "Option %d", i + 1); // (as written before they had names)
-                if (IniSame(line, keyLen, sRunOptionNames[i]) || IniSame(line, keyLen, key)) {
+                if (IniSame(line, keyLen, sRunOptionNames[i]) || IniSame(line, keyLen, key)
+                    || (i == 3 && IniSame(line, keyLen, "Blue Exclusive Pokemon"))) { // (é typed as e)
                     if (IniSame(eq + 1, valueLen, "On")) sRunOptions[slot][i] = 1;
                     else if (IniSame(eq + 1, valueLen, "Off")) sRunOptions[slot][i] = 0;
                 }
