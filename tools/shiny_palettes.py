@@ -5,7 +5,8 @@
 
 UPSTREAM is pret's pmd-red clone (build/upstream); SPRITECOLLAB a checkout of
 github.com/PMDCollab/SpriteCollab with at least sprite/*/Walk-Anim.png and
-sprite/*/0000/0001/Walk-Anim.png (the normal and the shiny walk sheets).
+sprite/*/0000/0001/Walk-Anim.png (the normal and the shiny walk sheets), and
+the Idle-Anim.png ones where they're there (they're added in).
 
 Red's species share 13 palettes of 16 colors (graphics/ax/pal). For each
 species, the colors its own sprites use are matched to the nearest colors of
@@ -63,16 +64,23 @@ def used_indices(folder):
     return count
 
 
-def color_map(normal, shiny):
-    """Normal RGB -> the shiny RGB it most often becomes, with its pixel count."""
-    a = Image.open(normal).convert("RGBA")
-    b = Image.open(shiny).convert("RGBA")
-    if a.size != b.size:
-        return None
+SHEETS = ("Walk-Anim.png", "Idle-Anim.png")  # (some walks show only part: Diglett's is all dirt)
+
+
+def color_map(sheets):
+    """Normal RGB -> the shiny RGB it most often becomes, with its pixel count,
+    over (normal, shiny) sheet pairs."""
     pairs = collections.defaultdict(collections.Counter)
-    for p, q in zip(a.getdata(), b.getdata()):
-        if p[3] > 0 and q[3] > 0:
-            pairs[p[:3]][q[:3]] += 1
+    for normal, shiny in sheets:
+        a = Image.open(normal).convert("RGBA")
+        b = Image.open(shiny).convert("RGBA")
+        if a.size != b.size:
+            continue
+        for p, q in zip(a.getdata(), b.getdata()):
+            if p[3] > 0 and q[3] > 0:
+                pairs[p[:3]][q[:3]] += 1
+    if not pairs:
+        return None
     return {n: (c.most_common(1)[0][0], sum(c.values())) for n, c in pairs.items()}
 
 
@@ -90,12 +98,13 @@ def main():
     made = 0
     for sid, e in enumerate(mons):
         dex = e["dexInternal"][0]
-        normal = os.path.join(sc, f"sprite/{dex:04d}/Walk-Anim.png")
-        shiny = os.path.join(sc, f"sprite/{dex:04d}/0000/0001/Walk-Anim.png")
+        sheets = [(os.path.join(sc, f"sprite/{dex:04d}/{n}"), os.path.join(sc, f"sprite/{dex:04d}/0000/0001/{n}"))
+                  for n in SHEETS]
+        sheets = [(a, b) for a, b in sheets if os.path.exists(a) and os.path.exists(b)]
         pal = pals[e["overworldPalette"]]
         new = None
-        if sid in folders and dex > 0 and os.path.exists(normal) and os.path.exists(shiny):
-            cmap = color_map(normal, shiny)
+        if sid in folders and dex > 0 and sheets:
+            cmap = color_map(sheets)
             used = used_indices(os.path.join(up, "graphics/ax/mon", folders[sid]))
             if cmap and used:
                 new = list(pal)
