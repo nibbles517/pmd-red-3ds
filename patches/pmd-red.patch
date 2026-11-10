@@ -603,7 +603,7 @@ index cf978c03..c1f5de60 100644
      }
  }
 diff --git a/src/cpu.c b/src/cpu.c
-index 000bd33a..0517662f 100644
+index 000bd33a..a901a2d5 100644
 --- a/src/cpu.c
 +++ b/src/cpu.c
 @@ -65,6 +65,11 @@ void CpuFill(void *dest, void *value, s32 size)
@@ -626,6 +626,16 @@ index 000bd33a..0517662f 100644
  
      REG_WININ = WININ_WIN0_ALL | WININ_WIN1_ALL;
      REG_WINOUT = WINOUT_WIN01_OBJ | WINOUT_WIN01_CLR | WINOUT_WIN01_BG3 | WINOUT_WIN01_BG2 | WINOUT_WIN01_BG0;
+@@ -87,6 +93,9 @@ void VBlank_CB(void)
+         // Manually set the first WIN0H and WIN1H values
+         REG_WIN0H = gWinBufferPtr[0];
+         REG_WIN1H = gWinBufferPtr[1];
++#ifdef PLATFORM_3DS
++        { extern void PortWindow_VBlank(void); PortWindow_VBlank(); } // (window_buffer.c)
++#endif
+         // Set WIN0V/WIN1V to max screen dimensions
+         REG_WIN0V = DISPLAY_HEIGHT;
+         REG_WIN1V = DISPLAY_HEIGHT;
 diff --git a/src/data/options_menu1.h b/src/data/options_menu1.h
 index d7099dca..985c92a9 100644
 --- a/src/data/options_menu1.h
@@ -8077,10 +8087,10 @@ index 3a78e6d7..27b86073 100644
                      SpriteSetY(&gUnknown_202EDC0, spriteY);
                      SpriteSetX(&gUnknown_202EDC0, spriteX);
 diff --git a/src/window_buffer.c b/src/window_buffer.c
-index 90053fbc..5e8e2df5 100644
+index 90053fbc..41de71af 100644
 --- a/src/window_buffer.c
 +++ b/src/window_buffer.c
-@@ -17,8 +17,17 @@ EWRAM_DATA static bool32 sBoolUnk = FALSE;      // Toggled but is never read
+@@ -17,8 +17,38 @@ EWRAM_DATA static bool32 sBoolUnk = FALSE;      // Toggled but is never read
  EWRAM_DATA static bool32 sBufferIdx = FALSE;    // Write to sBuffer0 or sBuffer1
  EWRAM_DATA static s16 *sBufferPtr = NULL;
  UNUSED EWRAM_DATA static u32 sUnused0 = 0;
@@ -8095,12 +8105,33 @@ index 90053fbc..5e8e2df5 100644
 +#else
 +#define BUF_LINES 160
 +#endif
++#ifdef PLATFORM_3DS
++// The room's edges in screen x (gPortWin1X) for each of the two buffers: they
++// go to gPortWin1X when their buffer starts being shown, at the VBlank after
++// ToggleWindowBgBuffer (cpu.c, PortWindow_VBlank). Written straight there, a
++// scrolling room's edges were a frame ahead of the buffer shown, and the wide
++// view's sides fell back to the GBA screen's window: the darkness around a
++// room broke up at its edges.
++static struct PortWinX sWin1X[2][SCREEN_H_MAX];
++static struct PortWinX *sToggledWin1X = NULL; // (the buffer's that gWinBufferPtr holds)
++#define WIN1X (sWin1X[sBufferIdx ? 1 : 0])
++static void ShowWin1X(void)
++{
++    sToggledWin1X = WIN1X; // (sBufferIdx: the one sBufferPtr was written with)
++}
++
++void PortWindow_VBlank(void)
++{
++    if (sToggledWin1X != NULL)
++        memcpy(gPortWin1X, sToggledWin1X, sizeof(gPortWin1X));
++}
++#endif
 +EWRAM_DATA static s16 sBuffer0[(BUF_LINES + 2) * 2] = {0}; // These might be [2][162]
 +EWRAM_DATA static s16 sBuffer1[(BUF_LINES + 2) * 2] = {0};
  
  EWRAM_INIT s16 *gWindowBgCopy = NULL;
  
-@@ -104,6 +113,22 @@ void WindowBgBufferInit(void)
+@@ -104,6 +134,22 @@ void WindowBgBufferInit(void)
      gWindowBgCopy = NULL;
  }
  
@@ -8123,7 +8154,7 @@ index 90053fbc..5e8e2df5 100644
  // arm9.bin::02005758
  void CopyWindowBgBuffer(s32 *pos, u8 kind)
  {
-@@ -119,8 +144,21 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -119,8 +165,21 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
      src1 = gWindowBgCopy;
      if (src1 == NULL)
          src1 = sDefaultBgH;
@@ -8140,12 +8171,12 @@ index 90053fbc..5e8e2df5 100644
      sBufferPtr = dst;
 +#ifdef PLATFORM_3DS
 +    for (i = 0; i < SCREEN_H_MAX; i++)
-+        gPortWin1X[i].valid = FALSE;
++        WIN1X[i].valid = FALSE;
 +#endif
  
      switch (kind) {
          case COPY_WINDOW_BG_BUFFER_WIN0:
-@@ -130,39 +168,64 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -130,39 +189,64 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                      *dst++ = 0;         // WIN1H (disabled)
                  );
              }
@@ -8212,7 +8243,7 @@ index 90053fbc..5e8e2df5 100644
                      if (pos[1] > i) {
                          *dst++ = *src1++;
                          *dst++ = 256;
-@@ -185,6 +248,16 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -185,6 +269,16 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                              left = pos[2];
                          }
  
@@ -8221,24 +8252,44 @@ index 90053fbc..5e8e2df5 100644
 +                        // past the GBA screen's edges (port_view.h)
 +                        if (PORT_WIDE_SIZE && i < SCREEN_H_MAX) {
 +                            s32 lo = left + WIDE_OX, hi = right + WIDE_OX;
-+                            gPortWin1X[i].lo = lo < 0 ? 0 : lo > SCREEN_W ? SCREEN_W : lo;
-+                            gPortWin1X[i].hi = hi < 0 ? 0 : hi > SCREEN_W ? SCREEN_W : hi;
-+                            gPortWin1X[i].valid = TRUE;
++                            WIN1X[i].lo = lo < 0 ? 0 : lo > SCREEN_W ? SCREEN_W : lo;
++                            WIN1X[i].hi = hi < 0 ? 0 : hi > SCREEN_W ? SCREEN_W : hi;
++                            WIN1X[i].valid = TRUE;
 +                        }
 +#endif
                          if (right < 0)
                              right = 0;
                          if (right > X_MAX - 1)
-@@ -198,6 +271,9 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+@@ -198,6 +292,9 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
                          *dst++ = *src1++;
                          // Note this is backwards so the dim window is drawn on the outside
                          *dst++ = (left << 8) | right;
 +#ifdef PLATFORM_3DS
-+                        gPortWin1X[i].reg = (left << 8) | right;
++                        WIN1X[i].reg = (left << 8) | right;
 +#endif
                      }
                  }
              }
+@@ -294,6 +391,9 @@ void CopyWindowBgBuffer(s32 *pos, u8 kind)
+ #if (GAME_VERSION == VERSION_RED)
+ UNUSED static void sub_80060A8(void)
+ {
++#ifdef PLATFORM_3DS
++    ShowWin1X();
++#endif
+     gWinBufferPtr = sBufferPtr;
+     sBufferIdx = !sBufferIdx;
+     sBoolUnk = !sBoolUnk;
+@@ -304,6 +404,9 @@ UNUSED static void sub_80060A8(void)
+ // arm9.bin::020056C0
+ void ToggleWindowBgBuffer(void)
+ {
++#ifdef PLATFORM_3DS
++    ShowWin1X();
++#endif
+     gWinBufferPtr = sBufferPtr;
+     sBufferIdx = !sBufferIdx;
+     sBoolUnk = !sBoolUnk;
 diff --git a/src/world_map.c b/src/world_map.c
 index 8c50130b..adb16bdd 100644
 --- a/src/world_map.c
