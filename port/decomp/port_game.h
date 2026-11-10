@@ -161,6 +161,7 @@ unsigned Port_KeysHeld(void);
 void Port_MusicSetVolume(int percent); // 10-400; 100: as the DS plays it
 void Port_MusicSetSfxVolume(int percent); // the sound effects' (the same)
 extern u8 gPortRawXY;
+extern u8 gPortItemSortMenu; // set each frame an item list SELECT sorts is open: Y is SELECT there (port/core/frame.c)
 // Change Current Save Data: Save Data 1-3 (port/core/save.c)
 void Port_ChangeSaveSlot(int slot);
 void Port_RunOptionsChosen(void); // options.c (port_new_run.c, after New Game's Yes)

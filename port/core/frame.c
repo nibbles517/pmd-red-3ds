@@ -201,20 +201,30 @@ const uint16_t *Port_Framebuffer(void);
 static uint16_t sKeysHeld;
 extern uint8_t gPortRawXY;
 uint8_t gPortFieldControl; // set by the game each frame the player walks freely (no menu)
+uint8_t gPortItemSortMenu; // set by the game each frame an item list that SELECT sorts is open
 
 // DS and 3DS buttons: X is A in menus, and B where the player walks freely
 // (it opens the menu there), whichever it was when pressed until released.
+// Y is SELECT in an item list that SELECT sorts, when pressed there (not when
+// still held from Rotate Mode as the list opened).
 static void UpdateKeys(void)
 {
-    static uint16_t sXAs;
+    static uint16_t sXAs, sYAs, sYWas;
     uint16_t keys = Backend_PollKeys();
     if (!(keys & KEY_BIT_X) || !Port_DsButtons() || gPortRawXY)
         sXAs = 0;
     else if (sXAs == 0)
         sXAs = gPortFieldControl ? KEY_BIT_B : KEY_BIT_A;
+    if (!(keys & KEY_BIT_Y) || !Port_DsButtons() || gPortRawXY)
+        sYAs = 0;
+    else if (!sYWas && gPortItemSortMenu)
+        sYAs = KEY_BIT_SELECT;
+    sYWas = (keys & KEY_BIT_Y) != 0;
     if (gPortFieldControl)
         gPortFieldControl--;
-    keys |= sXAs;
+    if (gPortItemSortMenu)
+        gPortItemSortMenu--;
+    keys |= sXAs | sYAs;
     if (!gPortRawXY) { // (Music Options' player: the volume instead)
         if (keys & KEY_BIT_CPAD_UP) keys |= KEY_BIT_UP;
         if (keys & KEY_BIT_CPAD_DOWN) keys |= KEY_BIT_DOWN;

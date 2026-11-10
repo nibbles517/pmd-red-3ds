@@ -2028,6 +2028,28 @@ index 4a9a72ad..ebc461ad 100644
      ScheduleBgTilemapCopy(2);
      gDungeon->unk181e8.unk1821A = 0;
  }
+diff --git a/src/dungeon_menu_items.c b/src/dungeon_menu_items.c
+index 342c9fa5..d5ddcbe3 100644
+--- a/src/dungeon_menu_items.c
++++ b/src/dungeon_menu_items.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "dungeon_menu_items.h"
+ #include "dungeon_menu_team.h"
+@@ -159,6 +162,9 @@ bool8 ShowDungeonItemsMenu(Entity * a0, struct UnkMenuBitsStruct *a1)
+ 
+         while (TRUE) {
+             AddMenuCursorSprite(&gDungeonMenu);
++#ifdef PLATFORM_3DS
++            gPortItemSortMenu = 2; // (DS and 3DS buttons: Y sorts too, port/core/frame.c)
++#endif
+             DungeonRunFrameActions(0x14);
+             if (!var_30) {
+                 if (sUnknown_202F258 > 1) {
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
 index 0680f301..3d640b15 100644
 --- a/src/dungeon_menu_others.c
@@ -4211,6 +4233,29 @@ index a2ebfc31..241ca022 100644
  }
  
  // arm9.bin::02060BD0
+diff --git a/src/kecleon_bros4.c b/src/kecleon_bros4.c
+index 13f60671..7e437b54 100644
+--- a/src/kecleon_bros4.c
++++ b/src/kecleon_bros4.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "constants/input.h"
+ #include "constants/item.h"
+@@ -79,6 +82,10 @@ u32 sub_801A6E8(bool8 param_1)
+         return 0;
+     }
+ 
++#ifdef PLATFORM_3DS
++    if (gUnknown_203B224->unk0 != 2)
++        gPortItemSortMenu = 2; // (DS and 3DS buttons: Y sorts too, port/core/frame.c)
++#endif
+     switch (GetKeyPress(&gUnknown_203B224->unk54.m.input)) {
+         case INPUT_B_BUTTON: {
+             PlayMenuSoundEffect(MENU_SFX_BACK);
 diff --git a/src/m4a.c b/src/m4a.c
 index 2bcf6f8a..603c0a3d 100644
 --- a/src/m4a.c
