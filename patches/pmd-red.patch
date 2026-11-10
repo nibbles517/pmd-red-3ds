@@ -1393,7 +1393,7 @@ index 28b04fb0..368ffdc7 100644
 +#endif
  }
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
-index 4506e559..6cf95795 100644
+index 4506e559..8bc2fe71 100644
 --- a/src/dungeon_floor_spawns.c
 +++ b/src/dungeon_floor_spawns.c
 @@ -18,6 +18,9 @@
@@ -1406,21 +1406,54 @@ index 4506e559..6cf95795 100644
  #include "dungeon_config.h"
  #include "structs/dungeon_mapparam.h"
  
-@@ -121,6 +124,21 @@ u8 GetRandomFloorItem(s32 spawnType)
+@@ -104,6 +107,31 @@ u8 GetRandomFloorTrap(void)
+     return TRAP_CHESTNUT_TRAP;
+ }
+ 
++#ifdef PLATFORM_3DS
++#include "dungeon_util.h"
++#include "structs/dungeon_entity.h"
++
++// The item run options' chance (in 100) of changing an item: 2, or 4 while
++// the team leader holds a Plain Ribbon (a hidden effect: its description
++// doesn't say)
++static s32 PortItemChangeChance(void)
++{
++    s32 i;
++
++    for (i = 0; i < MAX_TEAM_MEMBERS; i++) {
++        Entity *e = gDungeon->teamPokemon[i];
++        EntityInfo *info;
++
++        if (!EntityIsValid(e))
++            continue;
++        info = GetEntInfo(e);
++        if (info->isTeamLeader)
++            return ((info->heldItem.flags & ITEM_FLAG_EXISTS) && info->heldItem.id == ITEM_PLAIN_RIBBON) ? 4 : 2;
++    }
++    return 2;
++}
++#endif
++
+ u8 GetRandomFloorItem(s32 spawnType)
+ {
+     s32 i;
+@@ -121,6 +149,22 @@ u8 GetRandomFloorItem(s32 spawnType)
      rand = DungeonRandInt(ITEM_SETS_RANDOM_CAP + 1);
      for (i = 0; i < NUMBER_OF_ITEM_IDS; i++) {
          if (gDungeon->itemSpawns[spawnType].itemValues[i] != 0 && GetItemCategory(i) == category && gDungeon->itemSpawns[spawnType].itemValues[i] >= rand) {
 +#ifdef PLATFORM_3DS
 +            // Run options 1 and 2: an Oran Berry or a Reviver Seed rolled here
 +            // (floor, shop, Monster House, buried, held, Pickup...) is a
-+            // Sitrus Berry or a Life Seed 2 times in 100
-+            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) < 2)
++            // Sitrus Berry or a Life Seed 2 times in 100 (4 with the leader's Plain
++            // Ribbon)
++            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) < PortItemChangeChance())
 +                return ITEM_SITRUS_BERRY;
-+            if (i == ITEM_REVIVER_SEED && gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE] && DungeonRandInt(100) < 2)
++            if (i == ITEM_REVIVER_SEED && gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE] && DungeonRandInt(100) < PortItemChangeChance())
 +                return ITEM_LIFE_SEED;
 +            // Run option 3: a Max Elixir is a vitamin 2 times in 100: Protein,
 +            // Iron, Calcium or Zinc, as likely each
-+            if (i == ITEM_MAX_ELIXIR && gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && DungeonRandInt(100) < 2) {
++            if (i == ITEM_MAX_ELIXIR && gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && DungeonRandInt(100) < PortItemChangeChance()) {
 +                static const u8 sVitamins[4] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC };
 +                return sVitamins[DungeonRandInt(4)];
 +            }
