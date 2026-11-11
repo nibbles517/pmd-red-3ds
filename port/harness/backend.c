@@ -21,6 +21,7 @@ enum {
     IO_SUB_SIZE = 18,     // write: the next IO_SUBSCREEN picture's width << 16 | height
     IO_ARG = 19, IO_HANDLE = 20, // data files: offset, handle
     IO_GPULIST = 21,      // read: the drawing list's mode (Backend_GpuListMode)
+    IO_SONG = 22,         // read each frame: nonzero = stop the GBA music and start this song (--song)
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4, CMD_SAVE_SLOT = 5,
        CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9, CMD_FILE_WRITE = 10 };
@@ -119,7 +120,18 @@ void Backend_Present(const uint16_t *frame, int width, int height)
     IO[IO_PRESENT] = (uint32_t)(uintptr_t)frame;
 }
 uint16_t Backend_PollKeys(void) { return (uint16_t)IO[IO_KEYS]; }
-void Backend_EndFrame(void) { IO[IO_ENDFRAME] = (uint32_t)Port_FrameCount(); }
+void m4aMPlayAllStop(void);
+void m4aSongNumStart(uint16_t n);
+void Backend_EndFrame(void)
+{
+    uint32_t song = IO[IO_SONG];
+    if (song != 0) {
+        // (harness --song: the GBA music player's songs, for loudness checks)
+        m4aMPlayAllStop();
+        m4aSongNumStart((uint16_t)(song & 0xFFFF));
+    }
+    IO[IO_ENDFRAME] = (uint32_t)Port_FrameCount();
+}
 
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate)
 {

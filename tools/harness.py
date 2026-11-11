@@ -124,6 +124,7 @@ class Harness:
         self.last_frame = None
         self.exit_code = None
         self.presses = []
+        self.songs = {int(a): int(b) for a, b in (x.split(':') for x in args.song)}
         for p in args.press:
             f, keys, dur = p.split(':')
             mask = 0
@@ -235,6 +236,8 @@ class Harness:
             val = 1 if self.args.dump_maps else 0
         elif reg == 16:  # was the last frame late? (Frame Skip: Auto)
             val = 1 if self.args.late_every and self.frame % self.args.late_every == 0 else 0
+        elif reg == 22:  # start a GBA song this frame? (--song FRAME:N)
+            val = self.songs.get(self.frame, 0)
         elif reg == 21:  # the drawing list's mode (port/core/gpulist.h)
             val = self.args.gpu_list
         elif reg == 14:  # render the second screen this frame?
@@ -342,7 +345,8 @@ class Harness:
             sw, sh = getattr(self, 'sub_size', (256, 192))
             write_png(os.path.join(self.args.out, f'sub_{self.frame:05d}.png'), bytes(uc.mem_read(value, sw * sh * 2)), sw, sh)
         elif reg == 12:  # audio chunk: `value` interleaved 16-bit stereo samples
-            self.audio += bytes(uc.mem_read(self.regs[9], value * 4))
+            if self.frame >= self.args.wav_from:
+                self.audio += bytes(uc.mem_read(self.regs[9], value * 4))
             self.audio_rate = self.regs[11]
 
     def run_profiled(self, start):
@@ -456,6 +460,8 @@ def main():
     ap.add_argument('--data', help='folder of the data files (pmd-blue.nds); default: the --save folder')
     ap.add_argument('--config', help='the port settings file: FILE.ini (config.ini), or the older config.bin')
     ap.add_argument('--wav')
+    ap.add_argument('--song', action='append', default=[], help='FRAME:N: stop the GBA music and start song N (loudness checks)')
+    ap.add_argument('--wav-from', type=int, default=0, help='keep only the audio from this frame on')
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')
     ap.add_argument('--capture', type=int, action='append', default=[], help='capture this frame for renderer tests')
