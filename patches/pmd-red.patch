@@ -3776,7 +3776,7 @@ index 1179e657..2f5761d8 100644
 +#endif
  }
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..fd9ccc6c 100644
+index 069cfc94..810cf979 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -3787,7 +3787,7 @@ index 069cfc94..fd9ccc6c 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,158 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,168 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -3799,6 +3799,11 @@ index 069cfc94..fd9ccc6c 100644
 +static u16 sPortWideMaps[2][64 * 64]; // BG2, BG3
 +
 +bool8 gPortGroundNarrow; // set by ground_map.c for screens made as maps
++// ... and for the title: its sky and clouds' layer (repeated across as it
++// scrolls) carries its top and bottom rows on, and the layer of the logo, the
++// sun and the sea its edge columns and its bottom row (the sea, wider and
++// deeper); nothing black
++bool8 gPortGroundTitle;
 +// The weather's layers (ground_weather.c: drawn over the map, following its
 +// camera; Deep-Sea Floor's water) past their edges are as the GBA draws them
 +// there: repeated across, nothing below or above (not black).
@@ -3813,6 +3818,7 @@ index 069cfc94..fd9ccc6c 100644
 +    s32 tx0 = (mapRender->cameraPos.x - WIDE_OX) >> 3, ty0 = mapRender->cameraPos.y >> 3;
 +
 +    bool8 overlay;
++    s32 titleY0 = mapRender->cameraPos.y >> 3;
 +
 +    if (gPortGroundNarrow || !PORT_WIDE_SIZE)
 +        return;
@@ -3842,6 +3848,8 @@ index 069cfc94..fd9ccc6c 100644
 +                s32 mx = tx, i = tx - tx0;
 +                if (mapRender->wrapAround || overlay)
 +                    mx = ((mx % mapW) + mapW) % mapW;
++                else if (gPortGroundTitle) // (the logo's layer: its edge columns on, the sea's band)
++                    mx = mx < 0 ? 0 : mx >= mapW ? mapW - 1 : mx;
 +                if (mx < 0 || mx >= mapW) {
 +                    colChunk[i] = -1;
 +                    colIn[i] = 0;
@@ -3855,18 +3863,20 @@ index 069cfc94..fd9ccc6c 100644
 +                u16 *out = &dst[(ty & 63) * 64];
 +                const u16 *chunkRow;
 +                const u16 *tiles;
-+                if (mapRender->wrapAround)
++                if (gPortGroundTitle) // (the rows the GBA shows, the bottom's on: more sea; the sky's top on)
++                    my = my > titleY0 + 19 ? titleY0 + 19 : my < titleY0 && mapRender->wrapAround ? titleY0 : my;
++                else if (mapRender->wrapAround)
 +                    my = ((my % mapH) + mapH) % mapH;
 +                if (my < 0 || my >= mapH) {
 +                    for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++)
-+                        out[tx & 63] = overlay ? 0 : PORT_WIDE_BLACK;
++                        out[tx & 63] = (overlay || gPortGroundTitle) ? 0 : PORT_WIDE_BLACK;
 +                    continue;
 +                }
 +                chunkRow = &chunks[(my / cd) * 64];
 +                tiles = &mapRender->tileMappings[(my % cd) * cd];
 +                for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++) {
 +                    s32 i = tx - tx0;
-+                    out[tx & 63] = colChunk[i] < 0 ? PORT_WIDE_BLACK : tiles[chunkRow[colChunk[i]] * 9 + colIn[i]];
++                    out[tx & 63] = colChunk[i] < 0 ? (gPortGroundTitle ? 0 : PORT_WIDE_BLACK) : tiles[chunkRow[colChunk[i]] * 9 + colIn[i]];
 +                }
 +            }
 +        }
@@ -4020,7 +4030,7 @@ index 1dea7998..d585e375 100644
  {
      if (sUnknown_20398A8 == Unk_20398A8_UNK0) {
 diff --git a/src/ground_map.c b/src/ground_map.c
-index ddf7d16b..cf554fb4 100644
+index ddf7d16b..df82f212 100644
 --- a/src/ground_map.c
 +++ b/src/ground_map.c
 @@ -1,4 +1,7 @@
@@ -4055,10 +4065,10 @@ index ddf7d16b..cf554fb4 100644
  
 +#ifdef PLATFORM_3DS
 +// The screens made as maps keep the GBA's view (no wide view, ground_bg.c).
++extern bool8 gPortGroundNarrow, gPortGroundTitle; // (ground_bg.c)
 +static bool8 IsNarrowMap(s32 groundMapId)
 +{
 +    switch (groundMapId) {
-+        case MAP_TITLE_SCREEN:
 +        case MAP_LOGO_POKEMON_COMPANY:
 +        case MAP_LOGO_WARNING:
 +        case MAP_TEAM_BASE_WALL_MAP:
@@ -4070,7 +4080,7 @@ index ddf7d16b..cf554fb4 100644
 +bool8 Port_GroundViewIsNarrow(void)
 +{
 +    return !PORT_WIDE_SIZE || gGroundMapDungeon_3001B70 == NULL || gGroundMapAction->groundMapId == -1
-+        || IsNarrowMap(gGroundMapAction->groundMapId);
++        || IsNarrowMap(gGroundMapAction->groundMapId) || gGroundMapAction->groundMapId == MAP_TITLE_SCREEN;
 +}
 +#endif
 +
@@ -4135,12 +4145,25 @@ index ddf7d16b..cf554fb4 100644
              return TRUE;
          }
      }
-@@ -1522,6 +1584,9 @@ void sub_80A59DC(void)
+@@ -1500,6 +1562,9 @@ void sub_80A59DC(void)
+             case MAP_TITLE_SCREEN: {
+                 PixelPos pixPos2;
+ 
++#ifdef PLATFORM_3DS
++                gPortTitleView = 2; // (the sea carried on in the wide view: port/core/frame.c)
++#endif
+                 SetCameraPositionForLayer(gGroundMapDungeon_3001B70, 0, &pixPos);
+                 gGroundMapAction->unkF0++;
+                 gGroundMapAction->unkF8.x += gGroundMapAction->unkF0 / 8;
+@@ -1522,6 +1587,12 @@ void sub_80A59DC(void)
                  break;
          }
  
 +#ifdef PLATFORM_3DS
 +        gPortGroundNarrow = IsNarrowMap(gGroundMapAction->groundMapId);
++        // The title: wide, its picture (sky, logo, sea) carried on past its
++        // edges (ground_bg.c), the clouds' layer repeated across
++        gPortGroundTitle = gGroundMapAction->groundMapId == MAP_TITLE_SCREEN;
 +#endif
          sub_80A4764(gGroundMapDungeon_3001B70);
      }

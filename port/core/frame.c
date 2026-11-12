@@ -137,6 +137,7 @@ static int sViewMode = -1; // view of the last frame
 static int sViewW;         // ... and its width
 uint8_t gPortWideView;
 uint8_t gPortBorderFill;
+uint8_t gPortTitleView;
 static uint16_t sBorderOf[2] = { 0, 0 }; // the border each picture has (gPortBorderFill)
 int16_t gPortOamY[128];
 struct PortWinX gPortWin1X[SCREEN_H_MAX];
@@ -314,6 +315,49 @@ static int PictureBlack(void)
     return BanksBlack(gGpuList.usedBanks);
 }
 
+// The title in the wide view (gPortTitleView): its sea band (a sprite 320
+// pixels wide, GBA x -38..281, its top rows over the sky) carried on to the
+// sides where it ends short of the screen's edge (3DS size), each line's
+// edge pixel on; then the sea on down to the bottom, the sun's reflection in it.
+static void ExtendTitleSea(void)
+{
+    int w = SCREEN_W, h = SCREEN_H;
+    int l = WIDE_OX - 38, r = WIDE_OX + 281;
+    for (int y = 112; y < GBA_H; y++) {
+        uint16_t *row = &sFrame[y * w];
+        if (l > 0 && row[l] != row[l - 1]) // (the band on this line)
+            for (int x = 0; x < l; x++)
+                row[x] = row[l];
+        if (r < w - 1 && row[r] != row[r + 1])
+            for (int x = r + 1; x < w; x++)
+                row[x] = row[r];
+    }
+    // Below: the sea (the last line's colour at its edge), and the sun's
+    // reflection in it (the last line's middle, where it isn't the sea's
+    // colour) narrowing to nothing at the bottom, its edges rippling
+    const uint16_t *last = &sFrame[(GBA_H - 1) * w];
+    uint16_t sea = last[0], sun = last[w / 2];
+    int a = 0, b = w - 1;
+    while (a < w && last[a] == sea)
+        a++;
+    while (b > a && last[b] == sea)
+        b--;
+    int c2 = a + b, half2 = b - a; // (doubled: the middle and the width)
+    int rows = h - GBA_H;
+    for (int y = GBA_H; y < h; y++) {
+        uint16_t *row = &sFrame[y * w];
+        int k = y - GBA_H + 1;
+        int hw2 = a > b ? -1 : half2 * (rows + 4 - k) / (rows + 4); // (doubled)
+        if (k % 4 == 3)
+            hw2 = hw2 * 3 / 4;
+        int wob2 = 2 * ((k * 5) % 4) - 2;
+        for (int x = 0; x < w; x++) {
+            int d = 2 * x - c2 - wob2;
+            row[x] = (d < 0 ? -d : d) <= hw2 ? sun : sea;
+        }
+    }
+}
+
 static void RunFrame(void)
 {
     Backend_Mark(PORT_MARK_FRAME_START, 0);
@@ -326,8 +370,11 @@ static void RunFrame(void)
     int ds = Port_WideSize();
     int wide = ds && gPortWideView != 0;
     int mode = !ds ? VIEW_GBA : wide ? VIEW_WIDE : VIEW_FRAMED;
+    int title = wide && gPortTitleView;
     if (gPortWideView)
         gPortWideView--;
+    if (gPortTitleView)
+        gPortTitleView--;
     if (!wide) {
         memset(gPortWideBg, 0, sizeof(gPortWideBg));
         memset(gPortTileBg, 0, sizeof(gPortTileBg));
@@ -381,7 +428,7 @@ static void RunFrame(void)
         BgCache_Prepare(gPortRegs, wide); // (before the first line)
     if (!skip)
         Ppu_BeginFrame();
-    int listMode = skip ? 0 : Backend_GpuListMode(), listOk = 0;
+    int listMode = skip || title ? 0 : Backend_GpuListMode(), listOk = 0;
     if (listMode) {
         memcpy(sStartRegs, gPortRegs, REG_COPY);
         GpuList_Begin(wide ? SCREEN_W : GBA_W, lines);
@@ -452,6 +499,8 @@ static void RunFrame(void)
         if (listMode)
             gGpuList.border = fillBorder ? (uint16_t)(border | 0x8000) : 0;
     }
+    if (title && !skip)
+        ExtendTitleSea();
     if (listMode)
         sLastListed = listMode == 3 && listOk;
     if (listMode) {

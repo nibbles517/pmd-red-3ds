@@ -52,6 +52,11 @@ extern uint8_t gPortWideView;
 // warning and Nintendo screens), so it covers the whole drawing size.
 extern uint8_t gPortBorderFill;
 
+// The title screen in the wide view (set by the game every frame it shows
+// it, like gPortWideView): drawn by the CPU, then its sea carried on to the
+// sides (past the GBA's sea band) and down to the screen's bottom.
+extern uint8_t gPortTitleView;
+
 // Backgrounds drawn by the game for the wide view, instead of from VRAM: a
 // 64x64-entry map (512x512 pixels, wrapping) and its scroll, in GBA screen
 // coordinates (the pixel at GBA screen (0,0) is map pixel (scrollX, scrollY)).
