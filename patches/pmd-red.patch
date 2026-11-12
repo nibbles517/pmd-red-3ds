@@ -1,3 +1,16 @@
+diff --git a/data/item/item_data.json b/data/item/item_data.json
+index ea0c7585..80028357 100644
+--- a/data/item/item_data.json
++++ b/data/item/item_data.json
+@@ -821,7 +821,7 @@
+             false
+         ],
+         "order": 90,
+-        "paletteID": 4,
++        "paletteID": 10,
+         "actionType": "ITEM_ACTION_TYPE_FOOD"
+     },
+     {
 diff --git a/data/titlemenu_sbin.s b/data/titlemenu_sbin.s
 index dabe4fc6..f4554b1d 100644
 --- a/data/titlemenu_sbin.s
@@ -7444,10 +7457,10 @@ index 00000000..ee82f957
 +#endif // PLATFORM_3DS
 diff --git a/src/port_shiny.c b/src/port_shiny.c
 new file mode 100644
-index 00000000..53e5cc2e
+index 00000000..a4c49bd2
 --- /dev/null
 +++ b/src/port_shiny.c
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,181 @@
 +// 3DS port, run option Shiny Pokémon: shiny Pokémon's colors in dungeons.
 +//
 +// Red's species share 13 sprite palettes (OBJ palettes 0-12, "palet"); the
@@ -7464,6 +7477,7 @@ index 00000000..53e5cc2e
 +#include "dungeon_util.h"
 +#include "dungeon_vram.h"
 +#include "pokemon.h"
++#include "items.h"
 +#include "port_new_run.h"
 +#include "structs/rgb.h"
 +#include "structs/str_dungeon.h"
@@ -7524,8 +7538,10 @@ index 00000000..53e5cc2e
 +
 +    memcpy(old, sShiny.species, sizeof(old));
 +    // The palettes others need: every monster on the floor that isn't shiny
-+    // (or has no shiny colors), any the floor may still spawn, and those the
-+    // game picks by itself (Kecleon's shop colors, the Decoy).
++    // (or has no shiny colors), any the floor may still spawn, every item on
++    // the floor's (items share these palettes), and those the game picks by
++    // itself (Kecleon's shop colors, the Decoy; palette 10, items seen while
++    // hallucinating).
 +    for (i = 0; i < DUNGEON_MAX_POKEMON; i++) {
 +        Entity *e = gDungeon->activePokemon[i];
 +        EntityInfo *info;
@@ -7555,6 +7571,13 @@ index 00000000..53e5cc2e
 +        if ((m->flags & POKEMON_FLAG_EXISTS) && !m->shiny)
 +            needed[GetPokemonOverworldPalette(m->speciesNum, FALSE) % MON_PALETTES] = TRUE;
 +    }
++    for (i = 0; i < DUNGEON_MAX_ITEMS; i++) {
++        Entity *e = gDungeon->items[i];
++        if (EntityIsValid(e))
++            needed[GetItemPalette(GetItemInfo(e)->id) % MON_PALETTES] = TRUE;
++    }
++    if (gDungeon->unk181e8.hallucinating)
++        needed[10] = TRUE;
 +    needed[GetPokemonOverworldPalette(MONSTER_KECLEON, TRUE)] = TRUE;
 +    needed[GetPokemonOverworldPalette(MONSTER_DECOY, FALSE) % MON_PALETTES] = TRUE;
 +
