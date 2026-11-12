@@ -3776,7 +3776,7 @@ index 1179e657..2f5761d8 100644
 +#endif
  }
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..810cf979 100644
+index 069cfc94..a2ccb637 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -3787,7 +3787,7 @@ index 069cfc94..810cf979 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,168 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,172 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -3883,6 +3883,10 @@ index 069cfc94..810cf979 100644
 +        gPortWideBg[bg].map = dst;
 +        gPortWideBg[bg].scrollX = mapRender->cameraPos.x;
 +        gPortWideBg[bg].scrollY = mapRender->cameraPos.y;
++        // (the title's logo, in Fit and 3DS sizes: 8 lines higher than the
++        // rest, which port/core/frame.c moves down)
++        if (gPortGroundTitle && !mapRender->wrapAround && SCREEN_H >= 240)
++            gPortWideBg[bg].scrollY += 8;
 +    }
 +    gPortWideView = 2;
 +    gPortHudLines = 0;
