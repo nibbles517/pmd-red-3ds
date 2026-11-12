@@ -315,40 +315,69 @@ static int PictureBlack(void)
     return BanksBlack(gGpuList.usedBanks);
 }
 
+// The most common of n colours (a sprite crossing some of them doesn't count)
+static uint16_t MostCommon(const uint16_t *c, int n)
+{
+    int best = 0, bestCount = 0;
+    for (int i = 0; i < n; i++) {
+        int count = 0;
+        for (int j = 0; j < n; j++)
+            count += c[j] == c[i];
+        if (count > bestCount) {
+            bestCount = count;
+            best = i;
+        }
+    }
+    return c[best];
+}
+
 // The title in the wide view (gPortTitleView): its sea band (a sprite 320
-// pixels wide, GBA x -38..281, lines 132-163, its top rows the sky) carried on to the
-// sides where it ends short of the screen's edge (3DS size), each line's
-// edge pixel on; then the sea on down to the bottom, the sun's reflection in
-// it; then the picture moved down (the logo just above the middle), more sky.
+// pixels wide, GBA x -38..281, lines 132-163, its top rows the sky) carried
+// on to the sides where it ends short of the screen's edge (3DS size); then
+// the sea on down to the bottom, the sun's reflection in it; then the
+// picture moved down (the logo just above the middle) and the lines above
+// the GBA's drawn too (more sky; the falling mail comes from there). The
+// colours carried on are each the most common of several along the line, so
+// the Pelipper crossing it doesn't spread across the sea.
 static void ExtendTitleSea(void)
 {
+    enum { SAMPLES = 7 };
     int w = SCREEN_W, h = SCREEN_H;
     int l = WIDE_OX - 38, r = WIDE_OX + 281;
+    uint16_t c[SAMPLES];
     for (int y = 132; y < GBA_H; y++) { // (its lines: from 132, its top ones the sky over the clouds' bottom)
         uint16_t *row = &sFrame[y * w];
-        if (l > 0)
+        if (l > 0) {
+            for (int i = 0; i < SAMPLES; i++) // (the plain sea left of the sun)
+                c[i] = row[l + 2 + i * 15];
+            uint16_t v = MostCommon(c, SAMPLES);
             for (int x = 0; x < l; x++)
-                row[x] = row[l];
-        if (r < w - 1)
+                row[x] = v;
+        }
+        if (r < w - 1) {
+            for (int i = 0; i < SAMPLES; i++)
+                c[i] = row[r - 2 - i * 15];
+            uint16_t v = MostCommon(c, SAMPLES);
             for (int x = r + 1; x < w; x++)
-                row[x] = row[r];
+                row[x] = v;
+        }
     }
-    // Below: the sea (the last line's colour at its edge), and the sun's
-    // reflection in it (the last line's middle, where it isn't the sea's
-    // colour) narrowing to nothing at the bottom, its edges rippling
+    // Below: the sea (the last line's colour away from the sun), and the
+    // sun's reflection in it (as wide as on the last line, GBA x 75-168)
+    // narrowing to nothing at the bottom, its edges rippling
     const uint16_t *last = &sFrame[(GBA_H - 1) * w];
-    uint16_t sea = last[0], sun = last[w / 2];
-    int a = 0, b = w - 1;
-    while (a < w && last[a] == sea)
-        a++;
-    while (b > a && last[b] == sea)
-        b--;
-    int c2 = a + b, half2 = b - a; // (doubled: the middle and the width)
+    for (int i = 0; i < SAMPLES; i++)
+        c[i] = last[WIDE_OX + (i < 4 ? 4 + i * 16 : 236 - (i - 4) * 16)];
+    uint16_t sea = MostCommon(c, SAMPLES);
+    for (int i = 0; i < SAMPLES; i++)
+        c[i] = last[WIDE_OX + 109 + i * 4];
+    uint16_t sun = MostCommon(c, SAMPLES);
+    int c2 = 2 * WIDE_OX + 243, half2 = 93; // (doubled: the middle and the width)
     int rows = h - GBA_H;
     for (int y = GBA_H; y < h; y++) {
         uint16_t *row = &sFrame[y * w];
         int k = y - GBA_H + 1;
-        int hw2 = a > b ? -1 : half2 * (rows + 4 - k) / (rows + 4); // (doubled)
+        int hw2 = half2 * (rows + 4 - k) / (rows + 4); // (doubled)
         if (k % 4 == 3)
             hw2 = hw2 * 3 / 4;
         int wob2 = 2 * ((k * 5) % 4) - 2;
@@ -358,13 +387,19 @@ static void ExtendTitleSea(void)
         }
     }
     // Then all of it lower, the logo (its middle about the GBA's line 72) 16
-    // lines above the screen's middle: more sky above (its top line's colour)
+    // lines above the screen's middle, and the lines above the GBA's drawn
     int down = h / 2 - 16 - 72;
     if (down > 0) {
         memmove(&sFrame[down * w], sFrame, (size_t)(h - down) * w * sizeof(uint16_t));
-        uint16_t sky = sFrame[down * w];
-        for (int i = 0; i < down * w; i++)
-            sFrame[i] = sky;
+        if (R16(0x00) & 0x4000) { // (window 1 on: its per-line table has no lines above; the sky's colour)
+            uint16_t sky = sFrame[down * w];
+            for (int i = 0; i < down * w; i++)
+                sFrame[i] = sky;
+        }
+        else {
+            for (int g = -down; g < 0; g++)
+                Ppu_RenderLine(g, &sFrame[(g + down) * w]);
+        }
     }
 }
 

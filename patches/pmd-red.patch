@@ -3776,7 +3776,7 @@ index 1179e657..2f5761d8 100644
 +#endif
  }
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..a2ccb637 100644
+index 069cfc94..2219cae4 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -3787,7 +3787,7 @@ index 069cfc94..a2ccb637 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,172 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,174 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -3858,13 +3858,15 @@ index 069cfc94..a2ccb637 100644
 +                    colIn[i] = mx % cd;
 +                }
 +            }
-+            for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++) {
++            // (the title: rows above too, which port/core/frame.c draws above the
++            // GBA's picture as it moves it down)
++            for (ty = gPortGroundTitle ? ty0 - 6 : ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++) {
 +                s32 my = ty;
 +                u16 *out = &dst[(ty & 63) * 64];
 +                const u16 *chunkRow;
 +                const u16 *tiles;
 +                if (gPortGroundTitle) // (the rows the GBA shows, the bottom's on: more sea; the sky's top on)
-+                    my = my > titleY0 + 19 ? titleY0 + 19 : my < titleY0 && mapRender->wrapAround ? titleY0 : my;
++                    my = my > titleY0 + 19 ? titleY0 + 19 : my >= titleY0 ? my : mapRender->wrapAround ? titleY0 : -1;
 +                else if (mapRender->wrapAround)
 +                    my = ((my % mapH) + mapH) % mapH;
 +                if (my < 0 || my >= mapH) {
@@ -4172,8 +4174,34 @@ index ddf7d16b..df82f212 100644
          sub_80A4764(gGroundMapDungeon_3001B70);
      }
  
+diff --git a/src/ground_object.c b/src/ground_object.c
+index 965cbc4d..808ccb28 100644
+--- a/src/ground_object.c
++++ b/src/ground_object.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++extern bool8 gPortGroundTitle; // (ground_bg.c)
++#endif
+ #include "globaldata.h"
+ #include "ground_object.h"
+ #include "structs/str_ground_script.h"
+@@ -962,6 +965,13 @@ void sub_80ACAD4(void)
+         if (objectPtr->kind != (s16) minus1) {
+             PixelPos pos = {objectPtr->unk124.x + (objectPtr->unk14).x, objectPtr->unk124.y + (objectPtr->unk14).y};
+             s32 num = objectPtr->unk134.x + objectPtr->unk134.y;
++#ifdef PLATFORM_3DS
++            // The title: the falling mail and the big Pelipper that catches
++            // it, 24 pixels higher (in the wide view, the mail starts above
++            // the screen instead of appearing in the sky above the GBA's)
++            if (gPortGroundTitle && (objectPtr->kind == 60 || objectPtr->kind == 59))
++                pos.y -= 24 << 8;
++#endif
+             if ((sub_80A66D4(&objectPtr->unk144))) {
+                 objectPtr->directionRelated = 0;
+                 sub_80A6EFC(&objectPtr->unk144,objectPtr->unk13E & 0x1F00,(s8)objectPtr->unk13E);
 diff --git a/src/ground_sprite.c b/src/ground_sprite.c
-index 79fd9c0d..0a1feab2 100644
+index 79fd9c0d..fd240abf 100644
 --- a/src/ground_sprite.c
 +++ b/src/ground_sprite.c
 @@ -1,4 +1,21 @@
@@ -4207,12 +4235,33 @@ index 79fd9c0d..0a1feab2 100644
          return TRUE;
      }
  
-@@ -835,10 +852,10 @@ bool8 sub_80A7094(struct UnkGroundSpriteStruct *ptr, PixelPos *r10, PixelPos *po
+@@ -789,6 +806,14 @@ void sub_80A7040(struct UnkGroundSpriteStruct *ptr, s32 a1_, s32 a2_, s32 a3)
+     }
+ }
+ 
++#ifdef PLATFORM_3DS
++extern bool8 gPortGroundTitle; // (ground_bg.c)
++static s32 PortSpriteYMin(void)
++{
++    return gPortGroundTitle && PORT_WIDE_SIZE ? -16 - 64 : -16;
++}
++#endif
++
+ bool8 sub_80A7094(struct UnkGroundSpriteStruct *ptr, PixelPos *r10, PixelPos *posArg, s32 a3)
+ {
+     PixelPos resultPos;
+@@ -835,10 +860,16 @@ bool8 sub_80A7094(struct UnkGroundSpriteStruct *ptr, PixelPos *r10, PixelPos *po
  
      resultPos = (PixelPos) {(posArg->x / 256) - gUnknown_2039DD8.x, (posArg->y / 256) - gUnknown_2039DD8.y};
      unkY = resultPos.y - (a3 / 256);
 -    if (resultPos.x >= -64 && resultPos.x <= 303 && resultPos.y >= -16 && resultPos.y <= 207 && unkY >= -16 && unkY <= 207) {
++#ifdef PLATFORM_3DS
++    // (the title in the wide view shows more above the GBA's screen:
++    // port/core/frame.c)
++    if (resultPos.x >= SPRITE_X_MIN && resultPos.x <= SPRITE_X_MAX && resultPos.y >= PortSpriteYMin() && resultPos.y <= SPRITE_Y_MAX && unkY >= PortSpriteYMin() && unkY <= SPRITE_Y_MAX) {
++#else
 +    if (resultPos.x >= SPRITE_X_MIN && resultPos.x <= SPRITE_X_MAX && resultPos.y >= -16 && resultPos.y <= SPRITE_Y_MAX && unkY >= -16 && unkY <= SPRITE_Y_MAX) {
++#endif
          if ((ptr->flags_0x50 & 0x10) && (gUnknown_2039DCC & 1)) {
              sub_80A72B8(ptr, FALSE);
 -            DoAxFrame_800558C(&ptr->axdata, 304, 208, 0, ptr->unk68, &ptr->unk3C);
@@ -4220,7 +4269,7 @@ index 79fd9c0d..0a1feab2 100644
              ptr->unk70 = 0;
              return FALSE;
          }
-@@ -854,7 +871,7 @@ bool8 sub_80A7094(struct UnkGroundSpriteStruct *ptr, PixelPos *r10, PixelPos *po
+@@ -854,7 +885,7 @@ bool8 sub_80A7094(struct UnkGroundSpriteStruct *ptr, PixelPos *r10, PixelPos *po
      }
      else if (ptr->unk70 != 0) {
          sub_80A72B8(ptr, TRUE);
