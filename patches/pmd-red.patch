@@ -6894,10 +6894,40 @@ index 926d28d1..684b3d20 100644
  {
      RunPaletteFadeFunctions();
 diff --git a/src/pokemon.c b/src/pokemon.c
-index 3c5ab6ee..6970638c 100644
+index 3c5ab6ee..fe2d5e05 100644
 --- a/src/pokemon.c
 +++ b/src/pokemon.c
-@@ -967,6 +967,9 @@ void PokemonToDungeonMon(DungeonMon *dst, Pokemon *src, s32 recruitedPokemonId)
+@@ -78,6 +78,9 @@ void CreateLeaderPartnerData(s16 _species, bool32 _isLeader, u8* name)
+      bool8 isLeader = _isLeader;
+ 
+      pokemon.flags = POKEMON_FLAG_EXISTS | POKEMON_FLAG_ON_TEAM;
++#ifdef PLATFORM_3DS
++     pokemon.shiny = 0; // (was left to whatever the stack held: the starters could be shiny)
++#endif
+      if (isLeader) {
+          pokemon.isTeamLeader = TRUE;
+          pokemon.dungeonLocation.id = DUNGEON_JOIN_LOCATION_LEADER;
+@@ -137,6 +140,9 @@ void CreateLevel1Pokemon(Pokemon *pokemon, s16 _species, u8* name, u32 _itemID,
+     u8 itemID = _itemID;
+ 
+     pokemon->flags = POKEMON_FLAG_EXISTS;
++#ifdef PLATFORM_3DS
++    pokemon->shiny = 0; // (story recruits: not left to the stack)
++#endif
+     pokemon->isTeamLeader = FALSE;
+     pokemon->level = 1;
+     pokemon->pokeHP = GetBaseHP(species);
+@@ -200,6 +206,9 @@ void ConvertStoryMonToPokemon(Pokemon *dst, const struct StoryMonData *src)
+     s32 i;
+ 
+     dst->flags = POKEMON_FLAG_EXISTS;
++#ifdef PLATFORM_3DS
++    dst->shiny = 0;
++#endif
+     dst->isTeamLeader = FALSE;
+     dst->level = src->level;
+     dst->pokeHP = src->pokeHP;
+@@ -967,6 +976,9 @@ void PokemonToDungeonMon(DungeonMon *dst, Pokemon *src, s32 recruitedPokemonId)
  
      dst->belly = IntToFixedPoint(100);
      dst->maxBelly = IntToFixedPoint(100);
@@ -6907,7 +6937,7 @@ index 3c5ab6ee..6970638c 100644
  }
  
  void DungeonMonToRecruitedPokemon(s32 id, DungeonMon* src)
-@@ -1006,6 +1009,9 @@ void DungeonMonToPokemon(Pokemon* dst, DungeonMon* src)
+@@ -1006,6 +1018,9 @@ void DungeonMonToPokemon(Pokemon* dst, DungeonMon* src)
      else {
          dst->heldItem.id = ITEM_NOTHING;
      }
