@@ -44,6 +44,7 @@ void GpuList_Begin(int w, int h)
     l->h = h;
     l->backdrop = 0;
     l->bdSecond = 0;
+    l->border = 0;
     l->eva = 16;
     l->evb = 0;
     l->quadCount = 0;

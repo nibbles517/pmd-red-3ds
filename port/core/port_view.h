@@ -47,6 +47,11 @@ extern struct PortWinX gPortWin1X[SCREEN_H_MAX];
 // game patches; read when a frame starts).
 extern uint8_t gPortWideView;
 
+// The framed view's border in the picture's own colour (near its top left)
+// instead of black: set by the game while a white screen shows (the opening
+// warning and Nintendo screens), so it covers the whole drawing size.
+extern uint8_t gPortBorderFill;
+
 // Backgrounds drawn by the game for the wide view, instead of from VRAM: a
 // 64x64-entry map (512x512 pixels, wrapping) and its scroll, in GBA screen
 // coordinates (the pixel at GBA screen (0,0) is map pixel (scrollX, scrollY)).

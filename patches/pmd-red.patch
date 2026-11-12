@@ -4481,7 +4481,7 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..146728c9 100644
+index 372641a7..b34465d1 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
 @@ -1,4 +1,10 @@
@@ -4525,17 +4525,23 @@ index 372641a7..146728c9 100644
      InitializeGameOptions(TRUE);
      SetWindowTitle(_("PKDi ver 1.0 [Apr 28 2006] 16:37:54"));
      sub_800DAAC();
-@@ -149,6 +171,9 @@ void GameLoop_Async(void)
+@@ -149,13 +171,26 @@ void GameLoop_Async(void)
      if (ReadSaveFromPak(&tmp))
          ThoroughlyResetScriptVars();
  
 +#ifdef PLATFORM_3DS
 +    if (!sPortReloadingSave) { // (the opening scenes: not again for another save)
 +#endif
++#ifdef PLATFORM_3DS
++    gPortBorderFill = TRUE; // (the warning and Nintendo screens are white: so is the border)
++#endif
      xxx_script_related_8001334_Async(STARTMODE_14);
      xxx_script_related_8001334_Async(STARTMODE_15);
++#ifdef PLATFORM_3DS
++    gPortBorderFill = FALSE;
++#endif
      ClearScriptVarArray(NULL, EVENT_LOCAL);
-@@ -156,6 +181,10 @@ void GameLoop_Async(void)
+     xxx_script_related_8001334_Async(STARTMODE_16);
  
      if (GetScriptVarValue(NULL, EVENT_LOCAL) == 0)
          xxx_script_related_8001334_Async(STARTMODE_17);
@@ -4546,7 +4552,7 @@ index 372641a7..146728c9 100644
  
      while (TRUE) {
          sMainLoopsUnk = MAINLOOPS_UNK_0;
-@@ -166,6 +195,18 @@ void GameLoop_Async(void)
+@@ -166,6 +201,18 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
@@ -4565,7 +4571,7 @@ index 372641a7..146728c9 100644
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -224,6 +265,10 @@ void GameLoop_Async(void)
+@@ -224,6 +271,10 @@ void GameLoop_Async(void)
                  break;
              if (nextMenu == MENU_NEW_GAME)
                  break;
@@ -4576,7 +4582,7 @@ index 372641a7..146728c9 100644
          }
  
          DeleteMainMenu();
-@@ -241,7 +286,22 @@ void GameLoop_Async(void)
+@@ -241,7 +292,22 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
@@ -4600,7 +4606,7 @@ index 372641a7..146728c9 100644
          switch (nextMenu) {
              case 2: {
                  s32 mailIndex = GetFirstIndexofMailType(7);
-@@ -259,6 +319,9 @@ void GameLoop_Async(void)
+@@ -259,6 +325,9 @@ void GameLoop_Async(void)
                  break;
              }
              case MENU_NEW_GAME: {
@@ -4610,7 +4616,7 @@ index 372641a7..146728c9 100644
                  sub_80122A8();
                  nullsub_33();
                  tmp3 = RunGameMode_Async(0);
-@@ -1095,7 +1158,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -1095,7 +1164,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {

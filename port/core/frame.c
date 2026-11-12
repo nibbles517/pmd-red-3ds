@@ -136,6 +136,8 @@ enum { VIEW_GBA, VIEW_FRAMED, VIEW_WIDE };
 static int sViewMode = -1; // view of the last frame
 static int sViewW;         // ... and its width
 uint8_t gPortWideView;
+uint8_t gPortBorderFill;
+static uint16_t sBorderOf[2] = { 0, 0 }; // the border each picture has (gPortBorderFill)
 int16_t gPortOamY[128];
 struct PortWinX gPortWin1X[SCREEN_H_MAX];
 static uint64_t sFrames;
@@ -372,6 +374,7 @@ static void RunFrame(void)
         sViewW = SCREEN_W;
         Ppu_SetView(wide);
         memset(sPictures, 0, sizeof(sPictures)); // the framed view's border is black (both pictures)
+        sBorderOf[0] = sBorderOf[1] = 0;
     }
     int lines = wide ? SCREEN_H : GBA_H;
     if (!skip)
@@ -384,6 +387,11 @@ static void RunFrame(void)
         GpuList_Begin(wide ? SCREEN_W : GBA_W, lines);
         listOk = 1;
     }
+
+    // The framed view's border: black, or the picture's colour near its
+    // top-left corner (gPortBorderFill)
+    int fillBorder = gPortBorderFill && mode == VIEW_FRAMED && !skip;
+    uint16_t border = 0;
 
     // Lines 0-159: visible. The wide view also draws lines below, as if the
     // screen went on (no VCount events there, but the HBlank DMA continues).
@@ -413,7 +421,36 @@ static void RunFrame(void)
             Ppu_RenderLine(line, sLine);
             memcpy(&sFrame[(line + NARROW_OY) * SCREEN_W + NARROW_OX], sLine, GBA_W * sizeof(uint16_t));
         }
+        if (line == 4 && fillBorder) { // (a pixel near its top-left corner: the warning has a black edge)
+            if (listMode)
+                Ppu_RenderLine(4, sLine);
+            border = sLine[4] & 0x7FFF;
+        }
         Dma_HBlank();
+    }
+    if (mode == VIEW_FRAMED && !skip) {
+        // the border of this picture (if it isn't so already)
+        int k = sFrame == sPictures[0] ? 0 : 1;
+        uint16_t want = fillBorder ? border : 0;
+        if (sBorderOf[k] != want) {
+            sBorderOf[k] = want;
+            int w = SCREEN_W, h = SCREEN_H;
+            for (int y = 0; y < h; y++) {
+                uint16_t *row = &sFrame[y * w];
+                if (y < NARROW_OY || y >= NARROW_OY + GBA_H) {
+                    for (int x = 0; x < w; x++)
+                        row[x] = want;
+                }
+                else {
+                    for (int x = 0; x < NARROW_OX; x++)
+                        row[x] = want;
+                    for (int x = NARROW_OX + GBA_W; x < w; x++)
+                        row[x] = want;
+                }
+            }
+        }
+        if (listMode)
+            gGpuList.border = fillBorder ? (uint16_t)(border | 0x8000) : 0;
     }
     if (listMode)
         sLastListed = listMode == 3 && listOk;

@@ -87,6 +87,7 @@ typedef struct {
     uint32_t frame;    // (counts the listed frames: the sprite slots' ages)
     int full;          // something didn't fit: the list can't be used
     int fallback;      // why the renderer couldn't describe the frame (GPU_WHY_*), 0: it could
+    uint16_t border;   // the framed view's border colour (BGR555) | 0x8000; 0: black (gPortBorderFill)
 } GpuList;
 
 enum {

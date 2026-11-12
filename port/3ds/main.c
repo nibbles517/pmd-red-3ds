@@ -992,6 +992,23 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
     C3D_AlphaTest(false, GPU_ALWAYS, 0);
     C3D_StencilTest(false, GPU_ALWAYS, 0, 0, 0);
     C3D_AlphaBlend(GPU_BLEND_ADD, GPU_BLEND_ADD, GPU_ONE, GPU_ZERO, GPU_ONE, GPU_ZERO);
+    if (l->border & 0x8000) {
+        // The framed view's border in the picture's colour (gPortBorderFill):
+        // the whole frame, the backdrop drawn over it
+        unsigned c[3];
+        for (int k = 0; k < 3; k++)
+            c[k] = ((l->border >> (5 * k)) & 31) * 255 / 31 * level / 255;
+        C3D_TexEnvColor(env, 0xFF000000 | (c[2] << 16) | (c[1] << 8) | c[0]);
+        float x0 = (float)sGpuMain.x, y0 = (float)sGpuMain.y;
+        float x1 = x0 + (float)sGpuMain.w, y1 = y0 + (float)sGpuMain.h;
+        C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
+        C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmSendAttrib(x1, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
+        C3D_ImmDrawEnd();
+        C3D_TexEnvColor(env, 0xFF000000 | (b << 16) | (g << 8) | r);
+    }
     {
         float x0 = px, y0 = py, x1 = px + l->w * sx, y1 = py + l->h * sy;
         C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
