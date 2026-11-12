@@ -301,10 +301,10 @@ index d927bef9..a098cfde 100644
 \ No newline at end of file
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..b55123e3
+index 00000000..d961f263
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,33 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -313,11 +313,12 @@ index 00000000..b55123e3
 +extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On; each Save Data's in config.ini
 +// What they do (index in gPortRunOptions):
 +// (dungeon_floor_spawns.c) Increased Sitrus Berries: a rolled Oran Berry is a
-+// Sitrus Berry 2% of the time; Increased Life Seeds: a rolled Reviver Seed is
-+// a Life Seed 2% of the time; Increased Vitamins: a rolled Max Elixir is
-+// Protein, Iron, Calcium or Zinc (25% each) 2% of the time
++// Sitrus Berry 5% of the time; Increased Life Seeds: a rolled Blast Seed is
++// a Life Seed 5% of the time; Increased Vitamins: a rolled Max Elixir is
++// Protein, Iron, Calcium or Zinc (25% each) 5% of the time. 10% each while
++// the team leader holds a Plain Ribbon.
 +#define PORT_RUN_ORAN_TO_SITRUS 0
-+#define PORT_RUN_REVIVER_TO_LIFE 1
++#define PORT_RUN_BLAST_TO_LIFE 1
 +#define PORT_RUN_ELIXIR_TO_VITAMIN 2
 +// Blue Exclusive Pokémon: Blue Rescue Team's exclusives (Magikarp, Lapras...)
 +// count as unlocked, without Wonder Mail (exclusive_pokemon.c)
@@ -1393,7 +1394,7 @@ index 28b04fb0..368ffdc7 100644
 +#endif
  }
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
-index 4506e559..8bc2fe71 100644
+index 4506e559..76a3d8fa 100644
 --- a/src/dungeon_floor_spawns.c
 +++ b/src/dungeon_floor_spawns.c
 @@ -18,6 +18,9 @@
@@ -1414,7 +1415,7 @@ index 4506e559..8bc2fe71 100644
 +#include "dungeon_util.h"
 +#include "structs/dungeon_entity.h"
 +
-+// The item run options' chance (in 100) of changing an item: 2, or 4 while
++// The item run options' chance (in 100) of changing an item: 5, or 10 while
 +// the team leader holds a Plain Ribbon (a hidden effect: its description
 +// doesn't say)
 +static s32 PortItemChangeChance(void)
@@ -1429,9 +1430,9 @@ index 4506e559..8bc2fe71 100644
 +            continue;
 +        info = GetEntInfo(e);
 +        if (info->isTeamLeader)
-+            return ((info->heldItem.flags & ITEM_FLAG_EXISTS) && info->heldItem.id == ITEM_PLAIN_RIBBON) ? 4 : 2;
++            return ((info->heldItem.flags & ITEM_FLAG_EXISTS) && info->heldItem.id == ITEM_PLAIN_RIBBON) ? 10 : 5;
 +    }
-+    return 2;
++    return 5;
 +}
 +#endif
 +
@@ -1443,15 +1444,15 @@ index 4506e559..8bc2fe71 100644
      for (i = 0; i < NUMBER_OF_ITEM_IDS; i++) {
          if (gDungeon->itemSpawns[spawnType].itemValues[i] != 0 && GetItemCategory(i) == category && gDungeon->itemSpawns[spawnType].itemValues[i] >= rand) {
 +#ifdef PLATFORM_3DS
-+            // Run options 1 and 2: an Oran Berry or a Reviver Seed rolled here
++            // Run options 1 and 2: an Oran Berry or a Blast Seed rolled here
 +            // (floor, shop, Monster House, buried, held, Pickup...) is a
-+            // Sitrus Berry or a Life Seed 2 times in 100 (4 with the leader's Plain
-+            // Ribbon)
++            // Sitrus Berry or a Life Seed 5 times in 100 (10 with the leader's
++            // Plain Ribbon)
 +            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) < PortItemChangeChance())
 +                return ITEM_SITRUS_BERRY;
-+            if (i == ITEM_REVIVER_SEED && gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE] && DungeonRandInt(100) < PortItemChangeChance())
++            if (i == ITEM_BLAST_SEED && gPortRunOptions[PORT_RUN_BLAST_TO_LIFE] && DungeonRandInt(100) < PortItemChangeChance())
 +                return ITEM_LIFE_SEED;
-+            // Run option 3: a Max Elixir is a vitamin 2 times in 100: Protein,
++            // Run option 3: a Max Elixir is a vitamin 5 times in 100 (10): Protein,
 +            // Iron, Calcium or Zinc, as likely each
 +            if (i == ITEM_MAX_ELIXIR && gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && DungeonRandInt(100) < PortItemChangeChance()) {
 +                static const u8 sVitamins[4] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC };
@@ -4167,7 +4168,7 @@ index 79fd9c0d..0a1feab2 100644
          return FALSE;
      }
 diff --git a/src/items.c b/src/items.c
-index a2ebfc31..e0ce79d2 100644
+index a2ebfc31..028142d3 100644
 --- a/src/items.c
 +++ b/src/items.c
 @@ -16,6 +16,33 @@
@@ -4275,7 +4276,7 @@ index a2ebfc31..e0ce79d2 100644
 +    // Run options Increased Sitrus Berries / Life Seeds / Vitamins (any of
 +    // them): a chance of a Plain Ribbon in the first slot (4% in the first 3
 +    // story tiers, 1% post-game), the other 7 rolled as usual
-+    if ((gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] || gPortRunOptions[PORT_RUN_REVIVER_TO_LIFE]
++    if ((gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] || gPortRunOptions[PORT_RUN_BLAST_TO_LIFE]
 +         || gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN]) && RandInt(100) < (index == 3 ? 1 : 4)) {
 +        AddKecleonShopItem(ITEM_PLAIN_RIBBON);
 +        i = 1;
