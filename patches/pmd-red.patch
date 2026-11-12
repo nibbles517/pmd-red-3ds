@@ -3043,7 +3043,7 @@ index b965ec4a..3efd9cd9 100644
  {
      if (sDungeonPokemonSprites != NULL) {
 diff --git a/src/dungeon_range.c b/src/dungeon_range.c
-index ca1c1984..85b50559 100644
+index ca1c1984..bb5c0aae 100644
 --- a/src/dungeon_range.c
 +++ b/src/dungeon_range.c
 @@ -1,4 +1,7 @@
@@ -3066,6 +3066,41 @@ index ca1c1984..85b50559 100644
      {
          SpriteSetX(&gUnknown_202ED28[0][index].sprite, x + gUnknown_202ED28[0][index].pos.x);
          SpriteSetY(&gUnknown_202ED28[0][index].sprite, y + gUnknown_202ED28[0][index].pos.y);
+@@ -237,6 +244,22 @@ bool8 sub_8083660(DungeonPos *posDst)
+     s32 x, y;
+     s32 count = 0;
+ 
++#ifdef PLATFORM_3DS
++    // The wide view shows more of the floor around the leader: new Pokémon
++    // appear only where it doesn't reach (the GBA's 6 tiles, 24 pixels each,
++    // covering its 240x160; here half the screen, the leader's tile and up to
++    // a tile more of sprite). DS 7x6, Fit 9x7, 3DS 10x7.
++    s32 farX = 6, farY = 6;
++    if (PORT_WIDE_SIZE) {
++        farX = (SCREEN_W / 2 + 36 + 23) / 24;
++        farY = (SCREEN_H / 2 + 36 + 23) / 24;
++        if (farX < 6)
++            farX = 6;
++        if (farY < 6)
++            farY = 6;
++    }
++#endif
++
+     for (i = 0; i < 3; i++) {
+         DungeonPos leaderPos;
+ 
+@@ -260,7 +283,11 @@ bool8 sub_8083660(DungeonPos *posDst)
+                         && tile->room != CORRIDOR_ROOM
+                         && tile->object == NULL
+                         && tile->monster == NULL
++#ifdef PLATFORM_3DS
++                        && (abs(leaderPos.x - x) >= farX || abs(leaderPos.y - y) >= farY))
++#else
+                         && (abs(leaderPos.x - x) >= 6 || abs(leaderPos.y - y) >= 6))
++#endif
+                     {
+                         setPosition = TRUE;
+                     }
 diff --git a/src/dungeon_serializer.c b/src/dungeon_serializer.c
 index ed5c3e0a..972ce9b3 100644
 --- a/src/dungeon_serializer.c
