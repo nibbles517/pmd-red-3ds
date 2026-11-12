@@ -65,7 +65,7 @@ index 9d59c8fc..10cdcf67 100644
  @ I/O register offsets
  	.set OFFSET_REG_DISPCNT,     0x0
 diff --git a/include/constants/main_menu.h b/include/constants/main_menu.h
-index 76eb3bd6..dd20263d 100644
+index 76eb3bd6..0b54676c 100644
 --- a/include/constants/main_menu.h
 +++ b/include/constants/main_menu.h
 @@ -25,7 +25,8 @@ enum MainMenuScreens
@@ -78,11 +78,12 @@ index 76eb3bd6..dd20263d 100644
      MENU_DELETE_SAVE = 46,
      MENU_DEBUG_DUNGEON,
      MENU_DEBUG_FIELD,
-@@ -33,6 +34,7 @@ enum MainMenuScreens
+@@ -33,6 +34,8 @@ enum MainMenuScreens
      MENU_DEBUG_FIELD_SCRIPT,
      MENU_DEBUG_DEBUG_MENU,
      MENU_DEBUG_UNKNOWN_1,
 +    MENU_RELOAD_SAVE, // 3DS port: another save was chosen; read it as at power-on
++    MENU_PORT_DEBUG_ROOM, // 3DS port: Game Options > Debug Room: the save loaded into the debug room
      MENU_NO_SCREEN_CHANGE = 65500 // (s16)-36
  };
  
@@ -284,16 +285,17 @@ index 1ac7b0fe..9540874d 100644
  void ResetScheduledMemCopies(void);
  void ScheduleMemCopy(u32 *, const u32 *, u32);
 diff --git a/include/options_menu1.h b/include/options_menu1.h
-index d927bef9..a098cfde 100644
+index d927bef9..7b597dd9 100644
 --- a/include/options_menu1.h
 +++ b/include/options_menu1.h
-@@ -20,5 +20,10 @@ struct unkStruct_203B25C
+@@ -20,5 +20,11 @@ struct unkStruct_203B25C
  bool8 sub_801DCC4(void);
  u32 sub_801DCE8(void);
  void sub_801DD50(void);
 +#ifdef PLATFORM_3DS
 +void Port_OptionsMenuFromTitle(bool8 fromTitle);
 +bool8 Port_OptionsMenuLoadedSave(void);
++bool8 Port_OptionsMenuDebugRoom(void);
 +bool8 Port_OthersReturnToTitle(void); // Others > Return to Main Menu: saved // Change Current Save Data was used
 +#endif
  
@@ -4557,7 +4559,7 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..b34465d1 100644
+index 372641a7..4e5dc346 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
 @@ -1,4 +1,10 @@
@@ -4591,7 +4593,17 @@ index 372641a7..b34465d1 100644
  // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
  
  static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
-@@ -140,6 +159,9 @@ void GameLoop_Async(void)
+@@ -108,6 +127,9 @@ static void NDS_LoadOverlay_GroundMain();
+ static void RemoveAllMoneyAndItems(void);
+ static void RemoveMoneyAndRandomItems(void);
+ static u32 RunGameMode_Async(u32 param_1);
++#ifdef PLATFORM_3DS
++static bool8 sPortDebugRoomStart; // Game Options > Debug Room
++#endif
+ static u32 xxx_script_related_8001334_Async(u32 startMode);
+ static u8 sub_8001170(void);
+ static void sub_80011CC(DungeonSetupSubstruct *info, u8 dungId);
+@@ -140,6 +162,9 @@ void GameLoop_Async(void)
      LoadMailInfo();
      sub_800CD64(0x8000, FALSE);
      sub_8012284();
@@ -4601,7 +4613,7 @@ index 372641a7..b34465d1 100644
      InitializeGameOptions(TRUE);
      SetWindowTitle(_("PKDi ver 1.0 [Apr 28 2006] 16:37:54"));
      sub_800DAAC();
-@@ -149,13 +171,26 @@ void GameLoop_Async(void)
+@@ -149,13 +174,26 @@ void GameLoop_Async(void)
      if (ReadSaveFromPak(&tmp))
          ThoroughlyResetScriptVars();
  
@@ -4628,7 +4640,7 @@ index 372641a7..b34465d1 100644
  
      while (TRUE) {
          sMainLoopsUnk = MAINLOOPS_UNK_0;
-@@ -166,6 +201,18 @@ void GameLoop_Async(void)
+@@ -166,6 +204,18 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
@@ -4647,18 +4659,20 @@ index 372641a7..b34465d1 100644
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -224,6 +271,10 @@ void GameLoop_Async(void)
+@@ -224,6 +274,12 @@ void GameLoop_Async(void)
                  break;
              if (nextMenu == MENU_NEW_GAME)
                  break;
 +#ifdef PLATFORM_3DS
 +            if (nextMenu == MENU_RELOAD_SAVE)
 +                break;
++            if (nextMenu == MENU_PORT_DEBUG_ROOM)
++                break;
 +#endif
          }
  
          DeleteMainMenu();
-@@ -241,7 +292,22 @@ void GameLoop_Async(void)
+@@ -241,7 +297,31 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
@@ -4679,10 +4693,19 @@ index 372641a7..b34465d1 100644
 +            goto reloadSave;
 +        }
 +#endif
++#ifdef PLATFORM_3DS
++        if (nextMenu == MENU_PORT_DEBUG_ROOM) {
++            // Game Options > Debug Room: the loaded save, started as the
++            // debug start does (the debug room, map 0: DEBUG_SCRIPT)
++            sPortDebugRoomStart = TRUE;
++            tmp3 = RunGameMode_Async(1);
++            continue;
++        }
++#endif
          switch (nextMenu) {
              case 2: {
                  s32 mailIndex = GetFirstIndexofMailType(7);
-@@ -259,6 +325,9 @@ void GameLoop_Async(void)
+@@ -259,6 +339,9 @@ void GameLoop_Async(void)
                  break;
              }
              case MENU_NEW_GAME: {
@@ -4692,7 +4715,20 @@ index 372641a7..b34465d1 100644
                  sub_80122A8();
                  nullsub_33();
                  tmp3 = RunGameMode_Async(0);
-@@ -1095,7 +1164,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -559,6 +642,12 @@ static u32 RunGameMode_Async(u32 a0)
+     else if (mode != STARTMODE_NEW_GAME && mode != STARTMODE_11) {
+         mode = STARTMODE_CONTINUE_GAME;
+     }
++#ifdef PLATFORM_3DS
++    if (sPortDebugRoomStart) {
++        sPortDebugRoomStart = FALSE;
++        mode = STARTMODE_13;
++    }
++#endif
+ 
+     ClearScriptVarArray(NULL, EVENT_S08E01);
+     while (TRUE) {
+@@ -1095,7 +1184,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
@@ -4711,7 +4747,7 @@ index 372641a7..b34465d1 100644
  
  // arm9.bin::0200CA1C
 diff --git a/src/main_menu1.c b/src/main_menu1.c
-index f803cc06..61a861c1 100644
+index f803cc06..413e7d0c 100644
 --- a/src/main_menu1.c
 +++ b/src/main_menu1.c
 @@ -14,6 +14,7 @@
@@ -4735,20 +4771,21 @@ index f803cc06..61a861c1 100644
      }
  
      sMainMenu->currMenu = sMainMenu->nextMenu;
-@@ -202,6 +209,12 @@ s32 UpdateMenu(void)
+@@ -202,6 +209,13 @@ s32 UpdateMenu(void)
          case MENU_DEBUG:
              nextMenu = UpdateDebugMenu();
              break;
 +#ifdef PLATFORM_3DS
 +        case MENU_GAME_OPTIONS:
 +            if (sub_801DCE8() == 3)
-+                nextMenu = Port_OptionsMenuLoadedSave() ? MENU_RELOAD_SAVE : MENU_MAIN_SCREEN;
++                nextMenu = Port_OptionsMenuLoadedSave() ? MENU_RELOAD_SAVE
++                         : Port_OptionsMenuDebugRoom() ? MENU_PORT_DEBUG_ROOM : MENU_MAIN_SCREEN;
 +            break;
 +#endif
      }
  
      if (nextMenu != MENU_NO_SCREEN_CHANGE)
-@@ -269,6 +282,14 @@ void CleanUpMenu(void)
+@@ -269,6 +283,14 @@ void CleanUpMenu(void)
          case MENU_DEBUG:
              DeleteDebugMenu();
              break;
@@ -5161,7 +5198,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..eb7fa053 100644
+index 86f582c2..5d80b91d 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -5190,7 +5227,7 @@ index 86f582c2..eb7fa053 100644
  #include "string_format.h"
  #include "text_1.h"
  
-@@ -18,7 +33,17 @@ enum
+@@ -18,7 +33,18 @@ enum
      MENU_OPTION_HINTS,
      MENU_OPTION_GAMEOPTIONS,
      MENU_OPTION_YES,
@@ -5206,10 +5243,11 @@ index 86f582c2..eb7fa053 100644
 +    MENU_OPTION_SAVE_SLOT1, // ... Save Data 1, 2, 3
 +    MENU_OPTION_SAVE_SLOT2,
 +    MENU_OPTION_SAVE_SLOT3,
++    MENU_OPTION_DEBUG_ROOM, // 3DS port: Debug Room (title only, with a save)
  };
  
  enum OptionsMenuStates
-@@ -31,6 +56,20 @@ enum OptionsMenuStates
+@@ -31,6 +57,21 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -5227,10 +5265,11 @@ index 86f582c2..eb7fa053 100644
 +    OPTIONS_MENU_MUSIC_MATCH_OTHER, // ... with another game's ROM: says so
 +    OPTIONS_MENU_RETURN_ASK, // 3DS port: "Would you like to save ... main menu?"
 +    OPTIONS_MENU_RETURN_SAVE, // 3DS port: saving, as at a save point
++    OPTIONS_MENU_DEBUG_ASK, // 3DS port: "Load the Debug Room ...?"
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +87,115 @@ static void sub_801DED0(void);
+@@ -48,6 +89,127 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -5310,6 +5349,12 @@ index 86f582c2..eb7fa053 100644
 +static bool8 sReloadSave; // a save was loaded: the main menu reads it again
 +static void HandleSaveDataMenu(void);
 +static void HandleSaveDataLoaded(void);
++// Scene Select (Debug): the save loaded as by the developers' debug start
++// (STARTMODE_13, main_loops.c): their "Script" list of every story scene
++// (DEMO_01..04, EVENT_Mxx...), A plays one, and the game goes on from there
++ALIGNED(4) static const u8 sDebugRoom[] = _("{COLOR CYAN}Scene Select (Debug){RESET}");
++ALIGNED(4) static const u8 sDebugRoomPrompt[] = _("Open the developers' scene list with\nthis save data? Playing a scene changes\nthe story's progress. Use a spare save!");
++static bool8 sDebugRoomChosen;
 +
 +// Return to Main Menu: saved, the field should end.
 +bool8 Port_OthersReturnToTitle(void)
@@ -5323,6 +5368,12 @@ index 86f582c2..eb7fa053 100644
 +{
 +    sFromTitle = fromTitle;
 +    sReloadSave = FALSE;
++    sDebugRoomChosen = FALSE;
++}
++
++bool8 Port_OptionsMenuDebugRoom(void)
++{
++    return sDebugRoomChosen;
 +}
 +
 +bool8 Port_OptionsMenuLoadedSave(void)
@@ -5346,7 +5397,7 @@ index 86f582c2..eb7fa053 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +224,55 @@ u32 sub_801DCE8(void)
+@@ -76,8 +238,63 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -5355,7 +5406,7 @@ index 86f582c2..eb7fa053 100644
 +#else
              HandleChangeSettingsMenu();
 +#endif
-+            break;
+             break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
@@ -5366,7 +5417,7 @@ index 86f582c2..eb7fa053 100644
 +            break;
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            HandleSaveDataLoaded();
-             break;
++            break;
 +        case OPTIONS_MENU_MUSIC:
 +            HandleMusicMenu();
 +            break;
@@ -5388,6 +5439,14 @@ index 86f582c2..eb7fa053 100644
 +                SetOptionsMenuState(menuAction == 1 ? OPTIONS_MENU_RETURN_SAVE : OPTIONS_MENU_MAIN);
 +            break;
 +        }
++        case OPTIONS_MENU_DEBUG_ASK: {
++            s32 menuAction;
++            if (sub_80144A4(&menuAction) == 0) {
++                sDebugRoomChosen = menuAction == 1;
++                SetOptionsMenuState(sDebugRoomChosen ? OPTIONS_MENU_EXIT : OPTIONS_MENU_MAIN);
++            }
++            break;
++        }
 +        case OPTIONS_MENU_RETURN_SAVE:
 +            if (!WriteSavePak()) {
 +                FinishWriteSavePak();
@@ -5402,7 +5461,7 @@ index 86f582c2..eb7fa053 100644
          default:
              break;
      }
-@@ -120,9 +315,13 @@ static void sub_801DD84(void)
+@@ -120,9 +337,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -5417,7 +5476,7 @@ index 86f582c2..eb7fa053 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +329,32 @@ static void sub_801DD84(void)
+@@ -130,10 +351,32 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -5429,7 +5488,7 @@ index 86f582c2..eb7fa053 100644
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
 +#endif
-+            break;
+             break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SAVE_DATA:
 +            CreateOthersMenu();
@@ -5446,12 +5505,12 @@ index 86f582c2..eb7fa053 100644
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetMusicWindows();
-             break;
++            break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +371,10 @@ static void sub_801DED0(void)
+@@ -150,6 +393,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -5462,7 +5521,7 @@ index 86f582c2..eb7fa053 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +389,81 @@ static void sub_801DED0(void)
+@@ -164,12 +411,84 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -5515,6 +5574,9 @@ index 86f582c2..eb7fa053 100644
 +        case OPTIONS_MENU_RETURN_ASK: // as the save points ask (Yes, No: No first)
 +            CreateYesNoDialogueBoxAndPortrait_DefaultNo(sReturnPrompt, NULL, 0);
 +            break;
++        case OPTIONS_MENU_DEBUG_ASK:
++            CreateYesNoDialogueBoxAndPortrait_DefaultNo(sDebugRoomPrompt, NULL, 0);
++            break;
 +        case OPTIONS_MENU_RETURN_SAVE: // as SPECIAL_TEXT_SAVE_1 saves (textbox.c)
 +            SetScriptVarValue(NULL, 0x18, 1);
 +            sub_8011C28(1);
@@ -5544,7 +5606,7 @@ index 86f582c2..eb7fa053 100644
      }
  }
  
-@@ -180,12 +474,54 @@ static void CreateOthersMenu(void)
+@@ -180,12 +499,59 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -5582,6 +5644,11 @@ index 86f582c2..eb7fa053 100644
 +        loopMax++;
 +        sUnknown_203B25C->menuItems[loopMax].text = sChangeSaveData;
 +        sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_SAVE_DATA;
++        if (sub_8011C34() != -1) { // (a save to load into it)
++            loopMax++;
++            sUnknown_203B25C->menuItems[loopMax].text = sDebugRoom;
++            sUnknown_203B25C->menuItems[loopMax].menuAction = MENU_OPTION_DEBUG_ROOM;
++        }
 +    }
 +    else {
 +        loopMax++;
@@ -5599,7 +5666,7 @@ index 86f582c2..eb7fa053 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +565,44 @@ static void HandleOthersMenu(void)
+@@ -229,6 +595,47 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -5629,6 +5696,9 @@ index 86f582c2..eb7fa053 100644
 +        case MENU_OPTION_RETURN:
 +            SetOptionsMenuState(OPTIONS_MENU_RETURN_ASK);
 +            break;
++        case MENU_OPTION_DEBUG_ROOM:
++            SetOptionsMenuState(OPTIONS_MENU_DEBUG_ASK);
++            break;
 +        case MENU_OPTION_MUSIC_MATCH:
 +        case MENU_OPTION_SFX_MATCH:
 +            // Blue Rescue Team's tracks only
@@ -5644,7 +5714,7 @@ index 86f582c2..eb7fa053 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +646,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +679,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -5661,7 +5731,7 @@ index 86f582c2..eb7fa053 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +666,950 @@ static void sub_801E0FC(void)
+@@ -282,12 +699,950 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -5705,10 +5775,10 @@ index 86f582c2..eb7fa053 100644
 +        case 3:
 +            PortScreenMenu_Destroy();
 +            LeaveSettings(PortScreenMenu_Changed());
-             break;
-     }
- }
- 
++            break;
++    }
++}
++
 +// Save Data 1-3: that save file is used from now on (and next time); the
 +// main menu then reads it as at power-on.
 +static void HandleSaveDataMenu(void)
@@ -6596,10 +6666,10 @@ index 86f582c2..eb7fa053 100644
 +            break;
 +        default:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
-+            break;
-+    }
-+}
-+
+             break;
+     }
+ }
+ 
 +static void HandleChangesSaved(void)
 +{
 +    s32 menuAction;
