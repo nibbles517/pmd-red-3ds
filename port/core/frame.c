@@ -316,7 +316,7 @@ static int PictureBlack(void)
 }
 
 // The title in the wide view (gPortTitleView): its sea band (a sprite 320
-// pixels wide, GBA x -38..281, its top rows over the sky) carried on to the
+// pixels wide, GBA x -38..281, lines 132-163, its top rows the sky) carried on to the
 // sides where it ends short of the screen's edge (3DS size), each line's
 // edge pixel on; then the sea on down to the bottom, the sun's reflection in
 // it; then the picture moved down (the logo just above the middle), more sky.
@@ -324,12 +324,12 @@ static void ExtendTitleSea(void)
 {
     int w = SCREEN_W, h = SCREEN_H;
     int l = WIDE_OX - 38, r = WIDE_OX + 281;
-    for (int y = 112; y < GBA_H; y++) {
+    for (int y = 132; y < GBA_H; y++) { // (its lines: from 132, its top ones the sky over the clouds' bottom)
         uint16_t *row = &sFrame[y * w];
-        if (l > 0 && row[l] != row[l - 1]) // (the band on this line)
+        if (l > 0)
             for (int x = 0; x < l; x++)
                 row[x] = row[l];
-        if (r < w - 1 && row[r] != row[r + 1])
+        if (r < w - 1)
             for (int x = r + 1; x < w; x++)
                 row[x] = row[r];
     }
@@ -396,8 +396,9 @@ static void RunFrame(void)
     // in step with the sprites.
     WideState live;
     SaveWide(&live);
-    if (!sLatchValid)
-        sLatched = live;
+    if (!sLatchValid || title)
+        sLatched = live; // (the title: as it is. Its blinking moves the camera between two pictures on its map, whose rows
+                         // the game rewrites in place: a frame late, the old scroll would show the other's rows)
     LoadWide(&sLatched);
 
     // Graphics Options > Frame Skip: the game runs every frame, but the
