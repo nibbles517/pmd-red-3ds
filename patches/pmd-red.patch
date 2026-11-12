@@ -303,10 +303,10 @@ index d927bef9..7b597dd9 100644
 \ No newline at end of file
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..d961f263
+index 00000000..3b058209
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,34 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -330,6 +330,7 @@ index 00000000..d961f263
 +#define PORT_RUN_SHINY 4
 +#define PORT_SHINY_ODDS 4096
 +// After the save's roster and dungeon team, and the quicksave: then each one's shiny bit
++u8 PortShinyRoll(void); // (pokemon.c: 1 in PORT_SHINY_ODDS with the option on)
 +#define PORT_SHINY_MAGIC 0x594E4853 // "SHNY"
 +// port_shiny.c
 +struct EntityInfo;
@@ -4202,6 +4203,78 @@ index 965cbc4d..808ccb28 100644
              if ((sub_80A66D4(&objectPtr->unk144))) {
                  objectPtr->directionRelated = 0;
                  sub_80A6EFC(&objectPtr->unk144,objectPtr->unk13E & 0x1F00,(s8)objectPtr->unk13E);
+diff --git a/src/ground_script.c b/src/ground_script.c
+index 87431714..429a70ca 100644
+--- a/src/ground_script.c
++++ b/src/ground_script.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#endif
+ #include "globaldata.h"
+ #include "ground_script.h"
+ #include "constants/dungeon.h"
+@@ -3504,6 +3507,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+                 s32 index;
+ 
+                 ConvertStoryMonToPokemon(&magnemiteMon, &magnemiteData);
++#ifdef PLATFORM_3DS
++                magnemiteMon.shiny = PortShinyRoll(); // (run option Shiny Pokémon)
++#endif
+                 recruitPtr = TryAddPokemonToRecruited(&magnemiteMon);
+                 if (recruitPtr == NULL)
+                     return 1;
+@@ -3538,6 +3544,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+                 Pokemon absolMon;
+ 
+                 ConvertStoryMonToPokemon(&absolMon, &absolData);
++#ifdef PLATFORM_3DS
++                absolMon.shiny = PortShinyRoll(); // (run option Shiny Pokémon)
++#endif
+                 recruitPtr = TryAddPokemonToRecruited(&absolMon);
+                 if (recruitPtr == NULL)
+                     return 1;
+@@ -3584,6 +3593,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+                 Pokemon smeargleMon;
+ 
+                 ConvertStoryMonToPokemon(&smeargleMon, &smeargleData);
++#ifdef PLATFORM_3DS
++                smeargleMon.shiny = PortShinyRoll(); // (run option Shiny Pokémon)
++#endif
+                 recruitPtr = TryAddPokemonToRecruited(&smeargleMon);
+                 if (!recruitPtr)
+                     return 1;
+@@ -3661,6 +3673,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+                 Pokemon latiosMon;
+ 
+                 ConvertStoryMonToPokemon(&latiosMon, &latiosData);
++#ifdef PLATFORM_3DS
++                latiosMon.shiny = PortShinyRoll(); // (run option Shiny Pokémon)
++#endif
+                 recruitPtr = TryAddPokemonToRecruited(&latiosMon);
+                 if (recruitPtr == NULL)
+                     return 1;
+@@ -3695,6 +3710,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+                 Pokemon latiasMon;
+ 
+                 ConvertStoryMonToPokemon(&latiasMon, &latiasData);
++#ifdef PLATFORM_3DS
++                latiasMon.shiny = PortShinyRoll(); // (run option Shiny Pokémon)
++#endif
+                 recruitPtr = TryAddPokemonToRecruited(&latiasMon);
+                 if (recruitPtr == NULL)
+                     return 1;
+@@ -3891,6 +3909,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+             Pokemon gardevoirMon;
+ 
+             ConvertStoryMonToPokemon(&gardevoirMon, &gardevoirData);
++#ifdef PLATFORM_3DS
++                gardevoirMon.shiny = PortShinyRoll(); // (run option Shiny Pokémon)
++#endif
+             if (TryAddPokemonToRecruited(&gardevoirMon) == NULL)
+                 return 1;
+ 
 diff --git a/src/ground_sprite.c b/src/ground_sprite.c
 index 79fd9c0d..fd240abf 100644
 --- a/src/ground_sprite.c
@@ -6894,20 +6967,46 @@ index 926d28d1..684b3d20 100644
  {
      RunPaletteFadeFunctions();
 diff --git a/src/pokemon.c b/src/pokemon.c
-index 3c5ab6ee..fe2d5e05 100644
+index 3c5ab6ee..160aa6c1 100644
 --- a/src/pokemon.c
 +++ b/src/pokemon.c
-@@ -78,6 +78,9 @@ void CreateLeaderPartnerData(s16 _species, bool32 _isLeader, u8* name)
+@@ -1,4 +1,8 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#include "random.h"
++#endif
+ #include "globaldata.h"
+ #include "pokemon.h"
+ #include "constants/colors.h"
+@@ -68,6 +72,16 @@ void InitializeRecruitedPokemon(void)
+     }
+ }
+ 
++#ifdef PLATFORM_3DS
++// Run option Shiny Pokémon: 1 in 4096 for the starters and the Pokémon that
++// join in the story (ground_script.c; not the guests); the wild ones:
++// dungeon_mon_spawn.c
++u8 PortShinyRoll(void)
++{
++    return gPortRunOptions[PORT_RUN_SHINY] && RandInt(PORT_SHINY_ODDS) == 0;
++}
++#endif
++
+ void CreateLeaderPartnerData(s16 _species, bool32 _isLeader, u8* name)
+ {
+      Pokemon pokemon;
+@@ -78,6 +92,9 @@ void CreateLeaderPartnerData(s16 _species, bool32 _isLeader, u8* name)
       bool8 isLeader = _isLeader;
  
       pokemon.flags = POKEMON_FLAG_EXISTS | POKEMON_FLAG_ON_TEAM;
 +#ifdef PLATFORM_3DS
-+     pokemon.shiny = 0; // (was left to whatever the stack held: the starters could be shiny)
++     pokemon.shiny = PortShinyRoll(); // (was left to whatever the stack held)
 +#endif
       if (isLeader) {
           pokemon.isTeamLeader = TRUE;
           pokemon.dungeonLocation.id = DUNGEON_JOIN_LOCATION_LEADER;
-@@ -137,6 +140,9 @@ void CreateLevel1Pokemon(Pokemon *pokemon, s16 _species, u8* name, u32 _itemID,
+@@ -137,6 +154,9 @@ void CreateLevel1Pokemon(Pokemon *pokemon, s16 _species, u8* name, u32 _itemID,
      u8 itemID = _itemID;
  
      pokemon->flags = POKEMON_FLAG_EXISTS;
@@ -6917,17 +7016,27 @@ index 3c5ab6ee..fe2d5e05 100644
      pokemon->isTeamLeader = FALSE;
      pokemon->level = 1;
      pokemon->pokeHP = GetBaseHP(species);
-@@ -200,6 +206,9 @@ void ConvertStoryMonToPokemon(Pokemon *dst, const struct StoryMonData *src)
+@@ -200,6 +220,9 @@ void ConvertStoryMonToPokemon(Pokemon *dst, const struct StoryMonData *src)
      s32 i;
  
      dst->flags = POKEMON_FLAG_EXISTS;
 +#ifdef PLATFORM_3DS
-+    dst->shiny = 0;
++    dst->shiny = 0; // (story recruits roll it as they join: ground_script.c; the guests aren't)
 +#endif
      dst->isTeamLeader = FALSE;
      dst->level = src->level;
      dst->pokeHP = src->pokeHP;
-@@ -967,6 +976,9 @@ void PokemonToDungeonMon(DungeonMon *dst, Pokemon *src, s32 recruitedPokemonId)
+@@ -278,6 +301,9 @@ Pokemon *TryAddLevel1PokemonToRecruited(s32 species, u8 *name, u32 _itemID, cons
+     Pokemon pokemon;
+ 
+     CreateLevel1Pokemon(&pokemon, species, name, (u8)_itemID, location, moveID);
++#ifdef PLATFORM_3DS
++    pokemon.shiny = PortShinyRoll(); // (the story's: the legendary birds, new friends)
++#endif
+     return TryAddPokemonToRecruited(&pokemon);
+ }
+ 
+@@ -967,6 +993,9 @@ void PokemonToDungeonMon(DungeonMon *dst, Pokemon *src, s32 recruitedPokemonId)
  
      dst->belly = IntToFixedPoint(100);
      dst->maxBelly = IntToFixedPoint(100);
@@ -6937,7 +7046,7 @@ index 3c5ab6ee..fe2d5e05 100644
  }
  
  void DungeonMonToRecruitedPokemon(s32 id, DungeonMon* src)
-@@ -1006,6 +1018,9 @@ void DungeonMonToPokemon(Pokemon* dst, DungeonMon* src)
+@@ -1006,6 +1035,9 @@ void DungeonMonToPokemon(Pokemon* dst, DungeonMon* src)
      else {
          dst->heldItem.id = ITEM_NOTHING;
      }
