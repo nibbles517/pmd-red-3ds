@@ -318,7 +318,8 @@ static int PictureBlack(void)
 // The title in the wide view (gPortTitleView): its sea band (a sprite 320
 // pixels wide, GBA x -38..281, its top rows over the sky) carried on to the
 // sides where it ends short of the screen's edge (3DS size), each line's
-// edge pixel on; then the sea on down to the bottom, the sun's reflection in it.
+// edge pixel on; then the sea on down to the bottom, the sun's reflection in
+// it; then the picture moved down (the logo just above the middle), more sky.
 static void ExtendTitleSea(void)
 {
     int w = SCREEN_W, h = SCREEN_H;
@@ -355,6 +356,15 @@ static void ExtendTitleSea(void)
             int d = 2 * x - c2 - wob2;
             row[x] = (d < 0 ? -d : d) <= hw2 ? sun : sea;
         }
+    }
+    // Then all of it lower, the logo (its middle about the GBA's line 72) 16
+    // lines above the screen's middle: more sky above (its top line's colour)
+    int down = h / 2 - 16 - 72;
+    if (down > 0) {
+        memmove(&sFrame[down * w], sFrame, (size_t)(h - down) * w * sizeof(uint16_t));
+        uint16_t sky = sFrame[down * w];
+        for (int i = 0; i < down * w; i++)
+            sFrame[i] = sky;
     }
 }
 
