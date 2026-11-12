@@ -1,16 +1,3 @@
-diff --git a/data/item/item_data.json b/data/item/item_data.json
-index ea0c7585..80028357 100644
---- a/data/item/item_data.json
-+++ b/data/item/item_data.json
-@@ -821,7 +821,7 @@
-             false
-         ],
-         "order": 90,
--        "paletteID": 4,
-+        "paletteID": 10,
-         "actionType": "ITEM_ACTION_TYPE_FOOD"
-     },
-     {
 diff --git a/data/titlemenu_sbin.s b/data/titlemenu_sbin.s
 index dabe4fc6..f4554b1d 100644
 --- a/data/titlemenu_sbin.s
@@ -4181,7 +4168,7 @@ index 79fd9c0d..0a1feab2 100644
          return FALSE;
      }
 diff --git a/src/items.c b/src/items.c
-index a2ebfc31..028142d3 100644
+index a2ebfc31..53157c15 100644
 --- a/src/items.c
 +++ b/src/items.c
 @@ -16,6 +16,33 @@
@@ -4280,7 +4267,20 @@ index a2ebfc31..028142d3 100644
  }
  
  // arm9.bin::02060BD0
-@@ -1071,7 +1098,20 @@ void ChooseKecleonShopInventory(u8 index)
+@@ -307,6 +334,12 @@ s32 GetItemOrder(u8 id)
+ // arm9.bin::02060BB8
+ s32 GetItemPalette(u8 id)
+ {
++#ifdef PLATFORM_3DS
++    // Run option Increased Life Seeds: the Life Seed in palette 10 (white),
++    // apart from the other seeds
++    if (id == ITEM_LIFE_SEED && gPortRunOptions[PORT_RUN_BLAST_TO_LIFE])
++        return 10;
++#endif
+     return gItemParametersData[id].palette;
+ }
+ 
+@@ -1071,7 +1104,20 @@ void ChooseKecleonShopInventory(u8 index)
      for (i = 0; i < MAX_KECLEON_ITEM_SHOP_ITEMS; i++)
          InitKecleonShopItem(i);
  
