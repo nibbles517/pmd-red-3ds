@@ -1,3 +1,27 @@
+diff --git a/data/system_sbin.s b/data/system_sbin.s
+index 4c163ca4..394e9d92 100644
+--- a/data/system_sbin.s
++++ b/data/system_sbin.s
+@@ -7417,6 +7417,9 @@ gUnknown_831D278:
+ .byte 0x00, 0xb0, 0xdd, 0x00, 0x00, 0x00, 0x00, 0xdd
+ .byte 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xdb, 0xbd, 0x00, 0x00, 0x00, 0xb0, 0x0d, 0xd0, 0x0b, 0x00, 0x00, 0xd0, 0xdd, 0xdd, 0x0d, 0x00, 0x00, 0xd0, 0x0d, 0x00, 0x00
+ .byte 0x00, 0x00, 0xb0, 0x0d, 0xd0, 0x0b, 0x00, 0x00, 0x00, 0xdb, 0xbd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
++@ kanji_b's characters (3DS port: labelled, for the pointer to them below)
++.global gUnknown_831D2C0
++gUnknown_831D2C0:
+ .4byte gUnknown_83191C8
+ .byte 0x20, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00
+ .4byte gUnknown_8319210
+@@ -7910,7 +7913,8 @@ gUnknown_831D278:
+ .byte 0x99, 0x81, 0x09, 0x00, 0x00, 0x00, 0x03, 0x00
+ .global gUnknown_831DD94
+ gUnknown_831DD94:
+-.byte 0xe7, 0x00, 0x00, 0x00, 0xc0, 0xd2, 0x31, 0x08
++.byte 0xe7, 0x00, 0x00, 0x00
++.4byte gUnknown_831D2C0 @ (was its address as bytes: the 3DS port's data isn't where the GBA's is)
+ 
+ @ Start of SIRO Header
+ .global gUnknown_831DD9C
 diff --git a/data/titlemenu_sbin.s b/data/titlemenu_sbin.s
 index dabe4fc6..f4554b1d 100644
 --- a/data/titlemenu_sbin.s
@@ -5037,7 +5061,7 @@ index 1179e657..2f5761d8 100644
 +#endif
  }
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..9d8ed0b3 100644
+index 069cfc94..103f9576 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -5048,7 +5072,7 @@ index 069cfc94..9d8ed0b3 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,179 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,182 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -5060,6 +5084,7 @@ index 069cfc94..9d8ed0b3 100644
 +static u16 sPortWideMaps[2][64 * 64]; // BG2, BG3
 +
 +bool8 gPortGroundNarrow; // set by ground_map.c for screens made as maps
++bool8 gPortGroundEdges; // ... for those whose edges go on past the map (THE END)
 +// ... and for the title: its sky and clouds' layer (repeated across as it
 +// scrolls) carries its top and bottom rows on, and the layer of the logo, the
 +// sun and the sea its edge columns and its bottom row (the sea, wider and
@@ -5110,7 +5135,7 @@ index 069cfc94..9d8ed0b3 100644
 +                s32 mx = tx, i = tx - tx0;
 +                if (mapRender->wrapAround || overlay)
 +                    mx = ((mx % mapW) + mapW) % mapW;
-+                else if (gPortGroundTitle) // (the logo's layer: its edge columns on, the sea's band)
++                else if (gPortGroundTitle || gPortGroundEdges) // (the logo's layer: its edge columns on, the sea's band)
 +                    mx = mx < 0 ? 0 : mx >= mapW ? mapW - 1 : mx;
 +                if (mx < 0 || mx >= mapW) {
 +                    colChunk[i] = -1;
@@ -5131,6 +5156,8 @@ index 069cfc94..9d8ed0b3 100644
 +                    my = my > titleY0 + 19 ? titleY0 + 19 : my >= titleY0 ? my : mapRender->wrapAround ? titleY0 : -1;
 +                else if (mapRender->wrapAround)
 +                    my = ((my % mapH) + mapH) % mapH;
++                else if (gPortGroundEdges)
++                    my = my < 0 ? 0 : my >= mapH ? mapH - 1 : my;
 +                if (my < 0 || my >= mapH) {
 +                    for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++)
 +                        out[tx & 63] = (overlay || gPortGroundTitle) ? 0 : PORT_WIDE_BLACK;
@@ -5582,7 +5609,7 @@ index 1dea7998..4c409e42 100644
  {
      if (sUnknown_20398A8 == Unk_20398A8_UNK0) {
 diff --git a/src/ground_map.c b/src/ground_map.c
-index ddf7d16b..df82f212 100644
+index ddf7d16b..11728797 100644
 --- a/src/ground_map.c
 +++ b/src/ground_map.c
 @@ -1,4 +1,7 @@
@@ -5611,19 +5638,34 @@ index ddf7d16b..df82f212 100644
  
  void sub_80A56A0(u8 param_1, u8 param_2)
  {
-@@ -1268,6 +1275,27 @@ bool8 GetCurrentDungeonBounds(PixelPos *pos1, PixelPos *pos2)
+@@ -1268,6 +1275,42 @@ bool8 GetCurrentDungeonBounds(PixelPos *pos1, PixelPos *pos2)
      }
  }
  
 +#ifdef PLATFORM_3DS
 +// The screens made as maps keep the GBA's view (no wide view, ground_bg.c).
-+extern bool8 gPortGroundNarrow, gPortGroundTitle; // (ground_bg.c)
++extern bool8 gPortGroundNarrow, gPortGroundTitle, gPortGroundEdges; // (ground_bg.c)
 +static bool8 IsNarrowMap(s32 groundMapId)
 +{
 +    switch (groundMapId) {
 +        case MAP_LOGO_POKEMON_COMPANY:
 +        case MAP_LOGO_WARNING:
 +        case MAP_TEAM_BASE_WALL_MAP:
++            return TRUE;
++    }
++    return FALSE;
++}
++
++// The ending's screens made as maps (the night sky, the credits', THE END):
++// in the wide view, framed as on the GBA (its camera's limits: the light and
++// THE END in the middle) instead of the map in the middle (they're narrower
++// than the wide screen, which shows past their edges: they repeat)
++static bool8 IsGbaFramedMap(s32 groundMapId)
++{
++    switch (groundMapId) {
++        case MAP_NIGHT_SKY_1:
++        case MAP_NIGHT_SKY_2:
++        case MAP_THE_END:
 +            return TRUE;
 +    }
 +    return FALSE;
@@ -5639,7 +5681,7 @@ index ddf7d16b..df82f212 100644
  bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
  {
      const GroundConversionStruct *convTable;
-@@ -1279,10 +1307,30 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
+@@ -1279,10 +1322,34 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
              convTable = &gGroundMapConversionTable[gGroundMapAction->groundMapId];
              GetDungeonBounds(gGroundMapDungeon_3001B70, pos1, pos2);
  
@@ -5660,6 +5702,10 @@ index ddf7d16b..df82f212 100644
 +            pos1->y += (SCREEN_H / 2) * 256;
 +            pos2->x -= (SCREEN_W - 121 - WIDE_OX) * 256;
 +            pos2->y -= (SCREEN_H - SCREEN_H / 2) * 256;
++            if (IsGbaFramedMap(gGroundMapAction->groundMapId)) { // (across: the GBA's limits)
++                pos1->x += (0x7800 - (121 + WIDE_OX) * 256);
++                pos2->x -= (0x7800 - (SCREEN_W - 121 - WIDE_OX) * 256);
++            }
 +            }
 +#else
              pos1->x += 0x7800;
@@ -5670,7 +5716,7 @@ index ddf7d16b..df82f212 100644
  
              if(convTable->unk0 == 0xA)
              {
-@@ -1292,12 +1340,26 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
+@@ -1292,12 +1359,28 @@ bool8 sub_80A579C(PixelPos *pos1, PixelPos *pos2)
                  pos2->y -= 0x1800;
              }
  
@@ -5682,6 +5728,8 @@ index ddf7d16b..df82f212 100644
 +                if (pos1->y > pos2->y)
 +                    pos2->y = pos1->y;
 +            }
++            else if (pos1->x > pos2->x && IsGbaFramedMap(gGroundMapAction->groundMapId))
++                pos2->x = pos1->x; // (as the GBA)
 +            else if (pos1->x > pos2->x)
 +                pos1->x = pos2->x = (pos1->x + pos2->x) / 2;
 +            if (pos1->y > pos2->y)
@@ -5697,7 +5745,7 @@ index ddf7d16b..df82f212 100644
              return TRUE;
          }
      }
-@@ -1500,6 +1562,9 @@ void sub_80A59DC(void)
+@@ -1500,6 +1583,9 @@ void sub_80A59DC(void)
              case MAP_TITLE_SCREEN: {
                  PixelPos pixPos2;
  
@@ -5707,7 +5755,7 @@ index ddf7d16b..df82f212 100644
                  SetCameraPositionForLayer(gGroundMapDungeon_3001B70, 0, &pixPos);
                  gGroundMapAction->unkF0++;
                  gGroundMapAction->unkF8.x += gGroundMapAction->unkF0 / 8;
-@@ -1522,6 +1587,12 @@ void sub_80A59DC(void)
+@@ -1522,6 +1608,14 @@ void sub_80A59DC(void)
                  break;
          }
  
@@ -5716,6 +5764,8 @@ index ddf7d16b..df82f212 100644
 +        // The title: wide, its picture (sky, logo, sea) carried on past its
 +        // edges (ground_bg.c), the clouds' layer repeated across
 +        gPortGroundTitle = gGroundMapAction->groundMapId == MAP_TITLE_SCREEN;
++        // THE END: its plain picture carried on past its edges (ground_bg.c)
++        gPortGroundEdges = gGroundMapAction->groundMapId == MAP_THE_END;
 +#endif
          sub_80A4764(gGroundMapDungeon_3001B70);
      }
@@ -10193,7 +10243,7 @@ index 812df38d..c77423e3 100644
      a0->sub1.pos.x = a0->sub1.offset.x + spriteX;
      a0->sub1.pos.y = a0->sub1.offset.y + spriteY;
 diff --git a/src/string_format.c b/src/string_format.c
-index be399eb4..d80555f1 100644
+index be399eb4..c8f1da04 100644
 --- a/src/string_format.c
 +++ b/src/string_format.c
 @@ -1,4 +1,11 @@
@@ -10241,8 +10291,22 @@ index be399eb4..d80555f1 100644
              sDialogueBoxWinTemplates.id[1].type = WINDOW_TYPE_7;
          }
          else {
+@@ -481,7 +507,13 @@ void DrawDialogueBoxString_Async(void)
+                         SpriteSetPalNum(&sDialogueBoxArrowSprite, 15);
+ 
+                         if (sStringFormatFlags & STR_FORMAT_FLAG_ONLY_TEXT) {
++#ifdef PLATFORM_3DS
++                            // (as far under the text as on the GBA: its window,
++                            // row 8 there, goes down in the wide view)
++                            SpriteSetY(&sDialogueBoxArrowSprite, gWindows[0].y * 8 + 56);
++#else
+                             SpriteSetY(&sDialogueBoxArrowSprite, 120);
++#endif
+                             SpriteSetX(&sDialogueBoxArrowSprite, 112);
+                         }
+                         else {
 diff --git a/src/text_1.c b/src/text_1.c
-index e6612f2c..5819b861 100644
+index e6612f2c..5e5c4279 100644
 --- a/src/text_1.c
 +++ b/src/text_1.c
 @@ -1,4 +1,10 @@
@@ -10297,7 +10361,7 @@ index e6612f2c..5819b861 100644
      UpdateFadeInTile(0);
  }
  
-@@ -246,6 +258,23 @@ void ShowWindows(const WindowTemplates *winTemplates, bool8 a1, bool8 a2)
+@@ -246,6 +258,26 @@ void ShowWindows(const WindowTemplates *winTemplates, bool8 a1, bool8 a2)
      ShowWindowsInternal(winTemplates, a1, a2, &positionModifier);
  }
  
@@ -10310,10 +10374,13 @@ index e6612f2c..5819b861 100644
 +// window ending right above the message box (row 15), as the choices of a
 +// question do, however many (string_format.c), so it stays on the box. Never
 +// less below than above, so windows only move apart.
++extern bool8 gPortGroundEdges; // (ground_bg.c: THE END's screen)
 +static s32 WindowShiftTiles(s32 y, s32 height)
 +{
 +    if (SCREEN_H <= 192)
 +        return WINDOW_SHIFT_TILES;
++    if (gPortGroundEdges) // (THE END: as far as its picture went, so the arrow stays under it)
++        return (SCREEN_H - 160) / 16;
 +    return y >= 10 || y + height == 14 ? WINDOW_SHIFT_TILES : WINDOW_SHIFT_TILES_TOP;
 +}
 +#endif
@@ -10321,7 +10388,7 @@ index e6612f2c..5819b861 100644
  // red  https://decomp.me/scratch/EN6n0 (includes removed code from pmd-blue)
  // blue https://decomp.me/scratch/1y9BG
  // arm9.bin::020051B0
-@@ -258,6 +287,14 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+@@ -258,6 +290,14 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
          winTemplates = &sDummyWindows;
      if (a2)
          sub_8009388();
@@ -10336,7 +10403,7 @@ index e6612f2c..5819b861 100644
  
      ResetWindowBgData();
  
-@@ -265,6 +302,11 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
+@@ -265,6 +305,11 @@ static void ShowWindowsInternal(const WindowTemplates *winTemplates, bool8 a1, b
          sSavedWindows.id[i] = winTemplates->id[i];
  
          if (winTemplates->id[i].width != 0) {
@@ -10348,7 +10415,7 @@ index e6612f2c..5819b861 100644
              AddWindow(gWindows, (u32 *)VRAM, sWindowGFXPool, gBgTilemaps, sUnknown_80B8804[i], &winTemplates->id[i], a1, startTileNum, positionModifier, FALSE);
              DrawWindowBg(&winTemplates->id[i], positionModifier);
  
-@@ -320,6 +362,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
+@@ -320,6 +365,7 @@ static void AddWindow(Window *windows, u32 *vram, u32 *gfxPool, u16 tilemaps[4][
      newWindow = &windows[windowId];
      x = winTemplate->pos.x + positionModifier->x;
      y =  winTemplate->pos.y + positionModifier->y;
