@@ -53,8 +53,9 @@ extern uint8_t gPortWideView;
 extern uint8_t gPortBorderFill;
 
 // The title screen in the wide view (set by the game every frame it shows
-// it, like gPortWideView): drawn by the CPU, then its sea carried on to the
-// sides (past the GBA's sea band) and down to the screen's bottom.
+// it, like gPortWideView): its sea carried on to the sides (past the GBA's
+// sea band) and down to the screen's bottom (frame.c: ListTitleSea on the
+// GPU, ExtendTitleSea when drawn by the CPU).
 extern uint8_t gPortTitleView;
 
 // Backgrounds drawn by the game for the wide view, instead of from VRAM: a

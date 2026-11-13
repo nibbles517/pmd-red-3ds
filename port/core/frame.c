@@ -62,6 +62,8 @@ static struct {
     uint32_t pal[3]; // listed frames by GPU_PAL_*
 } sListStats;
 
+static int sTitleListed; // (this frame's list is the title's: ListTitleSea)
+
 // The frame drawn the usual way, from the registers' copies
 static void DrawFromCopies(int lines, uint16_t *dst, int stride)
 {
@@ -96,7 +98,7 @@ static void ListFrameDone(int listMode, int listOk, int lines, uint16_t *dst, in
         if (listMode == 3)
             return; // (the backend draws it: Backend_PresentList)
         GpuList_Draw(l, dst, stride);
-        if (listMode == 2) { // checked against the renderer
+        if (listMode == 2 && !sTitleListed) { // checked against the renderer (not the title: ListTitleSea)
             DrawFromCopies(lines, check, l->w);
             int bad = 0, fx = -1, fy = -1;
             for (int y = 0; y < lines; y++)
@@ -403,6 +405,151 @@ static void ExtendTitleSea(void)
     }
 }
 
+// ... the same on the GPU: the frame's list (its lines described as the
+// renderer's) made into the title's. The sea's colours are the sea band's
+// own (its pixels in the sprite texture: no other sprite's), the lines below
+// and to the sides strips of them, the lines above the GBA's drawn by the
+// renderer (8 to 32), and every rectangle moved down. 0: not possible (the
+// sea band isn't in the list as expected): drawn by the CPU instead.
+static int sBandDown; // (how far the list has been moved down yet)
+static int BandTexel(int x, int y) // (the sea band's colour number at (x, y) of the list, before moving; -1: none)
+{
+    const GpuList *l = &gGpuList;
+    y += sBandDown;
+    for (int i = 0; i < l->quadCount; i++) {
+        const GpuQuad *q = &l->quads[i];
+        if (q->tex != GTEX_OBJ || q->h != 32 || q->dy != 132 + sBandDown || x < q->dx || x >= q->dx + q->w
+            || y < q->dy || y >= q->dy + q->h)
+            continue;
+        int tx = q->sx + ((q->flags & GQ_HFLIP) ? q->w - 1 - (x - q->dx) : x - q->dx);
+        int ty = q->sy + ((q->flags & GQ_VFLIP) ? q->h - 1 - (y - q->dy) : y - q->dy);
+        uint16_t n = gGpuObj[ty][tx];
+        return (n & 0x8000) ? -1 : n;
+    }
+    return -1;
+}
+static uint16_t BandColour(const int *xs, int n, int y, int *ok) // (the most common of the band's colours at xs on line y)
+{
+    uint16_t c[8];
+    int k = 0;
+    const uint16_t *pal = (const uint16_t *)gPortPltt;
+    for (int i = 0; i < n; i++) {
+        int t = BandTexel(xs[i], y);
+        if (t >= 0)
+            c[k++] = pal[256 + t] & 0x7FFF;
+    }
+    *ok = k > n / 2;
+    return k ? MostCommon(c, k) : 0;
+}
+// A listed line drawn by the renderer (from its registers' copy)
+static void ListedLine(int y, uint16_t *dst)
+{
+    Ppu_SetLineRegs(sLineRegs[y]);
+    Ppu_RenderLine(y, dst);
+    Ppu_SetLineRegs(NULL);
+}
+static int sColourLine = -1;
+static uint16_t sColourPx[SCREEN_W_MAX];
+static uint16_t LineColour(int y, const int *xs, int n) // (the most common of line y's colours at xs)
+{
+    uint16_t c[8];
+    if (sColourLine != y) {
+        ListedLine(y, sColourPx);
+        sColourLine = y;
+    }
+    for (int i = 0; i < n; i++)
+        c[i] = sColourPx[xs[i]];
+    return MostCommon(c, n);
+}
+static int ListTitleSea(void)
+{
+    enum { SAMPLES = 7, KEY_SIDE = 127, KEY_FRONT = 0 }; // (sides: behind priority 0's sprites, before the rest)
+    GpuList *l = &gGpuList;
+    int w = SCREEN_W, h = SCREEN_H;
+    int lx = WIDE_OX - 38, rx = WIDE_OX + 281;
+    int down = h / 2 - 16 - 72;
+    if (down < 0)
+        down = 0;
+    sBandDown = 0;
+    int xs[SAMPLES], ok;
+    uint16_t c[SAMPLES];
+    static uint16_t px[SCREEN_W_MAX];
+    // The sea and the sun below: the colours of the GBA's last line (drawn, it alone: the sun is a background's)
+    static uint16_t lastLine[SCREEN_W_MAX];
+    ListedLine(GBA_H - 1, lastLine);
+    for (int i = 0; i < SAMPLES; i++)
+        c[i] = lastLine[WIDE_OX + (i < 4 ? 4 + i * 16 : 236 - (i - 4) * 16)];
+    uint16_t sea = MostCommon(c, SAMPLES);
+    for (int i = 0; i < SAMPLES; i++)
+        c[i] = lastLine[WIDE_OX + 109 + i * 4];
+    uint16_t sun = MostCommon(c, SAMPLES);
+    // Everything down
+    for (int i = 0; i < l->quadCount; i++)
+        l->quads[i].dy = (int16_t)(l->quads[i].dy + down);
+    sBandDown = down;
+    sTitleListed = 1;
+    sColourLine = -1;
+    // The band carried on to the sides (lines 132-159), each line's colour its own
+    for (int y = 132; y < GBA_H && y + down < h; y++) {
+        if (lx > 0) {
+            for (int i = 0; i < SAMPLES; i++)
+                xs[i] = lx + 2 + i * 15;
+            uint16_t v = BandColour(xs, SAMPLES, y, &ok);
+            if (!ok) // (the band clear there: the line's own colours)
+                v = LineColour(y, xs, SAMPLES);
+            {
+                for (int x = 0; x < lx; x++)
+                    px[x] = v;
+                GpuList_StripLine(y + down, 0, KEY_SIDE, GQ_PREFADED, px, 0, lx);
+            }
+        }
+        if (rx < w - 1) {
+            for (int i = 0; i < SAMPLES; i++)
+                xs[i] = rx - 2 - i * 15;
+            uint16_t v = BandColour(xs, SAMPLES, y, &ok);
+            if (!ok)
+                v = LineColour(y, xs, SAMPLES);
+            {
+                for (int x = rx + 1; x < w; x++)
+                    px[x] = v;
+                GpuList_StripLine(y + down, 1, KEY_SIDE, GQ_PREFADED, px, rx + 1, w);
+            }
+        }
+    }
+    // Below: the sea and the reflection (as ExtendTitleSea), in front of all
+    int c2 = 2 * WIDE_OX + 243, half2 = 93, rows = h - GBA_H;
+    for (int y = GBA_H; y + down < h; y++) {
+        int k = y - GBA_H + 1;
+        int hw2 = half2 * (rows + 4 - k) / (rows + 4);
+        if (k % 4 == 3)
+            hw2 = hw2 * 3 / 4;
+        int wob2 = 2 * ((k * 5) % 4) - 2;
+        for (int x = 0; x < w; x++) {
+            int d = 2 * x - c2 - wob2;
+            px[x] = (d < 0 ? -d : d) <= hw2 ? sun : sea;
+        }
+        GpuList_StripLine(y + down, 2, KEY_FRONT, GQ_PREFADED, px, 0, w);
+    }
+    // Above: the lines over the GBA's (the renderer's; window 1 on: the sky's colour)
+    if (down > 0) {
+        uint16_t sky = 0;
+        int win1 = (R16(0x00) & 0x4000) != 0;
+        if (win1) {
+            Ppu_RenderLine(0, sLine);
+            sky = sLine[0];
+        }
+        for (int g = -down; g < 0; g++) {
+            if (win1)
+                for (int x = 0; x < w; x++)
+                    sLine[x] = sky;
+            else
+                Ppu_RenderLine(g, sLine);
+            GpuList_StripLine(g + down, 3, KEY_FRONT, GQ_PREFADED, sLine, 0, w);
+        }
+    }
+    return !l->full;
+}
+
 static void RunFrame(void)
 {
     Backend_Mark(PORT_MARK_FRAME_START, 0);
@@ -474,7 +621,8 @@ static void RunFrame(void)
         BgCache_Prepare(gPortRegs, wide); // (before the first line)
     if (!skip)
         Ppu_BeginFrame();
-    int listMode = skip || title ? 0 : Backend_GpuListMode(), listOk = 0;
+    int listMode = skip ? 0 : Backend_GpuListMode(), listOk = 0;
+    sTitleListed = 0;
     if (listMode) {
         memcpy(sStartRegs, gPortRegs, REG_COPY);
         GpuList_Begin(wide ? SCREEN_W : GBA_W, lines);
@@ -545,8 +693,8 @@ static void RunFrame(void)
         if (listMode)
             gGpuList.border = fillBorder ? (uint16_t)(border | 0x8000) : 0;
     }
-    if (title && !skip)
-        ExtendTitleSea();
+    if (title && !skip && listMode && listOk)
+        listOk = ListTitleSea(); // (0: drawn from the copies, ListFrameDone, then ExtendTitleSea)
     if (listMode)
         sLastListed = listMode == 3 && listOk;
     if (listMode) {
@@ -557,6 +705,8 @@ static void RunFrame(void)
         else
             ListFrameDone(listMode, listOk, lines, &sFrame[NARROW_OY * SCREEN_W + NARROW_OX], SCREEN_W);
     }
+    if (title && !skip && (!listMode || !listOk))
+        ExtendTitleSea();
     Backend_Mark(PORT_MARK_DRAWN, skip && !black);
     LoadWide(&live); // the game's again
     sLatched = live;
