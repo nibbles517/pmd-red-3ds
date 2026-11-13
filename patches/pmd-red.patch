@@ -719,10 +719,10 @@ index 55f3b5f3..4bfc40f9 100644
  ALIGNED(4) static const u8 sGreen[] = _("Green");
 diff --git a/src/data/port_cutscene_spawns.h b/src/data/port_cutscene_spawns.h
 new file mode 100644
-index 00000000..165db5a8
+index 00000000..3d1a02cb
 --- /dev/null
 +++ b/src/data/port_cutscene_spawns.h
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,31 @@
 +// 3DS port: where story scenes' Pokémon start, moved for the wider sizes so
 +// they come in from off the screen instead of appearing on it (they walk to
 +// the same places after: scripts walk to points on the map). Pixels, + right
@@ -737,6 +737,22 @@ index 00000000..165db5a8
 +} sPortSpawnNudges[] = {
 +    // EVENT_M01E01A_L001 (Tiny Woods, the hero wakes up): Butterfree
 +    { MAP_TINY_WOODS_ENTRY, 1, 1, 0, -96, -96, 0 },
++    // EVENT_M01E01A_L003 (Tiny Woods' end, finding Caterpie): the hero and the partner
++    { MAP_TINY_WOODS_END, 1, 0, 0, 0, 0, 24 },
++    { MAP_TINY_WOODS_END, 1, 0, 1, 0, 0, 24 },
++};
++
++// ... and points on the map scenes walk Pokémon to (s_gs<map>_links), moved
++// the same way: for one that walks off the screen and disappears there, so it
++// does that past the wider screen's edge. Every scene of the map that walks
++// to the point goes to the moved one.
++static const struct PortLinkNudge {
++    s16 map, link;
++    s16 xFit, x3ds, y;
++} sPortLinkNudges[] = {
++    // EVENT_M01E01A_L003 (Tiny Woods, after rescuing Caterpie): Butterfree and Caterpie leave to the right
++    { MAP_TINY_WOODS_ENTRY, 14, 48, 64, 0 },
++    { MAP_TINY_WOODS_ENTRY, 15, 48, 64, 0 },
 +};
 diff --git a/src/data/port_shiny_faces.h b/src/data/port_shiny_faces.h
 new file mode 100644
@@ -5181,6 +5197,55 @@ index 069cfc94..9d8ed0b3 100644
  }
  
  static void ClearSingleBgTilemap(MapRender *mapRender)
+diff --git a/src/ground_link.c b/src/ground_link.c
+index 6419cd6d..81aa4797 100644
+--- a/src/ground_link.c
++++ b/src/ground_link.c
+@@ -5,6 +5,12 @@
+ #include "ground_script.h"
+ #include "ground_script_file.h"
+ #include "number_util.h"
++#ifdef PLATFORM_3DS
++#include "constants/ground_map.h"
++#include "port_game.h"
++#include "data/port_cutscene_spawns.h"
++static s16 sPortLinkMap = -1;
++#endif
+ 
+ EWRAM_INIT static const struct GroundLink *sCurrentGroundLink = NULL;
+ 
+@@ -22,6 +28,9 @@ void GroundLink_Select(s16 r0)
+ {
+     const struct GroundScriptHeader *gs = GetGroundScript(r0, DEBUG_LOC_PTR("../ground/ground_link.c", 77, "GroundLink_Select"));
+     sCurrentGroundLink = gs->links;
++#ifdef PLATFORM_3DS
++    sPortLinkMap = r0;
++#endif
+ }
+ 
+ UNUSED static const struct GroundLink *GetCurrentGroundLink(s16 r0)
+@@ -36,6 +45,21 @@ s32 GroundLink_GetPos(s32 _arg0, PixelPos *pos)
+     const struct GroundLink *ptr = &sCurrentGroundLink[arg0];
+ 
+     SetUnkInGroundEvent(&ptr->pos, pos);
++#ifdef PLATFORM_3DS
++    {
++        // (scenes in the wider sizes: data/port_cutscene_spawns.h)
++        s32 i, size = gPortConfig.layout[0][0];
++        if (size == PORT_SIZE_FIT || size == PORT_SIZE_3DS) {
++            for (i = 0; i < (s32)ARRAY_COUNT(sPortLinkNudges); i++) {
++                const struct PortLinkNudge *n = &sPortLinkNudges[i];
++                if (n->map == sPortLinkMap && n->link == arg0) {
++                    pos->x += (size == PORT_SIZE_3DS ? n->x3ds : n->xFit) << 8;
++                    pos->y += n->y << 8;
++                }
++            }
++        }
++    }
++#endif
+ 
+     return ptr->ret;
+ }
 diff --git a/src/ground_lives.c b/src/ground_lives.c
 index d4a101ff..22d803b5 100644
 --- a/src/ground_lives.c
