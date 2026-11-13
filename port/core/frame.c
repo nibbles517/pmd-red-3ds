@@ -550,8 +550,16 @@ static int ListTitleSea(void)
     return !l->full;
 }
 
+// The game half's commit and when it was made (Makefile: prelink; the harness has none)
+extern const char gPortBuildStamp[] __attribute__((weak));
+
 static void RunFrame(void)
 {
+    static int sStamped;
+    if (!sStamped) {
+        sStamped = 1;
+        Backend_Log("build: %s", gPortBuildStamp ? gPortBuildStamp : "(harness)");
+    }
     Backend_Mark(PORT_MARK_FRAME_START, 0);
     // Main Screen Settings > Size: GBA, the game's 240x160 picture as it is;
     // DS (256x192) or Fit (320x240), the GBA picture in the middle, or the

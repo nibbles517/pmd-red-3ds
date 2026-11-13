@@ -105,8 +105,11 @@ PRELINK := $(BUILD)/pmd-red-game.o
 
 # A plain target, not a file rule: `make 3ds` must use an existing
 # pmd-red-game.o as is, never try to rebuild it.
+# (with the commit and time it was made: port.log's first "build:" line)
 prelink: $(GAME_OBJS) $(PORT_OBJS) $(GAME_DATA_OBJS)
-	@$(PREFIX)ld -r -S -o $(PRELINK) $(PORT_OBJS) $(GAME_OBJS) $(GAME_DATA_OBJS)
+	@printf 'const char gPortBuildStamp[] = "%s %s";\n' "$$(git describe --always --dirty 2>/dev/null || echo unknown)" "$$(date -u '+%Y-%m-%d %H:%M UTC')" > $(CORE_OBJ)/stamp.c
+	@$(GAME_CC) $(CORE_CFLAGS) -c $(CORE_OBJ)/stamp.c -o $(CORE_OBJ)/stamp.o
+	@$(PREFIX)ld -r -S -o $(PRELINK) $(PORT_OBJS) $(CORE_OBJ)/stamp.o $(GAME_OBJS) $(GAME_DATA_OBJS)
 	@echo "  LD   $(PRELINK) (partial)"
 
 DEVKITPRO ?= /opt/devkitpro
