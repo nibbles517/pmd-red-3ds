@@ -60,6 +60,19 @@ def load_elf(uc, path):
     return e_entry
 
 
+def reload_code(uc, path):
+    """Writes the ELF's read-only segments (code, constant data) again: after
+    --load-state, to try a new build's code or script data from an old
+    snapshot (only while nothing moved: edits that keep every size)."""
+    data = open(path, 'rb').read()
+    e_phoff, = struct.unpack_from('<I', data, 28)
+    e_phentsize, e_phnum = struct.unpack_from('<HH', data, 42)
+    for i in range(e_phnum):
+        p_type, p_offset, p_vaddr, _, p_filesz, p_memsz, p_flags = struct.unpack_from('<7I', data, e_phoff + i * e_phentsize)
+        if p_type == 1 and p_filesz and not (p_flags & 2):
+            uc.mem_write(p_vaddr, data[p_offset:p_offset + p_filesz])
+
+
 def symbols(path):
     """name -> address, from the ELF symbol table (for crash reports)."""
     data = open(path, 'rb').read()
@@ -397,6 +410,8 @@ class Harness:
         self.first_frame = first
         if self.args.load_state:
             start = self.load_state(self.args.load_state)
+            if self.args.reload_code:
+                reload_code(self.uc, self.args.elf)
             first = self.frame
             self.args.frames += self.frame  # --frames counts frames to run
         self.first_frame = first
@@ -464,6 +479,7 @@ def main():
     ap.add_argument('--wav-from', type=int, default=0, help='keep only the audio from this frame on')
     ap.add_argument('--save-state')
     ap.add_argument('--load-state')
+    ap.add_argument('--reload-code', action='store_true', help='after --load-state, the ELF\'s code and constant data again (edits that move nothing)')
     ap.add_argument('--capture', type=int, action='append', default=[], help='capture this frame for renderer tests')
     ap.add_argument('--dump-maps', action='store_true', help='write both world maps as PNGs at startup')
     ap.add_argument('--trace', action='append', default=[], help='log calls to this function (frame, r0-r3, lr)')

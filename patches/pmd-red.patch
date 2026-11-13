@@ -717,6 +717,27 @@ index 55f3b5f3..4bfc40f9 100644
  ALIGNED(4) static const u8 sBlue[] = _("Blue");
  ALIGNED(4) static const u8 sRed[] = _("Red");
  ALIGNED(4) static const u8 sGreen[] = _("Green");
+diff --git a/src/data/port_cutscene_spawns.h b/src/data/port_cutscene_spawns.h
+new file mode 100644
+index 00000000..165db5a8
+--- /dev/null
++++ b/src/data/port_cutscene_spawns.h
+@@ -0,0 +1,15 @@
++// 3DS port: where story scenes' Pokémon start, moved for the wider sizes so
++// they come in from off the screen instead of appearing on it (they walk to
++// the same places after: scripts walk to points on the map). Pixels, + right
++// and down; x for Fit and 3DS sizes each, y for both (DS and GBA: as the game).
++// Applied when a scene's Pokémon are placed (ground_lives.c).
++//   map, group, sector: the scene's (its station: ground_data_*_station.h,
++//   s_gs<map>_g<group>_s<sector>_lives); index: its place in that list.
++static const struct PortSpawnNudge {
++    s16 map;
++    s8 group, sector, index;
++    s16 xFit, x3ds, y;
++} sPortSpawnNudges[] = {
++    // EVENT_M01E01A_L001 (Tiny Woods, the hero wakes up): Butterfree
++    { MAP_TINY_WOODS_ENTRY, 1, 1, 0, -96, -96, 0 },
++};
 diff --git a/src/data/port_shiny_faces.h b/src/data/port_shiny_faces.h
 new file mode 100644
 index 00000000..cbd274da
@@ -5161,7 +5182,7 @@ index 069cfc94..9d8ed0b3 100644
  
  static void ClearSingleBgTilemap(MapRender *mapRender)
 diff --git a/src/ground_lives.c b/src/ground_lives.c
-index d4a101ff..31f9a9cc 100644
+index d4a101ff..22d803b5 100644
 --- a/src/ground_lives.c
 +++ b/src/ground_lives.c
 @@ -1,4 +1,7 @@
@@ -5172,7 +5193,75 @@ index d4a101ff..31f9a9cc 100644
  #include "globaldata.h"
  #include "ground_lives.h"
  #include "ground_script.h"
-@@ -830,6 +833,13 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
+@@ -17,6 +20,15 @@
+ #include "direction_util.h"
+ #include "friend_area_dialogue.h"
+ #include "ground_lives_helper.h"
++#ifdef PLATFORM_3DS
++#include "constants/ground_map.h"
++#include "port_game.h"
++#include "data/port_cutscene_spawns.h"
++// (the scene's Pokémon being placed by GroundLives_Select: its map and place
++// in the list, for sPortSpawnNudges)
++static s16 sPortAddMap;
++static s8 sPortAddIndex = -1;
++#endif
+ #include "ground_sprite_monster.h"
+ #include "ground_object.h"
+ #include "ground_map.h"
+@@ -275,8 +287,17 @@ void GroundLives_Select(s32 mapID, s32 group, s32 sector)
+     livesData = sectorPtr->lives;
+ 
+     size = sectorPtr->nLives;
++#ifdef PLATFORM_3DS
++    sPortAddMap = mapID_s32;
++    for (i = 0; i < size; i++, livesData++) {
++        sPortAddIndex = i;
++        GroundLives_Add(-1, livesData, group_s32, sector_s32);
++    }
++    sPortAddIndex = -1;
++#else
+     for (i = 0; i < size; i++, livesData++)
+         GroundLives_Add(-1, livesData, group_s32, sector_s32);
++#endif
+ }
+ 
+ void GroundLives_Cancel(s32 scriptID, s32 sector)
+@@ -674,6 +695,23 @@ s32 sub_80A7DDC(s16 *a0, s16 *speciesDst)
+     return ret;
+ }
+ 
++#ifdef PLATFORM_3DS
++static void PortNudgeSpawn(s32 group, s32 sector, PixelPos *pos)
++{
++    s32 i, size = gPortConfig.layout[0][0];
++
++    if (sPortAddIndex < 0 || (size != PORT_SIZE_FIT && size != PORT_SIZE_3DS))
++        return;
++    for (i = 0; i < (s32)ARRAY_COUNT(sPortSpawnNudges); i++) {
++        const struct PortSpawnNudge *n = &sPortSpawnNudges[i];
++        if (n->map == sPortAddMap && n->group == group && n->sector == sector && n->index == sPortAddIndex) {
++            pos->x += (size == PORT_SIZE_3DS ? n->x3ds : n->xFit) << 8;
++            pos->y += n->y << 8;
++        }
++    }
++}
++#endif
++
+ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32 sector_)
+ {
+     s32 id = (s16) id_;
+@@ -792,6 +830,9 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
+     livesPtr->unk14.y = livesPtr->unkC.y / 2;
+     livesPtr->unk1C = ptr->unk1;
+     SetUnkInGroundEvent(&ptr->pos, &livesPtr->unk20);
++#ifdef PLATFORM_3DS
++    PortNudgeSpawn(group, sector, &livesPtr->unk20);
++#endif
+     if (var24) {
+         struct GroundLivesMeta_Sub1 *metaPtr;
+ 
+@@ -830,6 +871,13 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
          livesPtr->unk168 = 0x807;
          livesPtr->directionRelated = TRUE;
          livesPtr->unk16A = 0;
