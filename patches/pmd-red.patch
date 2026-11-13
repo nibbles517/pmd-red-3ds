@@ -585,6 +585,24 @@ index 0b88b9a8..71e5ed43 100644
              sub_801D208(1);
              break;
      }
+diff --git a/src/code_803B050.c b/src/code_803B050.c
+index 6a1f23c2..bc949b0d 100644
+--- a/src/code_803B050.c
++++ b/src/code_803B050.c
+@@ -17,6 +17,13 @@ typedef struct unkStruct_203B3FC
+ } unkStruct_203B3FC;
+ 
+ EWRAM_INIT unkStruct_203B3FC *gUnknown_203B3FC = NULL; // arm9.bin::020EAF84
++#ifdef PLATFORM_3DS
++// 3DS port: Scene Select's list is open (ground_bg.c keeps it in the GBA-sized view)
++bool8 Port_ScriptPickerOpen(void)
++{
++    return gUnknown_203B3FC != NULL;
++}
++#endif
+ 
+ const WindowTemplate gUnknown_80E7F3C = WIN_TEMPLATE_DUMMY;
+ 
 diff --git a/src/code_809D148.c b/src/code_809D148.c
 index cf978c03..c1f5de60 100644
 --- a/src/code_809D148.c
@@ -4967,7 +4985,7 @@ index 1179e657..2f5761d8 100644
 +#endif
  }
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..2219cae4 100644
+index 069cfc94..9d8ed0b3 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -4978,7 +4996,7 @@ index 069cfc94..2219cae4 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,174 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,179 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -4995,6 +5013,7 @@ index 069cfc94..2219cae4 100644
 +// sun and the sea its edge columns and its bottom row (the sea, wider and
 +// deeper); nothing black
 +bool8 gPortGroundTitle;
++bool8 Port_ScriptPickerOpen(void);
 +// The weather's layers (ground_weather.c: drawn over the map, following its
 +// camera; Deep-Sea Floor's water) past their edges are as the GBA draws them
 +// there: repeated across, nothing below or above (not black).
@@ -5081,6 +5100,10 @@ index 069cfc94..2219cae4 100644
 +        if (gPortGroundTitle && !mapRender->wrapAround && SCREEN_H >= 240)
 +            gPortWideBg[bg].scrollY += 8;
 +    }
++    // (not under Scene Select's list, back from a scene with the map still
++    // loaded: its windows are laid out for the GBA-sized view)
++    if (Port_ScriptPickerOpen())
++        return;
 +    gPortWideView = 2;
 +    gPortHudLines = 0;
 +}
@@ -5202,7 +5225,7 @@ index b403f8d0..ef63c073 100644
                  if (held & B_BUTTON) {
                      strPtr->unk10 = 0;
 diff --git a/src/ground_main.c b/src/ground_main.c
-index 1dea7998..d585e375 100644
+index 1dea7998..4c409e42 100644
 --- a/src/ground_main.c
 +++ b/src/ground_main.c
 @@ -15,6 +15,7 @@
@@ -5213,7 +5236,20 @@ index 1dea7998..d585e375 100644
  #include "graphics_memory.h"
  #include "ground_effect.h"
  #include "ground_event.h"
-@@ -556,6 +557,38 @@ bool8 GroundMainGroundRequest(s32 r0, s32 r1, s32 r2)
+@@ -328,6 +329,12 @@ u32 xxx_script_related_8098468_Async(s32 startMode)
+             }
+             else if (sUnknown_20398B9 && !sUnknown_20398B8 && !sub_809AFAC()) {
+                 u16 pressed = gRealInputs.pressed;
++#ifdef PLATFORM_3DS
++                // Scene Select (the developers' script picker, STARTMODE_13):
++                // only START leaves a scene; A and the rest work as in the game
++                if (sScriptMode)
++                    pressed &= START_BUTTON;
++#endif
+                 if ((pressed & (A_BUTTON | B_BUTTON | SELECT_BUTTON | START_BUTTON | R_BUTTON | L_BUTTON)) || sub_80048BC()) {
+                     GroundMap_ExecuteEvent(DEMO_CANCEL, FALSE);
+                     GroundMainGameCancelRequest(30);
+@@ -556,6 +563,38 @@ bool8 GroundMainGroundRequest(s32 r0, s32 r1, s32 r2)
      return FALSE;
  }
  
@@ -10086,19 +10122,20 @@ index f20880c5..b44ac671 100644
      s32 i, j;
      Window *window = &windows[id];
 diff --git a/src/textbox.c b/src/textbox.c
-index f2e66d8d..3c600e37 100644
+index f2e66d8d..0a3b37f5 100644
 --- a/src/textbox.c
 +++ b/src/textbox.c
-@@ -1,4 +1,8 @@
+@@ -1,4 +1,9 @@
  #include "global.h"
 +#ifdef PLATFORM_3DS
 +#include "port_new_run.h"
++#include "port_game.h"
 +#include "ground_lives.h"
 +#endif
  #include "globaldata.h"
  #include "constants/dungeon.h"
  #include "constants/monster.h"
-@@ -608,6 +612,15 @@ bool8 ScriptSetPortraitInfo(s32 portraitId_, s32 spriteId_, s32 placementId_)
+@@ -608,6 +613,15 @@ bool8 ScriptSetPortraitInfo(s32 portraitId_, s32 spriteId_, s32 placementId_)
          }
  
          if (portraitPtr->showPortrait) {
@@ -10114,6 +10151,19 @@ index f2e66d8d..3c600e37 100644
              portraitPtr->faceFile = OpenPokemonDialogueSpriteFile(portraitPtr->speciesID);
              if (portraitPtr->faceFile != NULL) {
                  portraitPtr->spriteId = spriteId;
+@@ -1781,6 +1795,12 @@ static bool8 sub_809B648(void)
+             return 1;
+         case SPECIAL_TEXT_SCRIPTING_MENU:
+             ResetTextbox();
++#ifdef PLATFORM_3DS
++            // (Scene Select: back from a scene, the ground's wide view is
++            // still on for a frame or two; its windows would go down as in the
++            // wide view, then show in the GBA-sized one, cut off at the bottom)
++            gPortWideView = 0;
++#endif
+             if (sub_803B050()) {
+                 sub_803B100(sTextbox->unk5A4);
+                 sTextbox->unk418 = &gUnknown_81162E8;
 diff --git a/src/trap.c b/src/trap.c
 index 3a78e6d7..27b86073 100644
 --- a/src/trap.c
