@@ -719,27 +719,53 @@ index 55f3b5f3..4bfc40f9 100644
  ALIGNED(4) static const u8 sGreen[] = _("Green");
 diff --git a/src/data/port_cutscene_spawns.h b/src/data/port_cutscene_spawns.h
 new file mode 100644
-index 00000000..3d1a02cb
+index 00000000..6ff67bfd
 --- /dev/null
 +++ b/src/data/port_cutscene_spawns.h
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,62 @@
 +// 3DS port: where story scenes' Pokémon start, moved for the wider sizes so
 +// they come in from off the screen instead of appearing on it (they walk to
 +// the same places after: scripts walk to points on the map). Pixels, + right
 +// and down; x for Fit and 3DS sizes each, y for both (DS and GBA: as the game).
 +// Applied when a scene's Pokémon are placed (ground_lives.c).
++//   walkIn: for one whose script moves it away and walks it back by so much
++//   (a jump by 0x59, then WALK_RELATIVE): that first walk goes as much
++//   further, so it still ends where it did.
 +//   map, group, sector: the scene's (its station: ground_data_*_station.h,
 +//   s_gs<map>_g<group>_s<sector>_lives); index: its place in that list.
++// The team base is one map per partner and upgrade (MAP_TEAM_BASE_EEVEE_FINAL
++// ...), all with the same scenes: MAP_TEAM_BASE (outside) or
++// MAP_TEAM_BASE_INSIDE_PIKACHU_BASIC (inside) in these tables for all of them.
++static inline s32 PortSceneMap(s32 map)
++{
++    if (map >= MAP_TEAM_BASE_PIKACHU_BASIC && map <= MAP_TEAM_BASE_INSIDE_TREECKO_FINAL)
++        return (map - MAP_TEAM_BASE_PIKACHU_BASIC) % 6 >= 3 ? MAP_TEAM_BASE_INSIDE_PIKACHU_BASIC : MAP_TEAM_BASE_PIKACHU_BASIC;
++    return map;
++}
++
 +static const struct PortSpawnNudge {
 +    s16 map;
 +    s8 group, sector, index;
 +    s16 xFit, x3ds, y;
++    bool8 walkIn;
 +} sPortSpawnNudges[] = {
 +    // EVENT_M01E01A_L001 (Tiny Woods, the hero wakes up): Butterfree
-+    { MAP_TINY_WOODS_ENTRY, 1, 1, 0, -96, -96, 0 },
++    { MAP_TINY_WOODS_ENTRY, 1, 1, 0, -96, -96, 0, FALSE },
 +    // EVENT_M01E01A_L003 (Tiny Woods' end, finding Caterpie): the hero and the partner
-+    { MAP_TINY_WOODS_END, 1, 0, 0, 0, 0, 24 },
-+    { MAP_TINY_WOODS_END, 1, 0, 1, 0, 0, 24 },
++    { MAP_TINY_WOODS_END, 1, 0, 0, 0, 0, 24, FALSE },
++    { MAP_TINY_WOODS_END, 1, 0, 1, 0, 0, 24, FALSE },
++    // EVENT_M01E02A_L002 (team base, Pelipper brings the mail): Pelipper
++    { MAP_TEAM_BASE, 18, 0, 2, 136, 176, 0, FALSE },
++    // EVENT_M01E02A_L003 and L005 (Thunderwave Cave's entrance): the hero and the partner
++    { MAP_THUNDERWAVE_CAVE_ENTRY, 1, 0, 0, 0, 0, 24, TRUE },
++    { MAP_THUNDERWAVE_CAVE_ENTRY, 1, 0, 1, 0, 0, 24, TRUE },
++    { MAP_THUNDERWAVE_CAVE_ENTRY, 2, 0, 0, 0, 0, 24, TRUE },
++    { MAP_THUNDERWAVE_CAVE_ENTRY, 2, 0, 1, 0, 0, 24, TRUE },
++    // EVENT_M01E02A_L006 (Thunderwave Cave's end): the hero and the partner
++    { MAP_THUNDERWAVE_CAVE_END, 1, 0, 0, 0, 0, 24, FALSE },
++    { MAP_THUNDERWAVE_CAVE_END, 1, 0, 1, 0, 0, 24, FALSE },
++    // EVENT_M01E02B_L004B (team base): the partner
++    { MAP_TEAM_BASE, 26, 0, 1, 0, 0, 24, TRUE },
 +};
 +
 +// ... and points on the map scenes walk Pokémon to (s_gs<map>_links), moved
@@ -753,6 +779,11 @@ index 00000000..3d1a02cb
 +    // EVENT_M01E01A_L003 (Tiny Woods, after rescuing Caterpie): Butterfree and Caterpie leave to the right
 +    { MAP_TINY_WOODS_ENTRY, 14, 48, 64, 0 },
 +    { MAP_TINY_WOODS_ENTRY, 15, 48, 64, 0 },
++    // The team base: where Pelipper flies off to after bringing mail (every such scene)
++    { MAP_TEAM_BASE, 4, -96, -128, 0 },
++    // EVENT_M01E02A_L006 (Thunderwave Cave's entrance): the Magnemite leave downwards
++    { MAP_THUNDERWAVE_CAVE_ENTRY, 2, 0, 0, 24 },
++    { MAP_THUNDERWAVE_CAVE_ENTRY, 3, 0, 0, 24 },
 +};
 diff --git a/src/data/port_shiny_faces.h b/src/data/port_shiny_faces.h
 new file mode 100644
@@ -5198,10 +5229,10 @@ index 069cfc94..9d8ed0b3 100644
  
  static void ClearSingleBgTilemap(MapRender *mapRender)
 diff --git a/src/ground_link.c b/src/ground_link.c
-index 6419cd6d..81aa4797 100644
+index 6419cd6d..003f6826 100644
 --- a/src/ground_link.c
 +++ b/src/ground_link.c
-@@ -5,6 +5,12 @@
+@@ -5,6 +5,13 @@
  #include "ground_script.h"
  #include "ground_script_file.h"
  #include "number_util.h"
@@ -5210,11 +5241,12 @@ index 6419cd6d..81aa4797 100644
 +#include "port_game.h"
 +#include "data/port_cutscene_spawns.h"
 +static s16 sPortLinkMap = -1;
++bool8 gPortLinkNudged; // (the last GroundLink_GetPos: a moved point)
 +#endif
  
  EWRAM_INIT static const struct GroundLink *sCurrentGroundLink = NULL;
  
-@@ -22,6 +28,9 @@ void GroundLink_Select(s16 r0)
+@@ -22,6 +29,9 @@ void GroundLink_Select(s16 r0)
  {
      const struct GroundScriptHeader *gs = GetGroundScript(r0, DEBUG_LOC_PTR("../ground/ground_link.c", 77, "GroundLink_Select"));
      sCurrentGroundLink = gs->links;
@@ -5224,7 +5256,7 @@ index 6419cd6d..81aa4797 100644
  }
  
  UNUSED static const struct GroundLink *GetCurrentGroundLink(s16 r0)
-@@ -36,6 +45,21 @@ s32 GroundLink_GetPos(s32 _arg0, PixelPos *pos)
+@@ -36,6 +46,23 @@ s32 GroundLink_GetPos(s32 _arg0, PixelPos *pos)
      const struct GroundLink *ptr = &sCurrentGroundLink[arg0];
  
      SetUnkInGroundEvent(&ptr->pos, pos);
@@ -5232,12 +5264,14 @@ index 6419cd6d..81aa4797 100644
 +    {
 +        // (scenes in the wider sizes: data/port_cutscene_spawns.h)
 +        s32 i, size = gPortConfig.layout[0][0];
++        gPortLinkNudged = FALSE;
 +        if (size == PORT_SIZE_FIT || size == PORT_SIZE_3DS) {
 +            for (i = 0; i < (s32)ARRAY_COUNT(sPortLinkNudges); i++) {
 +                const struct PortLinkNudge *n = &sPortLinkNudges[i];
-+                if (n->map == sPortLinkMap && n->link == arg0) {
++                if (n->map == PortSceneMap(sPortLinkMap) && n->link == arg0) {
 +                    pos->x += (size == PORT_SIZE_3DS ? n->x3ds : n->xFit) << 8;
 +                    pos->y += n->y << 8;
++                    gPortLinkNudged = TRUE;
 +                }
 +            }
 +        }
@@ -5247,7 +5281,7 @@ index 6419cd6d..81aa4797 100644
      return ptr->ret;
  }
 diff --git a/src/ground_lives.c b/src/ground_lives.c
-index d4a101ff..22d803b5 100644
+index d4a101ff..666c302d 100644
 --- a/src/ground_lives.c
 +++ b/src/ground_lives.c
 @@ -1,4 +1,7 @@
@@ -5258,7 +5292,7 @@ index d4a101ff..22d803b5 100644
  #include "globaldata.h"
  #include "ground_lives.h"
  #include "ground_script.h"
-@@ -17,6 +20,15 @@
+@@ -17,6 +20,19 @@
  #include "direction_util.h"
  #include "friend_area_dialogue.h"
  #include "ground_lives_helper.h"
@@ -5270,11 +5304,15 @@ index d4a101ff..22d803b5 100644
 +// in the list, for sPortSpawnNudges)
 +static s16 sPortAddMap;
 +static s8 sPortAddIndex = -1;
++// (how much further each one's first relative walk goes: a walkIn nudge)
++static PixelPos sPortWalkOwed[0x18]; // (UNK_3001B84_ARR_COUNT, below)
++// (whether it was moved out of the map's bounds to start, by sPortSpawnNudges)
++static bool8 sPortUnbound[0x18];
 +#endif
  #include "ground_sprite_monster.h"
  #include "ground_object.h"
  #include "ground_map.h"
-@@ -275,8 +287,17 @@ void GroundLives_Select(s32 mapID, s32 group, s32 sector)
+@@ -275,8 +291,17 @@ void GroundLives_Select(s32 mapID, s32 group, s32 sector)
      livesData = sectorPtr->lives;
  
      size = sectorPtr->nLives;
@@ -5292,41 +5330,102 @@ index d4a101ff..22d803b5 100644
  }
  
  void GroundLives_Cancel(s32 scriptID, s32 sector)
-@@ -674,6 +695,23 @@ s32 sub_80A7DDC(s16 *a0, s16 *speciesDst)
+@@ -674,6 +699,73 @@ s32 sub_80A7DDC(s16 *a0, s16 *speciesDst)
      return ret;
  }
  
 +#ifdef PLATFORM_3DS
-+static void PortNudgeSpawn(s32 group, s32 sector, PixelPos *pos)
++static void PortNudgeSpawn(s32 id, s32 group, s32 sector, PixelPos *pos)
 +{
 +    s32 i, size = gPortConfig.layout[0][0];
 +
++    sPortWalkOwed[id].x = sPortWalkOwed[id].y = 0;
++    sPortUnbound[id] = FALSE;
 +    if (sPortAddIndex < 0 || (size != PORT_SIZE_FIT && size != PORT_SIZE_3DS))
 +        return;
 +    for (i = 0; i < (s32)ARRAY_COUNT(sPortSpawnNudges); i++) {
 +        const struct PortSpawnNudge *n = &sPortSpawnNudges[i];
-+        if (n->map == sPortAddMap && n->group == group && n->sector == sector && n->index == sPortAddIndex) {
-+            pos->x += (size == PORT_SIZE_3DS ? n->x3ds : n->xFit) << 8;
-+            pos->y += n->y << 8;
++        if (n->map == PortSceneMap(sPortAddMap) && n->group == group && n->sector == sector && n->index == sPortAddIndex) {
++            s32 dx = (size == PORT_SIZE_3DS ? n->x3ds : n->xFit) << 8, dy = n->y << 8;
++            pos->x += dx;
++            pos->y += dy;
++            sPortUnbound[id] = TRUE;
++            if (n->walkIn) {
++                sPortWalkOwed[id].x = -dx;
++                sPortWalkOwed[id].y = -dy;
++            }
 +        }
 +    }
++}
++
++// Its bounds (where it can move: the map's) 512 pixels wider each way, for a
++// scene's Pokémon started or sent past the map's edges in the wider sizes
++// (else it's pushed back in: the wider screen shows past the edges)
++static void PortUnbound(struct GroundLive *lives)
++{
++    lives->unk28.x -= 512 << 8;
++    lives->unk28.y -= 512 << 8;
++    lives->unk30.x += 512 << 8;
++    lives->unk30.y += 512 << 8;
++}
++
++// ground_script.c: `parent` walks to a map point moved for the wider sizes
++// (sPortLinkNudges)
++void Port_LivesUnbound(void *parent)
++{
++    struct GroundLive *lives = parent;
++    s32 id;
++
++    if (gGroundLives == NULL || lives < &gGroundLives->array[0] || lives >= &gGroundLives->array[UNK_3001B84_ARR_COUNT])
++        return;
++    id = lives - &gGroundLives->array[0];
++    if (!sPortUnbound[id]) {
++        sPortUnbound[id] = TRUE;
++        PortUnbound(lives);
++    }
++}
++
++// ground_script.c, a relative walk (WALK_RELATIVE) of `parent` to *to: as much
++// further as its start was moved (sPortSpawnNudges' walkIn), the first time
++void Port_LivesWalkRelative(void *parent, PixelPos *to)
++{
++    struct GroundLive *lives = parent;
++    s32 id;
++
++    if (gGroundLives == NULL || lives < &gGroundLives->array[0] || lives >= &gGroundLives->array[UNK_3001B84_ARR_COUNT])
++        return;
++    id = lives - &gGroundLives->array[0];
++    to->x += sPortWalkOwed[id].x;
++    to->y += sPortWalkOwed[id].y;
++    sPortWalkOwed[id].x = sPortWalkOwed[id].y = 0;
 +}
 +#endif
 +
  static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32 sector_)
  {
      s32 id = (s16) id_;
-@@ -792,6 +830,9 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
+@@ -792,6 +884,9 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
      livesPtr->unk14.y = livesPtr->unkC.y / 2;
      livesPtr->unk1C = ptr->unk1;
      SetUnkInGroundEvent(&ptr->pos, &livesPtr->unk20);
 +#ifdef PLATFORM_3DS
-+    PortNudgeSpawn(group, sector, &livesPtr->unk20);
++    PortNudgeSpawn(id, group, sector, &livesPtr->unk20);
 +#endif
      if (var24) {
          struct GroundLivesMeta_Sub1 *metaPtr;
  
-@@ -830,6 +871,13 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
+@@ -822,6 +917,10 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
+     }
+ 
+     GetCurrentDungeonBounds(&livesPtr->unk28, &livesPtr->unk30);
++#ifdef PLATFORM_3DS
++    if (sPortUnbound[id])
++        PortUnbound(livesPtr);
++#endif
+     if (var24) {
+         livesPtr->direction2 = -1;
+         livesPtr->unk15E = 0x300;
+@@ -830,6 +929,13 @@ static s32 GroundLives_Add(s32 id_, const GroundLivesData *ptr, s32 group_, s32
          livesPtr->unk168 = 0x807;
          livesPtr->directionRelated = TRUE;
          livesPtr->unk16A = 0;
@@ -5592,7 +5691,7 @@ index 965cbc4d..808ccb28 100644
                  objectPtr->directionRelated = 0;
                  sub_80A6EFC(&objectPtr->unk144,objectPtr->unk13E & 0x1F00,(s8)objectPtr->unk13E);
 diff --git a/src/ground_script.c b/src/ground_script.c
-index 87431714..429a70ca 100644
+index 87431714..5c628a92 100644
 --- a/src/ground_script.c
 +++ b/src/ground_script.c
 @@ -1,4 +1,7 @@
@@ -5603,7 +5702,73 @@ index 87431714..429a70ca 100644
  #include "globaldata.h"
  #include "ground_script.h"
  #include "constants/dungeon.h"
-@@ -3504,6 +3507,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+@@ -114,6 +117,11 @@ static const ScriptCommand gUnknown_81164E4[] = {
+ };
+ 
+ static s32 ExecuteScriptCommand(Action *action);
++#ifdef PLATFORM_3DS
++void Port_LivesWalkRelative(void *parent, PixelPos *to);
++void Port_LivesUnbound(void *parent);
++extern bool8 gPortLinkNudged;
++#endif
+ static const ScriptCommand *FindLabel(Action *action, s32 labelNum);
+ static u32 GroundScriptModifyBGM(u16 bgm);
+ static const ScriptCommand *ResolveJump(Action *action, s32 r1);
+@@ -2396,6 +2404,9 @@ static s32 ExecuteScriptCommand(Action *action)
+                 action->callbacks->getHitboxCenter(action->parentObject, &pos);
+                 scriptData->pos2.x = pos.x + (curCmd.arg1 << 8);
+                 scriptData->pos2.y = pos.y + (curCmd.arg2 << 8);
++#ifdef PLATFORM_3DS
++                Port_LivesWalkRelative(action->parentObject, &scriptData->pos2); // (ground_lives.c)
++#endif
+                 scriptData->unk30 = curCmd.argShort;
+                 scriptData->unk2A = -1;
+                 return ESC_RET_02;
+@@ -2404,6 +2415,10 @@ static s32 ExecuteScriptCommand(Action *action)
+             case CMD_BYTE_6B: {
+                 action->callbacks->getHitboxCenter(action->parentObject, &scriptData->pos2);
+                 GroundLink_GetPos((s16)curCmd.arg1, &scriptData->pos2);
++#ifdef PLATFORM_3DS
++                if (gPortLinkNudged)
++                    Port_LivesUnbound(action->parentObject);
++#endif
+                 scriptData->unk30 = curCmd.argShort;
+                 scriptData->unk2A = -1;
+                 return ESC_RET_02;
+@@ -2412,6 +2427,10 @@ static s32 ExecuteScriptCommand(Action *action)
+             case CMD_BYTE_6C: {
+                 action->callbacks->getHitboxCenter(action->parentObject, &scriptData->pos2);
+                 GroundLink_GetPos((s16)curCmd.arg1, &scriptData->pos2);
++#ifdef PLATFORM_3DS
++                if (gPortLinkNudged)
++                    Port_LivesUnbound(action->parentObject);
++#endif
+                 scriptData->unk30 = curCmd.argShort;
+                 scriptData->unk2A = (u8)curCmd.argByte;
+                 return ESC_RET_02;
+@@ -2420,6 +2439,10 @@ static s32 ExecuteScriptCommand(Action *action)
+             case CMD_BYTE_6D: {
+                 action->callbacks->getHitboxCenter(action->parentObject, &scriptData->pos2);
+                 GroundLink_GetPos((s16)curCmd.arg1, &scriptData->pos2);
++#ifdef PLATFORM_3DS
++                if (gPortLinkNudged)
++                    Port_LivesUnbound(action->parentObject);
++#endif
+                 scriptData->unk30 = curCmd.argShort;
+                 scriptData->unk2A = OtherRandInt((u8)curCmd.argByte);
+                 return ESC_RET_02;
+@@ -2508,6 +2531,10 @@ static s32 ExecuteScriptCommand(Action *action)
+                 action->callbacks->getHitboxCenter(action->parentObject, &scriptData->pos1);
+                 scriptData->pos2 = scriptData->pos1;
+                 GroundLink_GetPos((s16)curCmd.arg1, &scriptData->pos2);
++#ifdef PLATFORM_3DS
++                if (gPortLinkNudged)
++                    Port_LivesUnbound(action->parentObject);
++#endif
+                 if (curCmd.op == CMD_BYTE_80 || curCmd.op == CMD_BYTE_86) {
+                     scriptData->unk2A = HYPOT;
+                     if (scriptData->unk2A <= 0)
+@@ -3504,6 +3531,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
                  s32 index;
  
                  ConvertStoryMonToPokemon(&magnemiteMon, &magnemiteData);
@@ -5613,7 +5778,7 @@ index 87431714..429a70ca 100644
                  recruitPtr = TryAddPokemonToRecruited(&magnemiteMon);
                  if (recruitPtr == NULL)
                      return 1;
-@@ -3538,6 +3544,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+@@ -3538,6 +3568,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
                  Pokemon absolMon;
  
                  ConvertStoryMonToPokemon(&absolMon, &absolData);
@@ -5623,7 +5788,7 @@ index 87431714..429a70ca 100644
                  recruitPtr = TryAddPokemonToRecruited(&absolMon);
                  if (recruitPtr == NULL)
                      return 1;
-@@ -3584,6 +3593,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+@@ -3584,6 +3617,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
                  Pokemon smeargleMon;
  
                  ConvertStoryMonToPokemon(&smeargleMon, &smeargleData);
@@ -5633,7 +5798,7 @@ index 87431714..429a70ca 100644
                  recruitPtr = TryAddPokemonToRecruited(&smeargleMon);
                  if (!recruitPtr)
                      return 1;
-@@ -3661,6 +3673,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+@@ -3661,6 +3697,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
                  Pokemon latiosMon;
  
                  ConvertStoryMonToPokemon(&latiosMon, &latiosData);
@@ -5643,7 +5808,7 @@ index 87431714..429a70ca 100644
                  recruitPtr = TryAddPokemonToRecruited(&latiosMon);
                  if (recruitPtr == NULL)
                      return 1;
-@@ -3695,6 +3710,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+@@ -3695,6 +3734,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
                  Pokemon latiasMon;
  
                  ConvertStoryMonToPokemon(&latiasMon, &latiasData);
@@ -5653,7 +5818,7 @@ index 87431714..429a70ca 100644
                  recruitPtr = TryAddPokemonToRecruited(&latiasMon);
                  if (recruitPtr == NULL)
                      return 1;
-@@ -3891,6 +3909,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
+@@ -3891,6 +3933,9 @@ static s32 sub_80A14E8(Action *action, u8 idx, u32 r2, s32 r3)
              Pokemon gardevoirMon;
  
              ConvertStoryMonToPokemon(&gardevoirMon, &gardevoirData);
@@ -9835,7 +10000,7 @@ index ee2ca650..032da776 100644
  {
      return WriteSaveSector(a, src, size);
 diff --git a/src/sprite.c b/src/sprite.c
-index 812df38d..4f716172 100644
+index 812df38d..c77423e3 100644
 --- a/src/sprite.c
 +++ b/src/sprite.c
 @@ -1,4 +1,11 @@
@@ -9946,6 +10111,31 @@ index 812df38d..4f716172 100644
          // Set x/matrixNum to 0
          // Set size to 1
          *oam++ = 0x4000;
+@@ -538,6 +572,13 @@ void RunAxAnimationFrame(axdata *a0)
+ 
+     if (!AxFlag8000_Not2000(a0))
+         return;
++#ifdef PLATFORM_3DS
++    // (a sprite with no animation chosen: Scene Select's scenes before the
++    // story set who a Pokémon is, its species 0. The GBA reads its BIOS there;
++    // here it's unmapped)
++    if ((uintptr_t)a0->activeAnimData < 0x100000)
++        return;
++#endif
+ 
+     if (a0->sub1.poseId >= 0) {
+         if (a0->flags & 0x4000)
+@@ -590,6 +631,10 @@ void DoAxFrame_800558C(axdata *a0, s32 spriteX, s32 spriteY, u32 a3, u32 palette
+ 
+     if (!(a0->flags >> 15))
+         return;
++#ifdef PLATFORM_3DS
++    if ((uintptr_t)a0->activeAnimData < 0x100000) // (no animation: RunAxAnimationFrame)
++        return;
++#endif
+ 
+     a0->sub1.pos.x = a0->sub1.offset.x + spriteX;
+     a0->sub1.pos.y = a0->sub1.offset.y + spriteY;
 diff --git a/src/string_format.c b/src/string_format.c
 index be399eb4..d80555f1 100644
 --- a/src/string_format.c
