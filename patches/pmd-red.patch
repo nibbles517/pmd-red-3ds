@@ -5281,7 +5281,7 @@ index 6419cd6d..003f6826 100644
      return ptr->ret;
  }
 diff --git a/src/ground_lives.c b/src/ground_lives.c
-index d4a101ff..666c302d 100644
+index d4a101ff..3af26278 100644
 --- a/src/ground_lives.c
 +++ b/src/ground_lives.c
 @@ -1,4 +1,7 @@
@@ -5439,6 +5439,62 @@ index d4a101ff..666c302d 100644
          sub_80A7428(&livesPtr->unk170, livesPtr->unk2, livesPtr->speciesId, livesPtr->flags);
      }
  
+@@ -1603,13 +1709,20 @@ static s32 sub_80A9488(struct GroundLive *livesPtr, PixelPos *posArg1, PixelPos
+     PixelPos posTemp = {((posArg2->x - 1) / 2048), ((posArg2->y - 1) / 2048)};
+     PixelPos pixPos2 = {(posTemp.x- pixPos1.x) + 1, (posTemp.y -pixPos1.y) + 1};
+ 
+-    if (livesPtr->flags & 1) {
+-        if (CheckMapCollision_80A585C(&pixPos1, &pixPos2))
+-            return 1;
+-    }
+-    if (livesPtr->flags & 2) {
+-        if (sub_80A58C8(&pixPos1, &pixPos2))
+-            return 1;
++#ifdef PLATFORM_3DS
++    // (one a scene started or sent past the map's edges, sPortUnbound: no
++    // walls there, off the map, where they'd stop it; its walk is the script's)
++    if (!sPortUnbound[livesPtr - &gGroundLives->array[0]])
++#endif
++    {
++        if (livesPtr->flags & 1) {
++            if (CheckMapCollision_80A585C(&pixPos1, &pixPos2))
++                return 1;
++        }
++        if (livesPtr->flags & 2) {
++            if (sub_80A58C8(&pixPos1, &pixPos2))
++                return 1;
++        }
+     }
+     if (livesPtr->flags & 4) {
+         if ((s16) GetLivesCollision_80A92A0(livesPtr->id, 4, posArg1, posArg2) >= 0)
+@@ -1633,13 +1746,20 @@ static s32 sub_80A95AC(struct GroundLive *livesPtr, PixelPos *posArg1, PixelPos
+     PixelPos posTemp = {((posArg2->x - 1) / 2048), ((posArg2->y - 1) / 2048)};
+     PixelPos pixPos2 = {(posTemp.x- pixPos1.x) + 1, (posTemp.y -pixPos1.y) + 1};
+ 
+-    if (livesPtr->flags & 1) {
+-        if (CheckMapCollision_80A585C(&pixPos1, &pixPos2))
+-            return 1;
+-    }
+-    if (livesPtr->flags & 2) {
+-        if (sub_80A58C8(&pixPos1, &pixPos2))
+-            return 1;
++#ifdef PLATFORM_3DS
++    // (one a scene started or sent past the map's edges, sPortUnbound: no
++    // walls there, off the map, where they'd stop it; its walk is the script's)
++    if (!sPortUnbound[livesPtr - &gGroundLives->array[0]])
++#endif
++    {
++        if (livesPtr->flags & 1) {
++            if (CheckMapCollision_80A585C(&pixPos1, &pixPos2))
++                return 1;
++        }
++        if (livesPtr->flags & 2) {
++            if (sub_80A58C8(&pixPos1, &pixPos2))
++                return 1;
++        }
+     }
+     if (livesPtr->flags & 4) {
+         s32 id2 = (s16) GetLivesCollision_80A92A0(livesPtr->id, 0x44, posArg1, posArg2);
 diff --git a/src/ground_lives_helper.c b/src/ground_lives_helper.c
 index b403f8d0..ef63c073 100644
 --- a/src/ground_lives_helper.c
