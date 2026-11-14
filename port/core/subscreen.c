@@ -505,8 +505,8 @@ static void DrawStatusSymbol(const PanelRow *row, const struct PortStatusSymbol 
         if (at.x == 99 && at.y == 99)
             return; // no such point in this pose: the game draws it off screen
     }
-    ax += frame->offset.x + at.x + sym->dx;
-    ay += frame->offset.y + at.y + sym->dy;
+    ax += at.x + sym->dx; // (without the frame's offset, as the sprite: DrawRowSprite)
+    ay += at.y + sym->dy;
     for (int y = 0; y < sym->height * 8; y++) {
         for (int x = 0; x < sym->width * 8; x++) {
             int t = (y / 8) * sym->width + x / 8;
@@ -552,8 +552,10 @@ static void DrawRowSprite(const PanelRow *row, int ax, int ay)
         return;
     if (row->frame >= n)
         return;
+    // (the frame's pose only, not its offset: lunges, hops and recoils move
+    // the sprite on the main screen, but here it stays on its floor)
     DrawPose(row->sprite->poses[sw[row->frame].poseId], row->sprite->spriteData, NULL, 0,
-             sPalet, row->palNum, ax + sw[row->frame].offset.x, ay + sw[row->frame].offset.y);
+             sPalet, row->palNum, ax, ay);
     if (FIT)
         return; // the symbols go under the belly instead (DrawRowSymbols)
     for (int i = 0; i < row->symbolCount; i++)
