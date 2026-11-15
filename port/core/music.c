@@ -34,6 +34,7 @@ typedef struct {
     uint16_t arc;
     uint16_t index;
     uint16_t gain;    // its own volume, percent (sDefaultMusicGain/sDefaultGain, ds-volumes.txt)
+    uint16_t defGain; // ... the built-in one (sDefaultMusicGain/sDefaultGain)
     char label[LABEL_LEN];
 } Track;
 
@@ -516,10 +517,9 @@ int Port_MusicMapSave(const int *songs, const char *const *names, int count)
 // the ROM's (a sequence archive entry). Built in: the same number in the
 // first archive (GBA sound effect n = DS E00.n; Sound Effect Matching showed
 // the DS version kept the GBA's numbering), when the ROM has that entry.
-// sfx-map.txt, which Sound Effect Matching (options_menu1.c) writes, changes
-// those it names: "SE <id> = E<archive>.<entry>" ("= NONE" lines are left
-// as built in). Each DS track's own volume: ds-volumes.txt (below; Sound
-// Effect Matching's balancing is saved there too).
+// sfx-map.txt (as Sound Effect Matching wrote it, while the matches were
+// made) changes those it names: "SE <id> = E<archive>.<entry>" ("= NONE"
+// lines are left as built in). Each DS track's own volume: below.
 
 #define SFX_FIRST 300
 #define SFX_LAST 999
@@ -543,8 +543,10 @@ static int FindEffect(int arc, int index)
 // (ds-vs-gba-loudness.xlsx: the loudness of each, the DS music at the Music
 // volume 190%; songs over their first 20 s, sound effects their loudest
 // 0.4 s). ds-volumes.txt changes them ("MUSIC SEQ <n> = <percent>",
-// "SFX E<archive>.<entry> = <percent>"); the port writes it, with every
-// track's, when there's none.
+// "SFX E<archive>.<entry> = <percent>"): DS Volume Balance (Game Options,
+// options_menu1.c) writes it, with only the volumes that aren't the
+// built-in ones (so a player's file is their changes, to be merged into
+// these tables; and a later build's own changes to them still count).
 static const struct {
     uint16_t seq, percent;
 } sDefaultMusicGain[] = {
@@ -650,17 +652,20 @@ static int SaveVolumes(void)
     if (text == NULL)
         return 0;
     len += (size_t)snprintf(text + len, cap - len,
-                            "# DS volumes (percent; 100 = as the ROM has it), each matched to the GBA version's\n"
-                            "# loudness. Edit and restart the game; delete this file to get the built-in values back.\n"
-                            "# Music: on top of the Music volume. Sound effects: on top of the SFX volume.\n");
+                            "# DS volumes changed from the built-in ones (percent; 100 = as the ROM has it),\n"
+                            "# as set in Game Options > DS Volume Balance (or by hand: restart the game after).\n"
+                            "# Music: on top of the Music volume. Sound effects: on top of the SFX volume.\n"
+                            "# Delete a line (or this file) to get the built-in volume back.\n");
     for (int t = 0; t < sSongCount && len < cap; t++)
-        if (sTracks[t].sdat == 0 && !sTracks[t].isStream)
-            len += (size_t)snprintf(text + len, cap - len, "MUSIC SEQ %03u = %u  # %s\n", (unsigned)sTracks[t].index,
-                                    (unsigned)sTracks[t].gain, sTracks[t].label + 4);
+        if (sTracks[t].sdat == 0 && !sTracks[t].isStream && sTracks[t].gain != sTracks[t].defGain)
+            len += (size_t)snprintf(text + len, cap - len, "MUSIC SEQ %03u = %u  # (built-in %u) %s\n",
+                                    (unsigned)sTracks[t].index, (unsigned)sTracks[t].gain,
+                                    (unsigned)sTracks[t].defGain, sTracks[t].label + 4);
     for (int t = sSongCount; t < sCount && len < cap; t++)
-        if (sTracks[t].sdat == 0 && sTracks[t].isEffect)
-            len += (size_t)snprintf(text + len, cap - len, "SFX E%02u.%03u = %u\n", (unsigned)sTracks[t].arc,
-                                    (unsigned)sTracks[t].index, (unsigned)sTracks[t].gain);
+        if (sTracks[t].sdat == 0 && sTracks[t].isEffect && sTracks[t].gain != sTracks[t].defGain)
+            len += (size_t)snprintf(text + len, cap - len, "SFX E%02u.%03u = %u  # (built-in %u)\n",
+                                    (unsigned)sTracks[t].arc, (unsigned)sTracks[t].index, (unsigned)sTracks[t].gain,
+                                    (unsigned)sTracks[t].defGain);
     if (len > cap)
         len = cap;
     int ok = Backend_FileWrite(VOL_FILE, text, (uint32_t)len);
@@ -682,11 +687,11 @@ static void LoadVolumes(void)
         if (t >= 0)
             sTracks[t].gain = sDefaultGain[i].percent;
     }
+    for (int i = 0; i < sCount; i++)
+        sTracks[i].defGain = sTracks[i].gain;
     void *f = Backend_FileOpen(VOL_FILE);
-    if (f == NULL) {
-        SaveVolumes(); // (to edit: every track's)
-        return;
-    }
+    if (f == NULL)
+        return; // (none changed)
     uint32_t size = Backend_FileSize(f);
     char *text = malloc(size + 1);
     if (text != NULL && Backend_FileRead(f, 0, text, size)) {
@@ -742,6 +747,34 @@ static int TrackGain(int track)
     return sOpen && track >= 0 && track < sCount ? sTracks[track].gain : 100;
 }
 
+// A DS track's own volume (percent), and its built-in one
+int Port_TrackGainGet(int track)
+{
+    return TrackGain(track);
+}
+
+int Port_TrackGainDefault(int track)
+{
+    return sOpen && track >= 0 && track < sCount ? sTracks[track].defGain : 100;
+}
+
+void Port_TrackGainSet(int track, int percent)
+{
+    if (sOpen && track >= 0 && track < sCount)
+        sTracks[track].gain = (uint16_t)ClampGain(&sTracks[track], percent);
+}
+
+int Port_TrackGainMax(int track)
+{
+    return sOpen && track >= 0 && track < sCount && !sTracks[track].isEffect ? MUSIC_GAIN_MAX : SFX_GAIN_MAX;
+}
+
+// Writes ds-volumes.txt (the volumes changed from the built-in ones)
+int Port_TrackGainsSave(void)
+{
+    return sOpen && SaveVolumes();
+}
+
 // A DS sound effect's own volume (percent; 100 for anything else)
 int Port_SfxGainGet(int track)
 {
@@ -757,36 +790,6 @@ void Port_SfxGainSet(int track, int percent)
 int Port_SfxMapGet(int se)
 {
     return se >= SFX_FIRST && se <= SFX_LAST ? sSfxMap[se - SFX_FIRST] : -1;
-}
-
-void Port_SfxMapSet(int se, int track)
-{
-    if (se >= SFX_FIRST && se <= SFX_LAST)
-        sSfxMap[se - SFX_FIRST] = (int16_t)(Port_MusicIsEffect(track) ? track : -1);
-}
-
-// Writes every match (the sound effects ses[0..count-1]) to sfx-map.txt.
-int Port_SfxMapSave(const int *ses, int count)
-{
-    size_t cap = (size_t)count * 64 + (size_t)sCount * 48 + 256, len = 0;
-    char *text = malloc(cap);
-    if (text == NULL)
-        return 0;
-    len += (size_t)snprintf(text + len, cap - len,
-                            "# Sound Effect Matching: GBA sound effect = DS sound effect of %s\n", Port_MusicRomTitle());
-    for (int i = 0; i < count && len < cap; i++) {
-        int t = Port_SfxMapGet(ses[i]);
-        if (t < 0)
-            len += (size_t)snprintf(text + len, cap - len, "SE %d = NONE\n", ses[i]);
-        else
-            len += (size_t)snprintf(text + len, cap - len, "SE %d = E%02u.%03u  # %s\n", ses[i],
-                                    (unsigned)sTracks[t].arc, (unsigned)sTracks[t].index, sTracks[t].label);
-    }
-    if (len > cap)
-        len = cap;
-    int ok = Backend_FileWrite(SFX_FILE, text, (uint32_t)len);
-    free(text);
-    return ok && SaveVolumes(); // (and the volumes Sound Effect Matching set)
 }
 
 // --- Music Style: DS -------------------------------------------------------------

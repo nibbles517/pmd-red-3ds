@@ -60,12 +60,16 @@ music: put your own dump of Pokémon Mystery Dungeon: Blue Rescue Team, named
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 The Music Player lists the ROM's sound effects after its music (in green);
-an effect plays once. Sound Effect Matching (Dev), in Game Options for now,
-pairs each of the game's sound effects with one of the DS's (A plays the
-GBA one, Y the DS one, L/R and ZL/ZR pick another, X clears, START or B
-saves `sfx-map.txt` to the same folder). The matches are built in (each GBA
-sound effect as the DS one with the same number); the file only changes the
-ones it names.
+an effect plays once. Each GBA sound effect plays as the DS one with the
+same number (built in).
+Game Options > DS Volume Balance sets each DS track's own volume against the
+GBA song or sound effect it stands for: A plays the GBA one, Y the DS one,
+L/R change the DS one's volume by 1%, ZL/ZR by 10% (heard at once), X switches
+between the music and the sound effects (SELECT plays a DS song under the
+effects; with L/R or ZL/ZR held, another), START or B saves. The volumes are
+built in (port/core/music.c); `ds-volumes.txt` in the same folder keeps only
+those changed from the built-in ones (each with the built-in one beside it),
+so a player's file is their balance changes, ready to be merged.
 Sound Effects (GBA | DS), under Music Style, picks which sound effects the
 game plays: with DS (the default), each GBA sound effect plays as its DS
 match, at the SFX Volume; it starts, fades and stops with the GBA
@@ -74,7 +78,8 @@ on to its own end. Both settings are GBA only (in red) with another game's ROM.
 Music Volume and SFX Volume (Left/Right: 10% a press) set the DS music's and
 the DS sound effects' volumes; the Music Player's volume buttons (Circle Pad
 up/down or ZL/ZR) set the volume of what plays (or of the track the cursor is
-on), and Sound Effect Matching's (Circle Pad up/down) the DS side's.
+on), and DS Volume Balance's (Circle Pad up/down, on its music) the DS
+music's.
 With Dual Core on, the DS music and sound effects are made on the second CPU
 core while the game runs, a frame ahead; that is all the second core does (the
 picture is drawn on the main core).

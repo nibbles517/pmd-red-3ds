@@ -115,15 +115,18 @@ int Port_MusicRomIsBlue(void); // APHE, APHP or APHJ
 int Port_MusicMapGet(int gbaSong);
 void Port_MusicMapSet(int gbaSong, int track);
 int Port_MusicMapSave(const int *songs, const char *const *names, int count);
-// GBA sound effect (300-999) -> DS sound effect (track list index, -1: none);
-// Sound Effect Matching saves them (sfx-map.txt)
+// GBA sound effect (300-999) -> DS sound effect (track list index, -1: none)
 int Port_SfxMapGet(int se);
-void Port_SfxMapSet(int se, int track);
-int Port_SfxMapSave(const int *ses, int count);
-// A DS sound effect's own volume, percent (sfx-map.txt; 100 at first)
-int Port_SfxGainGet(int track);
+// A DS track's own volume, percent (built in; ds-volumes.txt: DS Volume
+// Balance's changes, which Port_TrackGainsSave writes)
+int Port_TrackGainGet(int track);
+int Port_TrackGainDefault(int track);
+void Port_TrackGainSet(int track, int percent);
+int Port_TrackGainMax(int track);
+int Port_TrackGainsSave(void);
+int Port_SfxGainGet(int track); // (100 for a track that isn't a sound effect)
 void Port_SfxGainSet(int track, int percent);
-extern s16 gPortMatchBgm; // Sound Effect Matching: the DS song playing under the effects (-1: none)
+extern s16 gPortMatchBgm; // DS Volume Balance: the DS song playing under the sound effects (-1: none)
 // Music Style: DS (music.c): slot 0 the background music, 1 a fanfare
 void Port_MusicSlot(int slot, int track, int loop, int paused, int volume64);
 int Port_MusicSlotDone(int slot);
