@@ -160,9 +160,11 @@ static void CheckConfig(void)
     for (int i = 0; i < 2; i++)
         if (gPortConfig.layout[i][1] > PORT_SCALE_STRETCH)
             gPortConfig.layout[i][1] = PORT_SCALE_FULL;
-    if (gPortConfig.layoutSubScreen > PORT_SUB_LAYOUT_MT)
+    // (Sky and the 3DS button style were taken out: an old config's become
+    // Blue and DS)
+    if (gPortConfig.layoutSubScreen > PORT_SUB_LAYOUT_MT || gPortConfig.layoutSubScreen == PORT_SUB_LAYOUT_SKY)
         gPortConfig.layoutSubScreen = PORT_SUB_LAYOUT_BLUE;
-    if (gPortConfig.buttonStyle > PORT_BUTTONS_3DS)
+    if (gPortConfig.buttonStyle >= PORT_BUTTONS_3DS)
         gPortConfig.buttonStyle = PORT_BUTTONS_DS;
     if (gPortConfig.musicStyle > PORT_MUSIC_DS)
         gPortConfig.musicStyle = PORT_MUSIC_GBA;
@@ -328,9 +330,7 @@ static const IniSetting sIni[] = {
     { "Sub-Screen Settings", "Size", &gPortConfig.layout[1][0], sIniSubSizes },
     { "Sub-Screen Settings", "Scale", &gPortConfig.layout[1][1], sIniScales },
     { "Layout Options", "Sub-Screen Layout", &gPortConfig.layoutSubScreen, sIniLayouts },
-    { "Layout Options", "Additional Info", &gPortConfig.layoutInfo, sIniOffOn },
     { "Controls Options", "Button Style", &gPortConfig.buttonStyle, sIniButtons },
-    { "Controls Options", "Touch Screen", &gPortConfig.touchScreenOff, sIniOnOff },
     { "Music Options", "Music Style", &gPortConfig.musicStyle, sIniStyles },
     { "Music Options", "Sound Effects", &gPortConfig.sfxStyle, sIniStyles },
     { "Music Options", "Music Volume", &gPortConfig.musicVolume, NULL },

@@ -101,6 +101,7 @@ static void Fill(int x, int y, int w, int h, u16 c)
 }
 
 u16 Port_PaletteColor(u16 index); // palette_fade_util.c: as set, before fades
+bool8 PortShiny_SlotColors(s32 slot, u16 *out); // port_shiny.c: a shiny's colours in an OBJ palette
 
 // The colours of OBJ palette pal as the game set them (the main screen's
 // fades and flashes do not reach the second screen).
@@ -413,6 +414,8 @@ typedef struct {
     u8 itemPal;         // ... and OBJ palette
     const u8 *tactic;
     const axmain *sprite;
+    u16 pal[16];        // its palette's colours as the main screen has them (a shiny's own: port_shiny.c)
+    bool8 palOk;
     u8 anim, palNum;
     s16 frame, frameLeft; // position in the down-left animation
     struct PortStatusSymbol symbols[2]; // status symbols over the sprite
@@ -474,6 +477,9 @@ static bool8 FollowSprite(PanelRow *row, Entity *entity)
     row->sprite = m;
     row->anim = obj->unk43_animId2;
     row->palNum = obj->axdata.sub1.paletteNum;
+    // (a shiny's palette is one borrowed and loaded with its colours, not
+    // "palet"'s of that number: those, kept for when it can't be followed)
+    row->palOk = PortShiny_SlotColors(row->palNum, row->pal);
     row->frame = frame;
     row->frameLeft = obj->axdata.animFrames > 0 ? obj->axdata.animFrames : sw[frame].frames;
     return TRUE;
@@ -554,8 +560,12 @@ static void DrawRowSprite(const PanelRow *row, int ax, int ay)
         return;
     // (the frame's pose only, not its offset: lunges, hops and recoils move
     // the sprite on the main screen, but here it stays on its floor)
+    static u16 pals[256];
+    memcpy(pals, sPalet, sizeof(pals));
+    if (row->palOk)
+        memcpy(&pals[(row->palNum & 15) * 16], row->pal, sizeof(row->pal));
     DrawPose(row->sprite->poses[sw[row->frame].poseId], row->sprite->spriteData, NULL, 0,
-             sPalet, row->palNum, ax, ay);
+             pals, row->palNum, ax, ay);
     if (FIT)
         return; // the symbols go under the belly instead (DrawRowSymbols)
     for (int i = 0; i < row->symbolCount; i++)
