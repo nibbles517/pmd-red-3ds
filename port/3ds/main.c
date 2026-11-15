@@ -742,8 +742,10 @@ static void GpuListUpload(const GpuList *l)
     // Which colours changed, as sGlTileUse has them: 16 colours a bank (each
     // bank's colours 1-15), 256 colours (the groups of 16)
     uint16_t changed16[16] = { 0 }, changed256 = 0;
+    int changedCount = 0;
     for (int i = 0; i < 256; i++)
         if (changedEntry[i]) {
+            changedCount++;
             if (i & 15)
                 changed16[i >> 4] |= (uint16_t)(1u << (i & 15));
             if (i)
@@ -774,7 +776,12 @@ static void GpuListUpload(const GpuList *l)
     // changes then, and written a part a frame the dungeon's first floor
     // came in in chunks, some still in the old colours.)
     static int sGlLastClass = -1;
-    bool spread = l->palette != GPU_PAL_OTHER && sGlLastClass >= 0 && sGlLastClass != GPU_PAL_OTHER;
+    // (Nor when most colours change at once: a scene writing its palette
+    // over, not animating it (the ending's flash to white and back, the team
+    // base faded in by its colours), whose tiles left in the old colours
+    // showed as blocks for frames. A palette animation changes a few.)
+    bool spread = l->palette != GPU_PAL_OTHER && sGlLastClass >= 0 && sGlLastClass != GPU_PAL_OTHER
+                  && changedCount <= 48;
     sGlLastClass = (l->quadCount == 0 || sGlNoBudget) ? -1 : l->palette;
     for (int b = 0; !spread && b < 4; b++) // (tiles still waiting from a palette animation: now, whole)
         if (sGlPalAny[b]) {
