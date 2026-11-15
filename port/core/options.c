@@ -28,28 +28,30 @@ static bool8 IniSave(void);
 
 // The settings before any are chosen (no config file yet). Those kept in the
 // game's own options have theirs in InitializeGameOptions (game_options.c):
-// Main Screen Bottom, BG and Border Color Blue (the border follows the
-// player's gender), the dungeon map Clear.
+// BG and Border Color Blue (the border follows the player's gender), the
+// dungeon map Clear (Main Screen: this file's).
 static void SetDefaultConfig(void)
 {
     memset(&gPortConfig, 0, sizeof(gPortConfig));
     gPortConfig.version = PORT_CONFIG_VERSION;
-    // Graphics Options
-    gPortConfig.frameSkip = Backend_IsNew3DS() ? PORT_FRAMESKIP_OFF : PORT_FRAMESKIP_AUTO;
+    // Graphics Options (the same on an Old and a New 3DS)
+    gPortConfig.frameSkip = PORT_FRAMESKIP_AUTO;
     gPortConfig.dualCore = 1;
-    gPortConfig.busyWait = 0; // Busy Screen: Skip
-    gPortConfig.layout[0][0] = PORT_SIZE_FIT; // Main Screen Settings: Size Fit,
-    gPortConfig.layout[0][1] = 1;             // Scale Full
-    gPortConfig.subScreenDisabled = 0;        // Sub-Screen Settings: Enabled? Yes,
-    gPortConfig.layout[1][0] = PORT_SIZE_FIT; // Size Fit,
-    gPortConfig.layout[1][1] = 1;             // Scale Full
+    gPortConfig.gpuDrawOff = 0;   // GPU Drawing: On
+    gPortConfig.busyWait = 0;     // Busy Screen: Skip
+    gPortConfig.mainScreenTop = 1; // Main Screen: Top
+    gPortConfig.layout[0][0] = PORT_SIZE_3DS;   // Main Screen Settings: Size 3DS,
+    gPortConfig.layout[0][1] = PORT_SCALE_NONE; // Scale None
+    gPortConfig.subScreenDisabled = 1;          // Sub-Screen Settings: Enabled? No,
+    gPortConfig.layout[1][0] = PORT_SIZE_FIT;   // Size Fit,
+    gPortConfig.layout[1][1] = PORT_SCALE_NONE; // Scale None
     // Controls Options
     gPortConfig.buttonStyle = PORT_BUTTONS_DS;
     gPortConfig.touchScreenOff = 0; // On
-    // Music Options (DS music only with Blue Rescue Team's ROM, though)
-    gPortConfig.musicStyle = PORT_MUSIC_DS;
+    // Music Options
+    gPortConfig.musicStyle = PORT_MUSIC_GBA;
     gPortConfig.musicVolume = 19;
-    gPortConfig.sfxStyle = PORT_MUSIC_DS; // (the DS's sound effects)
+    gPortConfig.sfxStyle = PORT_MUSIC_GBA;
     gPortConfig.sfxVolume = 10;
     // Layout Options (in dungeons)
     gPortConfig.layoutSubScreen = PORT_SUB_LAYOUT_BLUE;
@@ -302,8 +304,9 @@ static const char *const sIniMainScreen[] = { "Bottom", "Top", NULL };
 static const char *const sIniSizes[] = { "GBA", "DS", "Fit", "3DS", NULL };
 static const char *const sIniSubSizes[] = { "GBA", "DS", "Fit", NULL };
 static const char *const sIniScales[] = { "None", "Full", "Stretch", NULL };
-static const char *const sIniLayouts[] = { "Blue", "Sky", "Log", "M+T", NULL };
-static const char *const sIniButtons[] = { "GBA", "DS", "3DS", NULL };
+// ("-": a choice taken out, read from an older file but not offered: CheckConfig)
+static const char *const sIniLayouts[] = { "Blue", "-Sky", "Log", "M+T", NULL };
+static const char *const sIniButtons[] = { "GBA", "DS", "-3DS", NULL };
 static const char *const sIniStyles[] = { "GBA", "DS", NULL };
 static const char *const sIniSlots[] = { "1", "2", "3", NULL };
 // The run options, by their names in the menu (port_new_run.c sNames)
@@ -367,7 +370,7 @@ static void IniValue(const IniSetting *s, const char *v, int len)
         return;
     }
     for (int i = 0; s->names[i] != NULL; i++) {
-        if (IniSame(v, len, s->names[i])) {
+        if (IniSame(v, len, s->names[i] + (s->names[i][0] == '-'))) {
             *s->value = (u8)i;
             return;
         }
@@ -456,14 +459,21 @@ static bool8 IniSave(void)
         INI_PRINT("%-32s; ", line);
         if (s->names == NULL)
             INI_PRINT("10%% to 400%%, in steps of 10%%\n");
-        else
+        else {
+            const char *sep = "";
             for (int k = 0; s->names[k] != NULL; k++)
-                INI_PRINT("%s%s", s->names[k], s->names[k + 1] ? ", " : "\n");
+                if (s->names[k][0] != '-') {
+                    INI_PRINT("%s%s", sep, s->names[k]);
+                    sep = ", ";
+                }
+            INI_PRINT("\n");
+        }
     }
     for (int slot = 0; slot < 3; slot++) {
         INI_PRINT("\n[Save Data %d]\n", slot + 1);
         for (int i = 0; i < PORT_RUN_OPTIONS; i++)
-            INI_PRINT("%s = %s\n", sRunOptionNames[i], sRunOptions[slot][i] ? "On" : "Off");
+            if (strncmp(sRunOptionNames[i], "Option ", 7) != 0) // (Option 6 and 7: nothing yet, not shown)
+                INI_PRINT("%s = %s\n", sRunOptionNames[i], sRunOptions[slot][i] ? "On" : "Off");
     }
 #undef INI_PRINT
     if (n >= (int)sizeof(text))
