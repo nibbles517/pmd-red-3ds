@@ -39,6 +39,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
 #define DEBUG_FLAG DATA_DIR "/debug.txt"
 #define CPU_VIDEO_FLAG DATA_DIR "/cpu-video.txt" // the pictures copied by the CPU, as before the GPU did it
 #define GPU_NOFLIP_FLAG DATA_DIR "/gpu-noflip.txt" // GPU Drawing: the textures' rows top first (see GpuListInit)
+#define GPU_CANVASFLIP_FLAG DATA_DIR "/gpu-canvasflip.txt" // GPU Drawing scaled: the canvas read the other way up (GpuCanvasInit)
 #define GPU_GSPFLUSH_FLAG DATA_DIR "/gpu-gspflush.txt" // GPU Drawing: flush its textures through GSP (see GlFlushRange)
 
 void AgbMain(void);
@@ -304,8 +305,8 @@ static void PresentDs(const uint16_t *frame, int frameW, int frameH, uint16_t *f
 // The GPU puts the pictures on the screens: each picture is converted to the
 // 3DS's colours (RGB565) into a plain buffer, which the GPU's transfer engine
 // copies into a texture (in the GPU's tiled layout); a rectangle with that
-// texture is then drawn on each screen, scaled as the CPU path would scale it
-// (nearest pixel), and dimmed by the screen change fade. The CPU no longer
+// texture is then drawn on each screen, scaled (bilinear: the CPU path
+// scales to the nearest pixel), and dimmed by the screen change fade. The CPU no longer
 // writes the framebuffers column by column, nor scales.
 //
 // Without citro3d (or with sdmc:/3ds/pmd-red-3ds/cpu-video.txt present), the
@@ -352,7 +353,7 @@ static bool GpuPictureInit(GpuPicture *p)
     if (p->stage == NULL || !C3D_TexInitVRAM(&p->tex, TEX_W, TEX_H, GPU_RGB565))
         return false;
     memset(p->stage, 0, TEX_W * TEX_H * 2);
-    C3D_TexSetFilter(&p->tex, GPU_NEAREST, GPU_NEAREST); // (as the CPU scaled: whole pixels)
+    C3D_TexSetFilter(&p->tex, GPU_LINEAR, GPU_LINEAR); // (bilinear when scaled; 1:1, each pixel as it is)
     C3D_TexSetWrap(&p->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     return true;
 }
@@ -450,16 +451,22 @@ static void GpuDrawPicture(C3D_RenderTarget *target, const C3D_Mtx *proj, GpuPic
     // on a 3DS: drawing v from 1 at the top showed it upside down, its first
     // 16 rows missing and 16 black ones at the top, the rest of the texture).
     float x0 = (float)p->x, y0 = (float)p->y, x1 = (float)(p->x + p->w), y1 = (float)(p->y + p->h);
-    float u1 = (float)p->srcW / TEX_W, v0 = 0.0f, v1 = (float)p->srcH / TEX_H;
+    float u0 = 0.0f, u1 = (float)p->srcW / TEX_W, v0 = 0.0f, v1 = (float)p->srcH / TEX_H;
+    if (p->w != p->srcW || p->h != p->srcH) {
+        // Scaled (bilinear): the edges' pixels at the edges' texel centres,
+        // so nothing past the picture (in the texture) is blended in
+        u0 = 0.5f / TEX_W; u1 = (p->srcW - 0.5f) / TEX_W;
+        v0 = 0.5f / TEX_H; v1 = (p->srcH - 0.5f) / TEX_H;
+    }
 
     C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0x000000FF, 0); // black borders
     C3D_FrameDrawOn(target);
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, sProjLoc, proj);
     C3D_TexBind(0, &p->tex);
     C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
-    C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, v0, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(u0, v0, 0.0f, 0.0f);
     C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(u1, v0, 0.0f, 0.0f);
-    C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, v1, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(u0, v1, 0.0f, 0.0f);
     C3D_ImmSendAttrib(x1, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(u1, v1, 0.0f, 0.0f);
     C3D_ImmDrawEnd();
 }
@@ -497,6 +504,17 @@ static bool sGlReady, sGlFlip;
 static const GpuList *sGlList;    // the main screen's picture is this list (else sGpuMain's texture)
 static bool sGlUploaded;          // ... its textures written
 static int sGlFrameW, sGlFrameH, sGlOx, sGlOy; // where the list goes in the frame
+// Scaled (the frame not 1:1 on its screen): the list is drawn 1:1 into the
+// canvas, a texture the GPU draws into, which is then drawn on the screen
+// scaled, bilinear (drawing the list's rectangles scaled, each texture's
+// texels blended with their neighbours would blend in what is past each
+// rectangle: the next tile, a sprite's transparent edge).
+#define CANVAS_W 512
+#define CANVAS_H 256
+static C3D_Tex sCanvas;
+static C3D_RenderTarget *sCanvasTarget;
+static C3D_Mtx sProjCanvas;
+static bool sCanvasFlip;
 static uint16_t sGlMorton[8][8];  // (y, x) in a tile -> its place in the tile
 static uint8_t sGlPair[8][4];     // (y, x / 2) -> the place of texels x, x + 1 (together: Z order) in 32-bit words
 static u64 sGlUploadTicks;        // the meter: writing the textures
@@ -532,6 +550,26 @@ static void GpuListInit(void)
         C3D_TexSetFilter(all[i], GPU_NEAREST, GPU_NEAREST);
         C3D_TexSetWrap(all[i], GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     }
+    // The canvas (in VRAM, as the screens' buffers; with a stencil buffer)
+    if (C3D_TexInitVRAM(&sCanvas, CANVAS_W, CANVAS_H, GPU_RGBA8)) {
+        sCanvasTarget = C3D_RenderTargetCreateFromTex(&sCanvas, GPU_TEXFACE_2D, 0, GPU_RB_DEPTH24_STENCIL8);
+        if (sCanvasTarget == NULL)
+            C3D_TexDelete(&sCanvas);
+    }
+    if (sCanvasTarget != NULL) {
+        C3D_TexSetFilter(&sCanvas, GPU_LINEAR, GPU_LINEAR);
+        C3D_TexSetWrap(&sCanvas, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+        // Its pixels, y down (as citro2d draws into a texture): row y is at
+        // v = 1 - y / CANVAS_H (gpu-canvasflip.txt: at v = y / CANVAS_H)
+        Mtx_Ortho(&sProjCanvas, 0.0f, CANVAS_W, CANVAS_H, 0.0f, 1.0f, -1.0f, true);
+        flag = fopen(GPU_CANVASFLIP_FLAG, "r");
+        if (flag != NULL) {
+            fclose(flag);
+            sCanvasFlip = true;
+        }
+    }
+    else
+        Backend_Log("gpu drawing: no canvas (scaled: each rectangle scaled, whole pixels)");
     sGlReady = true;
     GlBench();
     Backend_Log("gpu drawing: ready%s%s", sGlFlip ? "" : " (rows top first: gpu-noflip.txt)",
@@ -970,10 +1008,12 @@ static void GlSetBlend(bool blend, int stencilRef, GPU_TESTFUNC test, GPU_STENCI
 }
 
 // The list on its screen: picture (x, y, w, h) on the screen is the frame
-static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const GpuList *l, unsigned level)
+// The list on `target`: the frame at (fx, fy), fw x fh
+static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const GpuList *l, unsigned level,
+                        int fx, int fy, int fw, int fh)
 {
-    const float sx = (float)sGpuMain.w / sGlFrameW, sy = (float)sGpuMain.h / sGlFrameH;
-    const float px = sGpuMain.x + sGlOx * sx, py = sGpuMain.y + sGlOy * sy;
+    const float sx = (float)fw / sGlFrameW, sy = (float)fh / sGlFrameH;
+    const float px = fx + sGlOx * sx, py = fy + sGlOy * sy;
     C3D_Tex *texs[6] = { &sGlBg[0], &sGlBg[1], &sGlBg[2], &sGlBg[3], &sGlStrip, &sGlObj };
     static uint16_t order[GPU_MAX_QUADS], start[1024];
 
@@ -1006,8 +1046,8 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
         for (int k = 0; k < 3; k++)
             c[k] = ((l->border >> (5 * k)) & 31) * 255 / 31 * level / 255;
         C3D_TexEnvColor(env, 0xFF000000 | (c[2] << 16) | (c[1] << 8) | c[0]);
-        float x0 = (float)sGpuMain.x, y0 = (float)sGpuMain.y;
-        float x1 = x0 + (float)sGpuMain.w, y1 = y0 + (float)sGpuMain.h;
+        float x0 = (float)fx, y0 = (float)fy;
+        float x1 = x0 + (float)fw, y1 = y0 + (float)fh;
         C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
         C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
         C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(0.0f, 0.0f, 0.0f, 0.0f);
@@ -1146,6 +1186,36 @@ static void GpuDrawList(C3D_RenderTarget *target, const C3D_Mtx *proj, const Gpu
 }
 
 
+// Scaled: the list 1:1 into the canvas, then the canvas on the screen,
+// bilinear (the edges' pixels at the edges' texel centres: nothing past the
+// frame blended in)
+static void GpuDrawCanvas(C3D_RenderTarget *target, const C3D_Mtx *proj, const GpuList *l, unsigned level)
+{
+    GpuDrawList(sCanvasTarget, &sProjCanvas, l, level, 0, 0, sGlFrameW, sGlFrameH);
+    float x0 = (float)sGpuMain.x, y0 = (float)sGpuMain.y;
+    float x1 = (float)(sGpuMain.x + sGpuMain.w), y1 = (float)(sGpuMain.y + sGpuMain.h);
+    float u0 = 0.5f / CANVAS_W, u1 = (sGlFrameW - 0.5f) / CANVAS_W;
+    float v0 = 0.5f / CANVAS_H, v1 = (sGlFrameH - 0.5f) / CANVAS_H;
+    if (!sCanvasFlip) {
+        v0 = 1.0f - v0;
+        v1 = 1.0f - v1;
+    }
+    C3D_RenderTargetClear(target, C3D_CLEAR_ALL, 0x000000FF, 0); // black borders
+    C3D_FrameDrawOn(target);
+    C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, sProjLoc, proj);
+    C3D_TexEnv *env = C3D_GetTexEnv(0); // (the screen change fade: in the canvas already)
+    C3D_TexEnvInit(env);
+    C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_TEXTURE0, GPU_TEXTURE0);
+    C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+    C3D_TexBind(0, &sCanvas);
+    C3D_ImmDrawBegin(GPU_TRIANGLE_STRIP);
+    C3D_ImmSendAttrib(x0, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(u0, v0, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x1, y0, 0.5f, 0.0f); C3D_ImmSendAttrib(u1, v0, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x0, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(u0, v1, 0.0f, 0.0f);
+    C3D_ImmSendAttrib(x1, y1, 0.5f, 0.0f); C3D_ImmSendAttrib(u1, v1, 0.0f, 0.0f);
+    C3D_ImmDrawEnd();
+}
+
 // A screen's swap (asked for when the GPU finished copying its picture to
 // the framebuffer) happens at its next VBlank; until then the screen still
 // shows the other buffer, the one the next copy goes into. Copying over the
@@ -1223,7 +1293,13 @@ static void GpuDrawFrame(void)
             GpuListUpload(sGlList);
             sGlUploaded = true;
         }
-        GpuDrawList(sBottom ? sTargetBottom : sTargetTop, sBottom ? &sProjBottom : &sProjTop, sGlList, level);
+        C3D_RenderTarget *target = sBottom ? sTargetBottom : sTargetTop;
+        const C3D_Mtx *proj = sBottom ? &sProjBottom : &sProjTop;
+        if ((sGpuMain.w == sGlFrameW && sGpuMain.h == sGlFrameH) || sCanvasTarget == NULL
+            || sGlFrameW > CANVAS_W || sGlFrameH > CANVAS_H)
+            GpuDrawList(target, proj, sGlList, level, sGpuMain.x, sGpuMain.y, sGpuMain.w, sGpuMain.h);
+        else
+            GpuDrawCanvas(target, proj, sGlList, level);
     }
     // The screen change fade: the texture's colours times a grey
     C3D_TexEnv *env = C3D_GetTexEnv(0);
