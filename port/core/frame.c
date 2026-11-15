@@ -641,6 +641,7 @@ static void RunFrame(void)
     // top-left corner (gPortBorderFill)
     int fillBorder = gPortBorderFill && mode == VIEW_FRAMED && !skip;
     uint16_t border = 0;
+    int edgeBlack = 0; // ... and its left edge column black (the logo screens')
 
     // Lines 0-159: visible. The wide view also draws lines below, as if the
     // screen went on (no VCount events there, but the HBlank DMA continues).
@@ -674,8 +675,28 @@ static void RunFrame(void)
             if (listMode)
                 Ppu_RenderLine(4, sLine);
             border = sLine[4] & 0x7FFF;
+            edgeBlack = (sLine[0] & 0x7FFF) == 0 && border != 0;
         }
         Dma_HBlank();
+    }
+    // The white logo screens' black left edge column (the warning, The
+    // Pokémon Company, Nintendo): on the GBA, the screen's edge; framed, a
+    // line down the white. The border's colour instead.
+    if (edgeBlack) {
+        if (listMode) {
+            if (listOk) {
+                uint16_t px1 = border;
+                for (int y = 0; y < GBA_H; y++)
+                    GpuList_StripLine(y, 0, 0, GQ_PREFADED, &px1, 0, 1); // (in front of all)
+            }
+        }
+        else {
+            for (int y = 0; y < GBA_H; y++) {
+                uint16_t *p = &sFrame[(y + NARROW_OY) * SCREEN_W + NARROW_OX];
+                if ((*p & 0x7FFF) == 0)
+                    *p = border;
+            }
+        }
     }
     if (mode == VIEW_FRAMED && !skip) {
         // the border of this picture (if it isn't so already)
