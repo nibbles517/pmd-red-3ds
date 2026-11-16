@@ -9735,7 +9735,7 @@ index 812df38d..c77423e3 100644
      a0->sub1.pos.x = a0->sub1.offset.x + spriteX;
      a0->sub1.pos.y = a0->sub1.offset.y + spriteY;
 diff --git a/src/string_format.c b/src/string_format.c
-index be399eb4..1e0927ee 100644
+index be399eb4..019a5c79 100644
 --- a/src/string_format.c
 +++ b/src/string_format.c
 @@ -1,4 +1,11 @@
@@ -9776,7 +9776,7 @@ index be399eb4..1e0927ee 100644
              sDialogueBoxWinTemplates.id[1].type = WINDOW_TYPE_7;
          }
          else {
-@@ -481,7 +498,13 @@ void DrawDialogueBoxString_Async(void)
+@@ -481,11 +498,31 @@ void DrawDialogueBoxString_Async(void)
                          SpriteSetPalNum(&sDialogueBoxArrowSprite, 15);
  
                          if (sStringFormatFlags & STR_FORMAT_FLAG_ONLY_TEXT) {
@@ -9790,6 +9790,24 @@ index be399eb4..1e0927ee 100644
                              SpriteSetX(&sDialogueBoxArrowSprite, 112);
                          }
                          else {
++#ifdef PLATFORM_3DS
++                            // The dialogue box (row 15 on the GBA) ends at the
++                            // GBA screen's bottom, which cuts off the arrow's
++                            // lower half; moved down in the wide view, the
++                            // whole arrow showed, hanging out under the box:
++                            // as far up as the GBA's bottom would have it, so
++                            // it sits on the box's bottom edge
++                            s32 arrowY = sTextPrintStruct.arrowSpritePosY + 1;
++                            s32 shift = (gWindows[0].y - sDialogueBoxWindowTemplate.pos.y) * 8;
++                            if (shift > 0 && arrowY - shift + 8 > DISPLAY_HEIGHT)
++                                arrowY -= arrowY - shift + 8 - DISPLAY_HEIGHT;
++                            SpriteSetY(&sDialogueBoxArrowSprite, arrowY);
++#else
+                             SpriteSetY(&sDialogueBoxArrowSprite, sTextPrintStruct.arrowSpritePosY + 1);
++#endif
+                             SpriteSetX(&sDialogueBoxArrowSprite, sTextPrintStruct.arrowSpritePosX);
+                         }
+ 
 diff --git a/src/text_1.c b/src/text_1.c
 index e6612f2c..4f125a91 100644
 --- a/src/text_1.c
