@@ -21,6 +21,15 @@ struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = P
 // Game), so they change together with the Save Data.
 u8 gPortRunOptions[PORT_RUN_OPTIONS];
 static u8 sRunOptions[3][PORT_RUN_OPTIONS];
+u8 gPortCheats[PORT_CHEATS]; // (the current Save Data's: sCheats)
+static u8 sCheats[3][PORT_CHEATS];
+static const char *const sCheatNames[PORT_CHEATS] = {
+    "Infinite HP", "Infinite PP", "Infinite Belly", "One-Hit KOs", "100% Accuracy", "Exp. Multiplier",
+    "Learn Any TM/HM", "100% Recruit Rate", "Permanent X-Ray Specs", "Permanent Luminous Orb",
+    "Permanent No-Stick Cap", "Permanent Goggle Specs", "Permanent Weather Band", "Permanent Twist Band",
+    "Permanent Mobile Scarf", "Permanent Pierce Band", "Permanent Sneak Scarf",
+};
+static const char *const sCheatExp[CHEAT_EXP_MAX + 1] = { "Off", "2x", "4x", "8x", "16x", "32x", "64x", "128x" };
 static bool8 sRunOptionsPending;
 
 static void IniLoad(const char *text, uint32_t len);
@@ -67,6 +76,7 @@ void Port_LoadConfig(void)
     void *f;
     SetDefaultConfig();
     memset(sRunOptions, 0, sizeof(sRunOptions));
+    memset(sCheats, 0, sizeof(sCheats));
     // config.ini, the settings file since version 14 (CheckConfig the values)
     if ((f = Backend_FileOpen(PORT_CONFIG_INI)) != NULL) {
         uint32_t size = Backend_FileSize(f);
@@ -265,7 +275,18 @@ void Port_RunOptionsUseSlot(int slot)
     if (slot < 0 || slot > 2)
         slot = 0;
     memcpy(gPortRunOptions, sRunOptions[slot], sizeof(gPortRunOptions));
+    memcpy(gPortCheats, sCheats[slot], sizeof(gPortCheats));
     sRunOptionsPending = FALSE;
+}
+
+// Others > Cheats changed: they're the current Save Data's
+void Port_CheatsSave(void)
+{
+    int slot = gPortConfig.saveSlot % 3;
+    if (memcmp(sCheats[slot], gPortCheats, sizeof(gPortCheats)) == 0)
+        return;
+    memcpy(sCheats[slot], gPortCheats, sizeof(gPortCheats));
+    IniSave();
 }
 
 // New Game (port_new_run.c): gPortRunOptions are this adventure's from now on
@@ -423,6 +444,15 @@ static void IniLoad(const char *text, uint32_t len)
                     else if (IniSame(eq + 1, valueLen, "Off")) sRunOptions[slot][i] = 0;
                 }
             }
+            for (int i = 0; i < PORT_CHEATS; i++) { // "Cheat: <name> = On/Off" (Exp. Multiplier: Off, 2x-128x)
+                char key[40];
+                snprintf(key, sizeof(key), "Cheat: %s", sCheatNames[i]);
+                if (!IniSame(line, keyLen, key))
+                    continue;
+                for (int v = 0; v <= (i == CHEAT_EXP ? CHEAT_EXP_MAX : 1); v++)
+                    if (IniSame(eq + 1, valueLen, i == CHEAT_EXP ? sCheatExp[v] : v ? "On" : "Off"))
+                        sCheats[slot][i] = (u8)v;
+            }
         }
         for (unsigned i = 0; i < sizeof(sIni) / sizeof(sIni[0]); i++)
             if (IniSame(section, sectionLen, sIni[i].section) && IniSame(line, keyLen, sIni[i].key))
@@ -474,6 +504,10 @@ static bool8 IniSave(void)
         for (int i = 0; i < PORT_RUN_OPTIONS; i++)
             if (strncmp(sRunOptionNames[i], "Option ", 7) != 0) // (Option 6 and 7: nothing yet, not shown)
                 INI_PRINT("%s = %s\n", sRunOptionNames[i], sRunOptions[slot][i] ? "On" : "Off");
+        for (int i = 0; i < PORT_CHEATS; i++) // (Others > Cheats, in dungeons)
+            INI_PRINT("Cheat: %s = %s\n", sCheatNames[i],
+                      i == CHEAT_EXP ? sCheatExp[sCheats[slot][i] <= CHEAT_EXP_MAX ? sCheats[slot][i] : 0]
+                                     : sCheats[slot][i] ? "On" : "Off");
     }
 #undef INI_PRINT
     if (n >= (int)sizeof(text))

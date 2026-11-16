@@ -327,12 +327,33 @@ index d927bef9..921af126 100644
  
  #endif // GUARD_OPTIONS_MENU1_H
 \ No newline at end of file
+diff --git a/include/port_cheats.h b/include/port_cheats.h
+new file mode 100644
+index 00000000..d576cc98
+--- /dev/null
++++ b/include/port_cheats.h
+@@ -0,0 +1,15 @@
++#ifndef GUARD_PORT_CHEATS_H
++#define GUARD_PORT_CHEATS_H
++
++// 3DS port: Others > Cheats (src/port_cheats.c; the settings: port_new_run.h)
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#include "structs/dungeon_entity.h"
++bool8 PortCheats_TeamMember(Entity *entity);
++bool8 PortCheats_HeldItem(Entity *entity, u8 id);
++s32 PortCheats_Exp(Entity *receiver, s32 exp);
++void PortCheats_KeepHP(Entity *target);
++void PortCheats_Turn(void);
++#endif
++
++#endif
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..c344c9ce
+index 00000000..553c562d
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,51 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -369,6 +390,19 @@ index 00000000..c344c9ce
 +// Normalized Shop Prices: items.c prices items by data/port_shop_prices.h
 +#define PORT_RUN_SHOP_PRICES 7
 +void PortNewRun_Run(void (*frameActions)(u32));
++
++
++// Others > Cheats (in dungeons: dungeon_menu_others.c), each Save Data's own
++// (config.ini, as its run options). 0 off, 1 on; CHEAT_EXP: 0 off, 1-7 2x-128x.
++enum {
++    CHEAT_INF_HP, CHEAT_INF_PP, CHEAT_INF_BELLY, CHEAT_ONE_HIT, CHEAT_ACCURACY, CHEAT_EXP, // Stats
++    CHEAT_ANY_TM, CHEAT_RECRUIT, CHEAT_XRAY, CHEAT_LUMINOUS, CHEAT_NOSTICK, CHEAT_GOGGLE, // Effects
++    CHEAT_WEATHER, CHEAT_TWIST, CHEAT_MOBILE, CHEAT_PIERCE, CHEAT_SNEAK,
++    PORT_CHEATS
++};
++#define CHEAT_EXP_MAX 7
++extern u8 gPortCheats[PORT_CHEATS];
++void Port_CheatsSave(void); // (options.c: gPortCheats as its Save Data's, config.ini written)
 +
 +#endif
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
@@ -1516,6 +1550,39 @@ index 28b04fb0..368ffdc7 100644
 +    }
 +#endif
  }
+diff --git a/src/dungeon_damage.c b/src/dungeon_damage.c
+index e8c2000a..73246781 100644
+--- a/src/dungeon_damage.c
++++ b/src/dungeon_damage.c
+@@ -1,4 +1,5 @@
+ #include "global.h"
++#include "port_cheats.h"
+ #include "globaldata.h"
+ #include "dungeon_damage.h"
+ #include "constants/ability.h"
+@@ -260,6 +261,12 @@ static bool8 HandleDealingDamageInternal_Async(Entity *attacker, Entity *target,
+     {
+         dmgStruct->dmg = gSetDamageDmgValue;
+     }
++#ifdef PLATFORM_3DS
++    // Others > Cheats: One-Hit KOs (the team's hits on others: 1000)
++    if (gPortCheats[CHEAT_ONE_HIT] && PortCheats_TeamMember(attacker) && !PortCheats_TeamMember(target)
++        && dmgStruct->dmg > 0 && dmgStruct->dmg != 9999)
++        dmgStruct->dmg = 1000;
++#endif
+ 
+     if (dungeonExitReason != DUNGEON_EXIT_FAINTED_FROM_PERISH_SONG && AbilityIsActive(target, ABILITY_STURDY) && dmgStruct->dmg == 9999) {
+         SubstitutePlaceholderStringTags(gFormatBuffer_Monsters[1], target, 0);
+@@ -415,6 +422,9 @@ static bool8 HandleDealingDamageInternal_Async(Entity *attacker, Entity *target,
+     hpChange = hpBefore - targetData->HP;
+     if (hpChange < 0)
+         hpChange = 0;
++#ifdef PLATFORM_3DS
++    PortCheats_KeepHP(target); // (Others > Cheats: Infinite HP)
++#endif
+ 
+     if (var_24 || unkTile != NULL)
+         DungeonWaitFrames_Async(0xA, 0x18);
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
 index 4506e559..76a3d8fa 100644
 --- a/src/dungeon_floor_spawns.c
@@ -1586,18 +1653,19 @@ index 4506e559..76a3d8fa 100644
          }
      }
 diff --git a/src/dungeon_items.c b/src/dungeon_items.c
-index 148a1118..359ba656 100644
+index 148a1118..a2e758f7 100644
 --- a/src/dungeon_items.c
 +++ b/src/dungeon_items.c
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,8 @@
  #include "global.h"
++#include "port_cheats.h"
 +#ifdef PLATFORM_3DS
 +#include "port_game.h"
 +#endif
  #include "globaldata.h"
  #include "dungeon_items.h"
  #include "dungeon_8041AD0.h"
-@@ -392,7 +395,12 @@ bool8 sub_80462AC(Entity * entity, u8 hallucinating, u8 a2, u8 a3, u8 a4)
+@@ -392,7 +396,12 @@ bool8 sub_80462AC(Entity * entity, u8 hallucinating, u8 a2, u8 a3, u8 a4)
      y2 = ((entity->pixelPos.y / 256) - gDungeon->unk181e8.cameraPixelPos.y) + 8;
      y2 /= 2;
  
@@ -1610,6 +1678,37 @@ index 148a1118..359ba656 100644
          s32 tileNum;
  
          SpriteSetMatrixNum(&gUnknown_202EDC0, 0);
+@@ -692,6 +701,10 @@ void sub_804687C(Entity *entity, DungeonPos *pos1, DungeonPos *pos2, Item *item,
+ bool8 HasHeldItem(Entity *pokemon, u8 id)
+ {
+     EntityInfo *pokemonInfo = GetEntInfo(pokemon);
++#ifdef PLATFORM_3DS
++    if (PortCheats_HeldItem(pokemon, id)) // (Others > Cheats: Permanent ...)
++        return TRUE;
++#endif
+     if (!ItemExists(&pokemonInfo->heldItem)) {
+         return FALSE;
+     }
+diff --git a/src/dungeon_leveling.c b/src/dungeon_leveling.c
+index fa0d30b0..4db71859 100644
+--- a/src/dungeon_leveling.c
++++ b/src/dungeon_leveling.c
+@@ -1,4 +1,5 @@
+ #include "global.h"
++#include "port_cheats.h"
+ #include "globaldata.h"
+ #include "dungeon_leveling.h"
+ #include "constants/tactic.h"
+@@ -52,6 +53,9 @@ void AddExpPoints(Entity *pokemon, Entity *target, s32 exp)
+   s32 expDiff;
+ 
+   EntityInfo *info = GetEntInfo(target);
++#ifdef PLATFORM_3DS
++  exp = PortCheats_Exp(target, exp); // (Others > Cheats: Exp. Multiplier)
++#endif
+   if (info->level != 100) {
+     if (!IsExperienceLocked(info->joinedAt.id)) {
+       newExp = info->exp + exp;
 diff --git a/src/dungeon_main.c b/src/dungeon_main.c
 index bec907ec..4f86b58d 100644
 --- a/src/dungeon_main.c
@@ -2208,10 +2307,10 @@ index 342c9fa5..d5ddcbe3 100644
              if (!var_30) {
                  if (sUnknown_202F258 > 1) {
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..30d37e6c 100644
+index 0680f301..3f4a5a2b 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
-@@ -31,6 +31,11 @@
+@@ -31,6 +31,12 @@
  #include "text_2.h"
  #include "text_3.h"
  #include "run_dungeon.h"
@@ -2219,11 +2318,35 @@ index 0680f301..30d37e6c 100644
 +#include <string.h>
 +#include "port_game.h"
 +#include "save.h"
++#include "port_cheats.h"
 +#endif
  
  static void PrintOthersMenuOptions(void);
  static void ShowGameOptionsMenu(void);
-@@ -146,10 +151,350 @@ void ShowDungeonOthersMenu(void)
+@@ -68,6 +74,10 @@ enum {
+     OTHERS_COUNT
+ };
+ 
++#ifdef PLATFORM_3DS
++static void ShowCheatsMenu(void);
++#endif
++
+ void ShowDungeonOthersMenu(void)
+ {
+     bool8 unkAlwaysFalse;
+@@ -133,6 +143,11 @@ void ShowDungeonOthersMenu(void)
+         if (sOthersCursorId == hintsMenuId) {
+             ShowHintsMenu();
+         }
++#ifdef PLATFORM_3DS
++        if (sOthersCursorId == hintsMenuId + 1) { // 3DS port: Cheats, after Hints
++            ShowCheatsMenu();
++        }
++#endif
+ 
+         if (gDungeon->unk4)
+             break;
+@@ -146,9 +161,349 @@ void ShowDungeonOthersMenu(void)
  
  enum {
      GAME_OPTION_DUNGEON,
@@ -2238,8 +2361,8 @@ index 0680f301..30d37e6c 100644
 +#endif
      GAME_OPTION_DEFAULT,
 +    GAME_OPTIONS_COUNT
- };
- 
++};
++
 +#ifdef PLATFORM_3DS
 +// 3DS port. Graphics Options and Windows Options here are the same as
 +// outside dungeons (the same settings: the port's config, and the game's own
@@ -2329,7 +2452,7 @@ index 0680f301..30d37e6c 100644
 +    [PAGE_CONTROLS] = {
 +        { sTextButtonStyle, 2, 96, 32, { sTextGBA, sTextDS }, 0, NO_LINK },
 +    },
-+};
+ };
 +static const u8 sPortRowCount[PAGE_COUNT] = { 2, 2, 5, 2, 3, 1 };
 +static const u8 *const sPortTitles[PAGE_COUNT] = {
 +    NULL, sTextLayoutOptions, sTextGraphicsOptions, sTextMainScreenSettings, sTextSubScreenSettings, sTextControlOptions
@@ -2571,11 +2694,10 @@ index 0680f301..30d37e6c 100644
 +    return bPress;
 +}
 +#endif
-+
+ 
  static void ShowGameOptionsMenu(void)
  {
-     while (TRUE) {
-@@ -185,6 +530,30 @@ static void ShowGameOptionsMenu(void)
+@@ -185,6 +540,30 @@ static void ShowGameOptionsMenu(void)
              break;
  
          sChangedGameOptions = *gGameOptionsRef;
@@ -2606,7 +2728,7 @@ index 0680f301..30d37e6c 100644
          if (gDungeonMenu.menuIndex == GAME_OPTION_DUNGEON) {
              bPress = ShowDungeonOptions();
              TrySetNewGameOptions(bPress);
-@@ -193,6 +562,7 @@ static void ShowGameOptionsMenu(void)
+@@ -193,6 +572,7 @@ static void ShowGameOptionsMenu(void)
              bPress = ShowOthersOptions();
              TrySetNewGameOptions(bPress);
          }
@@ -2614,7 +2736,7 @@ index 0680f301..30d37e6c 100644
          else if (gDungeonMenu.menuIndex == GAME_OPTION_DEFAULT) {
              AskToResetToDefault();
          }
-@@ -211,7 +581,11 @@ enum {
+@@ -211,7 +591,11 @@ enum {
      OPTION_COUNT
  };
  
@@ -2626,7 +2748,7 @@ index 0680f301..30d37e6c 100644
  #define OTHERS_OPTIONS_COUNT (OPTION_COUNT - DUNGEON_OPTIONS_COUNT)
  
  static bool8 ShowDungeonOptions(void)
-@@ -240,12 +614,18 @@ static bool8 ShowDungeonOptions(void)
+@@ -240,12 +624,18 @@ static bool8 ShowDungeonOptions(void)
              if (gRealInputs.repeated & DPAD_LEFT) {
                  PlayDungeonCursorSE(FALSE);
                  ChangeGameOptionLeft(gDungeonMenu.menuIndex);
@@ -2645,7 +2767,7 @@ index 0680f301..30d37e6c 100644
                  dpadMoved = TRUE;
                  break;
              }
-@@ -361,6 +741,11 @@ static void AskToResetToDefault(void)
+@@ -361,6 +751,11 @@ static void AskToResetToDefault(void)
  {
      if (DisplayDungeonYesNoMessage_Async(0, gUnknown_80FEC28, FALSE) == 1) {
          InitializeGameOptions(FALSE);
@@ -2657,7 +2779,30 @@ index 0680f301..30d37e6c 100644
          sub_803E13C();
      }
  }
-@@ -562,7 +947,7 @@ static void PrintQuickSaveMenuOptions(void)
+@@ -470,6 +865,9 @@ static void PrintOthersMenuOptions(void)
+     header.f3 = 0;
+     gDungeonMenu.menuIndex = sOthersCursorId;
+     optionsCount = (gDungeon->unk644.canRecruit) ? OTHERS_COUNT : OTHERS_COUNT - 1;
++#ifdef PLATFORM_3DS
++    optionsCount++; // Cheats
++#endif
+     gDungeonMenu.currPageEntries = optionsCount;
+     gDungeonMenu.entriesPerPage = optionsCount;
+     gDungeonMenu.currPage = 0;
+@@ -503,6 +901,12 @@ static void PrintOthersMenuOptions(void)
+         }
+     }
+     PrintFormattedStringOnWindow(8, GetMenuEntryYCoord(&gDungeonMenu, currOptionId), gUnknown_80FEA50, 0, '\0');
++#ifdef PLATFORM_3DS
++    {
++        static const u8 sTextCheatsItem[] = _("Cheats");
++        PrintFormattedStringOnWindow(8, GetMenuEntryYCoord(&gDungeonMenu, currOptionId + 1), sTextCheatsItem, 0, '\0');
++    }
++#endif
+ 
+     sub_80073E0(0);
+ }
+@@ -562,7 +966,7 @@ static void PrintQuickSaveMenuOptions(void)
  static void PrintGameOptions(void)
  {
      s32 optionsCount;
@@ -2666,7 +2811,7 @@ index 0680f301..30d37e6c 100644
      WindowHeader header;
      WindowTemplates windows = {
          .id = {
-@@ -585,7 +970,7 @@ static void PrintGameOptions(void)
+@@ -585,7 +989,7 @@ static void PrintGameOptions(void)
      header.currId = 0;
      header.f3 = 0;
      gDungeonMenu.menuIndex = 0;
@@ -2675,7 +2820,7 @@ index 0680f301..30d37e6c 100644
      gDungeonMenu.currPageEntries = optionsCount;
      gDungeonMenu.entriesPerPage = optionsCount;
      gDungeonMenu.currPage = 0;
-@@ -604,14 +989,18 @@ static void PrintGameOptions(void)
+@@ -604,14 +1008,18 @@ static void PrintGameOptions(void)
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
  
@@ -2700,7 +2845,7 @@ index 0680f301..30d37e6c 100644
      sub_80073E0(0);
  }
  
-@@ -654,7 +1043,11 @@ static void PrintDungeonOptions(void)
+@@ -654,7 +1062,11 @@ static void PrintDungeonOptions(void)
      ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
      windows.id[0].width = 24;
      windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(DUNGEON_OPTIONS_COUNT, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
@@ -2712,7 +2857,7 @@ index 0680f301..30d37e6c 100644
      windows.id[0].pos.x = 2;
      DungeonShowWindows(&windows, TRUE);
      sub_80137B0(&gDungeonMenu, 0);
-@@ -663,14 +1056,18 @@ static void PrintDungeonOptions(void)
+@@ -663,14 +1075,18 @@ static void PrintDungeonOptions(void)
      y[1] = GetMenuEntryYCoord(&gDungeonMenu, 1);
      y[2] = GetMenuEntryYCoord(&gDungeonMenu, 2);
      y[3] = GetMenuEntryYCoord(&gDungeonMenu, 3);
@@ -2731,7 +2876,7 @@ index 0680f301..30d37e6c 100644
  
      if (sChangedGameOptions.dungeonSpeed != DUNGEON_SPEED_SLOW) {
          AddDoubleUnderScoreHighlight(0, 136, y[0] + 10, 21, 7);
-@@ -700,7 +1097,11 @@ static void PrintDungeonOptions(void)
+@@ -700,7 +1116,11 @@ static void PrintDungeonOptions(void)
          AddDoubleUnderScoreHighlight(0, 80, y[3] + 10, 16, 7);
      }
  
@@ -2743,7 +2888,7 @@ index 0680f301..30d37e6c 100644
  
      sub_80073E0(0);
  }
-@@ -975,6 +1376,13 @@ static void ShowChosenHintWindow(s32 hintId)
+@@ -975,6 +1395,13 @@ static void ShowChosenHintWindow(s32 hintId)
          gDungeonMenu.leftRightArrowsPos.y = ((gWindows[0].y + 1) * 8) - 2;
          sub_80073B8(0);
          PrintFormattedStringOnWindow(16 + hintId * 8, 0, gHintsNames[hintId], 0, '\0');
@@ -2757,6 +2902,236 @@ index 0680f301..30d37e6c 100644
          PrintFormattedStringOnWindow(8, 16, gHintsDescriptions[dsControls][hintId], 0, '\0');
          sub_80073E0(0);
  
+@@ -1013,3 +1440,229 @@ static void ShowChosenHintWindow(s32 hintId)
+             break;
+     }
+ }
++
++#ifdef PLATFORM_3DS
++// --- 3DS port: Others > Cheats -------------------------------------------------
++//
++// Stats and Effects, each a list of cheats (port_new_run.h: gPortCheats, each
++// Save Data's own; what they do: port_cheats.c): A turns one on or off, a
++// star beside it while on. Exp. Multiplier: A opens a list to its right,
++// Off and 2x-128x, the chosen one starred (and shown in the list).
++
++static const u8 sTextCheatsTitle[] = _("Cheats");
++static const u8 sTextCheatsStats[] = _("Stats");
++static const u8 sTextCheatsEffects[] = _("Effects");
++static const u8 sTextCheatStar[] = _("{STAR_BULLET}");
++static const u8 sTextCheatInfHP[] = _("Infinite HP");
++static const u8 sTextCheatInfPP[] = _("Infinite PP");
++static const u8 sTextCheatInfBelly[] = _("Infinite Belly");
++static const u8 sTextCheatOneHit[] = _("One-Hit KOs");
++static const u8 sTextCheatAccuracy[] = _("100% Accuracy");
++static const u8 sTextCheatExp[] = _("Exp. Multiplier");
++static const u8 sTextCheatAnyTM[] = _("Learn Any TM/HM");
++static const u8 sTextCheatRecruit[] = _("100% Recruit Rate");
++static const u8 sTextCheatXRay[] = _("Permanent X-Ray Specs");
++static const u8 sTextCheatLuminous[] = _("Permanent Luminous Orb");
++static const u8 sTextCheatNoStick[] = _("Permanent No-Stick Cap");
++static const u8 sTextCheatGoggle[] = _("Permanent Goggle Specs");
++static const u8 sTextCheatWeather[] = _("Permanent Weather Band");
++static const u8 sTextCheatTwist[] = _("Permanent Twist Band");
++static const u8 sTextCheatMobile[] = _("Permanent Mobile Scarf");
++static const u8 sTextCheatPierce[] = _("Permanent Pierce Band");
++static const u8 sTextCheatSneak[] = _("Permanent Sneak Scarf");
++static const u8 *const sCheatTexts[PORT_CHEATS] = {
++    sTextCheatInfHP, sTextCheatInfPP, sTextCheatInfBelly, sTextCheatOneHit, sTextCheatAccuracy, sTextCheatExp,
++    sTextCheatAnyTM, sTextCheatRecruit, sTextCheatXRay, sTextCheatLuminous, sTextCheatNoStick, sTextCheatGoggle,
++    sTextCheatWeather, sTextCheatTwist, sTextCheatMobile, sTextCheatPierce, sTextCheatSneak,
++};
++static const u8 sTextExpOff[] = _("Off");
++static const u8 sTextExp2[] = _("2x");
++static const u8 sTextExp4[] = _("4x");
++static const u8 sTextExp8[] = _("8x");
++static const u8 sTextExp16[] = _("16x");
++static const u8 sTextExp32[] = _("32x");
++static const u8 sTextExp64[] = _("64x");
++static const u8 sTextExp128[] = _("128x");
++static const u8 *const sExpTexts[CHEAT_EXP_MAX + 1] = {
++    sTextExpOff, sTextExp2, sTextExp4, sTextExp8, sTextExp16, sTextExp32, sTextExp64, sTextExp128,
++};
++// The lists: Stats (cheats 0-5), Effects (6 on)
++static const u8 sCheatListFirst[2] = { CHEAT_INF_HP, CHEAT_ANY_TM };
++static const u8 sCheatListCount[2] = { CHEAT_ANY_TM - CHEAT_INF_HP, PORT_CHEATS - CHEAT_ANY_TM };
++#define CHEAT_LIST_WIDTH 20
++#define CHEAT_STAR_X 144 // (the star, past the longest name)
++#define CHEAT_VALUE_X 104 // (Exp. Multiplier's choice)
++#define EXP_PANE_X 23 // (its list: to the right of the Stats window)
++#define EXP_PANE_WIDTH 6
++
++// A menu's cursor until A (its entry) or B (-1)
++static s32 CheatsMenuInput(void)
++{
++    s32 result;
++    while (TRUE) {
++        AddMenuCursorSprite(&gDungeonMenu);
++        DungeonRunFrameActions(0x24);
++        if (gRealInputs.repeated & DPAD_DOWN) {
++            PlayDungeonCursorSE(TRUE);
++            MoveMenuCursorDownWrapAround(&gDungeonMenu, TRUE);
++        }
++        if (gRealInputs.repeated & DPAD_UP) {
++            PlayDungeonCursorSE(TRUE);
++            MoveMenuCursorUpWrapAround(&gDungeonMenu, TRUE);
++        }
++        if ((gRealInputs.pressed & A_BUTTON) || gDungeonMenu.touchScreen.a_button) {
++            PlayDungeonConfirmationSE();
++            result = gDungeonMenu.menuIndex;
++            break;
++        }
++        if ((gRealInputs.pressed & B_BUTTON) || gDungeonMenu.touchScreen.b_button) {
++            PlayDungeonCancelSE();
++            result = -1;
++            break;
++        }
++    }
++    AddMenuCursorSprite(&gDungeonMenu);
++    DungeonRunFrameActions(0x24);
++    return result;
++}
++
++static void SetCheatsMenu(s32 cursor, s32 count, s32 windowId, s32 firstY)
++{
++    gDungeonMenu.menuIndex = cursor;
++    gDungeonMenu.currPageEntries = count;
++    gDungeonMenu.entriesPerPage = count;
++    gDungeonMenu.currPage = 0;
++    gDungeonMenu.pagesCount = 0;
++    gDungeonMenu.unk4 = 0;
++    gDungeonMenu.firstEntryY = firstY;
++    gDungeonMenu.leftRightArrowsPos.x = 0;
++    gDungeonMenu.leftRightArrowsPos.y = 0;
++    gDungeonMenu.unk14.x = 0;
++    gDungeonMenu.windowId = windowId;
++    ResetTouchScreenMenuInput(&gDungeonMenu.touchScreen);
++}
++
++// The Cheats window: Stats, Effects
++static void PrintCheatsWindow(s32 cursor)
++{
++    WindowHeader header;
++    WindowTemplates windows = {
++        .id = {
++            [0] = { .type = WINDOW_TYPE_WITH_HEADER, .pos = { 2, 2 }, .width = 10, .unk12 = 0, .header = &header },
++            [1] = WIN_TEMPLATE_DUMMY,
++            [2] = WIN_TEMPLATE_DUMMY,
++            [3] = WIN_TEMPLATE_DUMMY,
++        }
++    };
++
++    header.count = 1;
++    header.currId = 0;
++    header.f3 = 0;
++    header.width = 6;
++    SetCheatsMenu(cursor, 2, 0, 16);
++    windows.id[0].height = windows.id[0].totalHeight = CalcEntriesTotalHeight(2, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
++    DungeonShowWindows(&windows, TRUE);
++    sub_80137B0(&gDungeonMenu, 0);
++    sub_80073B8(0);
++    PrintFormattedStringOnWindow(16, 0, sTextCheatsTitle, 0, '\0');
++    PrintFormattedStringOnWindow(8, GetMenuEntryYCoord(&gDungeonMenu, 0), sTextCheatsStats, 0, '\0');
++    PrintFormattedStringOnWindow(8, GetMenuEntryYCoord(&gDungeonMenu, 1), sTextCheatsEffects, 0, '\0');
++    sub_80073E0(0);
++}
++
++// A list of cheats (and, open, Exp. Multiplier's choices: the cursor there)
++static void PrintCheatList(s32 list, s32 cursor, bool8 expPane, s32 expCursor)
++{
++    s32 i, count = sCheatListCount[list];
++    WindowHeader header;
++    WindowTemplates windows = {
++        .id = {
++            [0] = { .type = WINDOW_TYPE_WITH_HEADER, .pos = { 2, 2 }, .width = CHEAT_LIST_WIDTH, .unk12 = 0, .header = &header },
++            [1] = WIN_TEMPLATE_DUMMY,
++            [2] = WIN_TEMPLATE_DUMMY,
++            [3] = WIN_TEMPLATE_DUMMY,
++        }
++    };
++
++    header.count = 1;
++    header.currId = 0;
++    header.f3 = 0;
++    header.width = 6;
++    // (Effects: eleven, closer together in the tallest window)
++    windows.id[0].height = windows.id[0].totalHeight = count > 8 ? 16 : CalcEntriesTotalHeight(count, DEFAULT_MENU_ENTRY_HEIGHT) + 2;
++    if (expPane) {
++        windows.id[1].type = WINDOW_TYPE_NORMAL;
++        windows.id[1].pos.x = EXP_PANE_X;
++        windows.id[1].pos.y = 2;
++        windows.id[1].width = EXP_PANE_WIDTH;
++        windows.id[1].height = windows.id[1].totalHeight = CalcEntriesTotalHeight(CHEAT_EXP_MAX + 1, DEFAULT_MENU_ENTRY_HEIGHT);
++        windows.id[1].unk12 = 0;
++        windows.id[1].header = NULL;
++    }
++    SetCheatsMenu(cursor, count, 0, 16);
++    DungeonShowWindows(&windows, TRUE);
++    sub_80137B0(&gDungeonMenu, 0);
++    sub_80073B8(0);
++    PrintFormattedStringOnWindow(16, 0, list == 0 ? sTextCheatsStats : sTextCheatsEffects, 0, '\0');
++    for (i = 0; i < count; i++) {
++        s32 cheat = sCheatListFirst[list] + i, y = GetMenuEntryYCoord(&gDungeonMenu, i);
++        PrintFormattedStringOnWindow(8, y, sCheatTexts[cheat], 0, '\0');
++        if (cheat == CHEAT_EXP)
++            PrintFormattedStringOnWindow(CHEAT_VALUE_X, y, sExpTexts[gPortCheats[cheat] <= CHEAT_EXP_MAX ? gPortCheats[cheat] : 0], 0, '\0');
++        if (gPortCheats[cheat])
++            PrintFormattedStringOnWindow(CHEAT_STAR_X, y, sTextCheatStar, 0, '\0');
++    }
++    sub_80073E0(0);
++    if (expPane) {
++        SetCheatsMenu(expCursor, CHEAT_EXP_MAX + 1, 1, 0);
++        sub_80137B0(&gDungeonMenu, 0);
++        sub_80073B8(1);
++        for (i = 0; i <= CHEAT_EXP_MAX; i++) {
++            s32 y = GetMenuEntryYCoord(&gDungeonMenu, i);
++            PrintFormattedStringOnWindow(8, y, sExpTexts[i], 1, '\0');
++            if (gPortCheats[CHEAT_EXP] == i)
++                PrintFormattedStringOnWindow(32, y, sTextCheatStar, 1, '\0');
++        }
++        sub_80073E0(1);
++    }
++}
++
++static void ShowCheatList(s32 list)
++{
++    s32 cursor = 0;
++    while (TRUE) {
++        s32 entry, cheat;
++        PrintCheatList(list, cursor, FALSE, 0);
++        entry = CheatsMenuInput();
++        if (entry < 0)
++            break;
++        cursor = entry;
++        cheat = sCheatListFirst[list] + entry;
++        if (cheat == CHEAT_EXP) {
++            s32 value = gPortCheats[CHEAT_EXP] <= CHEAT_EXP_MAX ? gPortCheats[CHEAT_EXP] : 0;
++            PrintCheatList(list, cursor, TRUE, value);
++            value = CheatsMenuInput();
++            if (value >= 0)
++                gPortCheats[CHEAT_EXP] = (u8)value;
++        }
++        else
++            gPortCheats[cheat] = !gPortCheats[cheat];
++    }
++}
++
++static void ShowCheatsMenu(void)
++{
++    s32 cursor = 0;
++    while (TRUE) {
++        s32 entry;
++        PrintCheatsWindow(cursor);
++        entry = CheatsMenuInput();
++        if (entry < 0)
++            break;
++        cursor = entry;
++        ShowCheatList(entry);
++    }
++    Port_CheatsSave(); // (this Save Data's, in config.ini)
++    PortCheats_Turn(); // (at once)
++}
++#endif
 diff --git a/src/dungeon_menu_team.c b/src/dungeon_menu_team.c
 index ba1fadca..cc502bb4 100644
 --- a/src/dungeon_menu_team.c
@@ -2892,10 +3267,77 @@ index f2a3889a..fd219010 100644
  
  void TargetTileInFront(Entity *pokemon)
 diff --git a/src/dungeon_mon_recruit.c b/src/dungeon_mon_recruit.c
-index ed474c7f..f8ac8b26 100644
+index ed474c7f..fadc716f 100644
 --- a/src/dungeon_mon_recruit.c
 +++ b/src/dungeon_mon_recruit.c
-@@ -271,6 +271,9 @@ bool8 MonsterJoinSequence_Async(Entity *entity1, Entity *entity2, struct unkStru
+@@ -1,4 +1,5 @@
+ #include "global.h"
++#include "port_cheats.h"
+ #include "globaldata.h"
+ #include "dungeon_mon_recruit.h"
+ #include "constants/dungeon_exit.h"
+@@ -45,6 +46,13 @@ bool8 TryRecruitMonster(Entity *attacker, Entity *target)
+     s32 foundIndex = -1;
+     s32 size = GetBodySize(targetInfo->apparentID);
+ 
++#ifdef PLATFORM_3DS
++    // Others > Cheats: 100% Recruit Rate: whatever the dungeon or the friend
++    // areas allow, and always (the rest as ever: the legendaries once, next
++    // to the leader, seen, not the client, room on the team)
++    bool8 cheat = gPortCheats[CHEAT_RECRUIT] != 0;
++    if (!cheat)
++#endif
+     if (gDungeon->fixedRoomNumber != FIXED_ROOM_FROSTY_GROTTO_ARTICUNO
+         && gDungeon->fixedRoomNumber != FIXED_ROOM_MT_BLAZE_PEAK_MOLTRES
+         && gDungeon->fixedRoomNumber != FIXED_ROOM_WESTERN_CAVE_MEWTWO
+@@ -65,6 +73,9 @@ bool8 TryRecruitMonster(Entity *attacker, Entity *target)
+         }
+     }
+ 
++#ifdef PLATFORM_3DS
++    if (!cheat)
++#endif
+     if (gDungeon->unk644.unk19 != 0)
+         return FALSE;
+ 
+@@ -87,6 +98,15 @@ bool8 TryRecruitMonster(Entity *attacker, Entity *target)
+         return FALSE;
+     }
+ 
++#ifdef PLATFORM_3DS
++    if (cheat) {
++        // (still never these: they can't join in this game at all)
++        if (targetInfo->id == MONSTER_LATIAS || targetInfo->id == MONSTER_LATIOS || targetInfo->id == MONSTER_DEOXYS_ATTACK
++            || targetInfo->id == MONSTER_DEOXYS_DEFENSE || targetInfo->id == MONSTER_DEOXYS_SPEED)
++            return FALSE;
++    }
++    else
++#endif
+     if (!IsMonsterRecruitable(targetInfo->id))
+         return FALSE;
+     if (abs((attacker->pos).x - (target->pos).x) >= 2 || abs((attacker->pos).y - (target->pos).y) >= 2)
+@@ -101,6 +121,12 @@ bool8 TryRecruitMonster(Entity *attacker, Entity *target)
+     sub_806F910();
+     rand = DungeonRandInt(1000);
+     recruitRate = GetRecruitRate(targetInfo->id);
++#ifdef PLATFORM_3DS
++    if (cheat)
++        recruitRate = 1000; // (always)
++    else
++#endif
++    {
+     if (recruitRate == -999)
+         return FALSE;
+ 
+@@ -108,6 +134,7 @@ bool8 TryRecruitMonster(Entity *attacker, Entity *target)
+         recruitRate += gFriendBowRecruitRateUpValue;
+ 
+     recruitRate += gRecruitRateByLevel[attackerInfo->level];
++    }
+     if (rand >= recruitRate)
+         return FALSE;
+ 
+@@ -271,6 +298,9 @@ bool8 MonsterJoinSequence_Async(Entity *entity1, Entity *entity2, struct unkStru
      dungeonMon->recruitedPokemonId = -1;
      dungeonMon->unkC = pokeIndex;
      dungeonMon->speciesNum = param_3->id;
@@ -2905,7 +3347,7 @@ index ed474c7f..f8ac8b26 100644
      dungeonMon->dungeonLocation = gDungeon->unk644.dungeonLocation;
      dungeonMon->unk10 = param_3->HP;
      dungeonMon->unk12 = param_3->HP;
-@@ -396,6 +399,9 @@ bool8 HandleSpecialEntityJoinSequence(Entity *entity1,Entity *entity2,Entity **e
+@@ -396,6 +426,9 @@ bool8 HandleSpecialEntityJoinSequence(Entity *entity1,Entity *entity2,Entity **e
      dungeonMon->recruitedPokemonId = -1;
      dungeonMon->unkC = index;
      dungeonMon->speciesNum = local_74.id;
@@ -2998,6 +3440,27 @@ index ffca60be..91004b13 100644
          struct unkStruct_202ED28 *spriteStructPtr = &gUnknown_202ED28[var_34][shadowIndex];
          if (entInfo->unk156 != 0) {
              SpriteSetX(&spriteStructPtr->sprite, xSprite + spriteStructPtr->pos.x);
+diff --git a/src/dungeon_move_util.c b/src/dungeon_move_util.c
+index 1ceb3986..9ea89213 100644
+--- a/src/dungeon_move_util.c
++++ b/src/dungeon_move_util.c
+@@ -1,4 +1,5 @@
+ #include "global.h"
++#include "port_cheats.h"
+ #include "globaldata.h"
+ #include "dungeon_move_util.h"
+ #include "constants/ability.h"
+@@ -746,6 +747,10 @@ bool8 AccuracyCalc(Entity *attacker, Entity *target, Move *move, s32 accuracyTyp
+ 
+     if (selfAlwaysHits && attacker == target)
+         return TRUE;
++#ifdef PLATFORM_3DS
++    if (gPortCheats[CHEAT_ACCURACY] && PortCheats_TeamMember(attacker)) // (Others > Cheats: 100% Accuracy)
++        return TRUE;
++#endif
+     if (move->id == MOVE_REGULAR_ATTACK && IqSkillIsEnabled(attacker, IQ_SURE_HIT_ATTACKER))
+         return TRUE;
+     if (attackerInfo->sureShotClassStatus.status == STATUS_SURE_SHOT)
 diff --git a/src/dungeon_name_banner.c b/src/dungeon_name_banner.c
 index 7a4e7b57..97d66197 100644
 --- a/src/dungeon_name_banner.c
@@ -3305,7 +3768,7 @@ index e5de5d56..c5591c72 100644
  const u8 *const gUnknown_80FE764 = _("Speed{MOVE_X_POSITION_BY_80}Slow{MOVE_X_POSITION_BY_136}Fast");
  const u8 *const gUnknown_80FE788 = _("Far-off pals{MOVE_X_POSITION_BY_80}Self{MOVE_X_POSITION_BY_136}Look");
 diff --git a/src/dungeon_tilemap.c b/src/dungeon_tilemap.c
-index 80a7d04f..71ab1be4 100644
+index 80a7d04f..ff6b0b99 100644
 --- a/src/dungeon_tilemap.c
 +++ b/src/dungeon_tilemap.c
 @@ -33,6 +33,12 @@
@@ -3366,7 +3829,7 @@ index 80a7d04f..71ab1be4 100644
  }
  
  void sub_803F9CC(void)
-@@ -404,6 +420,40 @@ void sub_803F9CC(void)
+@@ -404,6 +420,42 @@ void sub_803F9CC(void)
  
  IWRAM_DATA static u32 gUnknown_3001018[96] = {0};
  
@@ -3380,6 +3843,8 @@ index 80a7d04f..71ab1be4 100644
 +    u32 sp[9] = {0, 0xF, 0xFF, 0xFFF, 0xFFFF, 0xFFFFF, 0xFFFFFF, 0xFFFFFFF, 0xFFFFFFFF};
 +    u32 r10 = 0x22222222, r9 = a2 ? 0x44444444 : 0x55555555;
 +
++    if (hp > maxHp) // (HP over the max: Others > Cheats, Infinite HP)
++        hp = maxHp;
 +    if (maxHp >= PORT_HUD_BAR_MAX) {
 +        hp = (hp * PORT_HUD_BAR_MAX) / maxHp;
 +        maxHp = PORT_HUD_BAR_MAX;
@@ -3407,11 +3872,13 @@ index 80a7d04f..71ab1be4 100644
  static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
  {
      s32 i;
-@@ -423,6 +473,9 @@ static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
+@@ -423,6 +475,11 @@ static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
  
      strPtr->unk3E = a0;
      strPtr->unk40 = a1;
 +#ifdef PLATFORM_3DS
++    if (a0 > a1) // (HP over the max: Others > Cheats, Infinite HP)
++        a0 = a1;
 +    Port_DrawLongHpBar(a0, a1, a2);
 +#endif
      r5 = a1;
@@ -7756,11 +8223,12 @@ index 926d28d1..684b3d20 100644
  {
      RunPaletteFadeFunctions();
 diff --git a/src/pokemon.c b/src/pokemon.c
-index 3c5ab6ee..160aa6c1 100644
+index 3c5ab6ee..f05fbdb9 100644
 --- a/src/pokemon.c
 +++ b/src/pokemon.c
-@@ -1,4 +1,8 @@
+@@ -1,4 +1,9 @@
  #include "global.h"
++#include "port_cheats.h"
 +#ifdef PLATFORM_3DS
 +#include "port_new_run.h"
 +#include "random.h"
@@ -7768,7 +8236,7 @@ index 3c5ab6ee..160aa6c1 100644
  #include "globaldata.h"
  #include "pokemon.h"
  #include "constants/colors.h"
-@@ -68,6 +72,16 @@ void InitializeRecruitedPokemon(void)
+@@ -68,6 +73,16 @@ void InitializeRecruitedPokemon(void)
      }
  }
  
@@ -7785,7 +8253,7 @@ index 3c5ab6ee..160aa6c1 100644
  void CreateLeaderPartnerData(s16 _species, bool32 _isLeader, u8* name)
  {
       Pokemon pokemon;
-@@ -78,6 +92,9 @@ void CreateLeaderPartnerData(s16 _species, bool32 _isLeader, u8* name)
+@@ -78,6 +93,9 @@ void CreateLeaderPartnerData(s16 _species, bool32 _isLeader, u8* name)
       bool8 isLeader = _isLeader;
  
       pokemon.flags = POKEMON_FLAG_EXISTS | POKEMON_FLAG_ON_TEAM;
@@ -7795,7 +8263,7 @@ index 3c5ab6ee..160aa6c1 100644
       if (isLeader) {
           pokemon.isTeamLeader = TRUE;
           pokemon.dungeonLocation.id = DUNGEON_JOIN_LOCATION_LEADER;
-@@ -137,6 +154,9 @@ void CreateLevel1Pokemon(Pokemon *pokemon, s16 _species, u8* name, u32 _itemID,
+@@ -137,6 +155,9 @@ void CreateLevel1Pokemon(Pokemon *pokemon, s16 _species, u8* name, u32 _itemID,
      u8 itemID = _itemID;
  
      pokemon->flags = POKEMON_FLAG_EXISTS;
@@ -7805,7 +8273,7 @@ index 3c5ab6ee..160aa6c1 100644
      pokemon->isTeamLeader = FALSE;
      pokemon->level = 1;
      pokemon->pokeHP = GetBaseHP(species);
-@@ -200,6 +220,9 @@ void ConvertStoryMonToPokemon(Pokemon *dst, const struct StoryMonData *src)
+@@ -200,6 +221,9 @@ void ConvertStoryMonToPokemon(Pokemon *dst, const struct StoryMonData *src)
      s32 i;
  
      dst->flags = POKEMON_FLAG_EXISTS;
@@ -7815,7 +8283,7 @@ index 3c5ab6ee..160aa6c1 100644
      dst->isTeamLeader = FALSE;
      dst->level = src->level;
      dst->pokeHP = src->pokeHP;
-@@ -278,6 +301,9 @@ Pokemon *TryAddLevel1PokemonToRecruited(s32 species, u8 *name, u32 _itemID, cons
+@@ -278,6 +302,9 @@ Pokemon *TryAddLevel1PokemonToRecruited(s32 species, u8 *name, u32 _itemID, cons
      Pokemon pokemon;
  
      CreateLevel1Pokemon(&pokemon, species, name, (u8)_itemID, location, moveID);
@@ -7825,7 +8293,7 @@ index 3c5ab6ee..160aa6c1 100644
      return TryAddPokemonToRecruited(&pokemon);
  }
  
-@@ -967,6 +993,9 @@ void PokemonToDungeonMon(DungeonMon *dst, Pokemon *src, s32 recruitedPokemonId)
+@@ -967,6 +994,9 @@ void PokemonToDungeonMon(DungeonMon *dst, Pokemon *src, s32 recruitedPokemonId)
  
      dst->belly = IntToFixedPoint(100);
      dst->maxBelly = IntToFixedPoint(100);
@@ -7835,7 +8303,7 @@ index 3c5ab6ee..160aa6c1 100644
  }
  
  void DungeonMonToRecruitedPokemon(s32 id, DungeonMon* src)
-@@ -1006,6 +1035,9 @@ void DungeonMonToPokemon(Pokemon* dst, DungeonMon* src)
+@@ -1006,6 +1036,9 @@ void DungeonMonToPokemon(Pokemon* dst, DungeonMon* src)
      else {
          dst->heldItem.id = ITEM_NOTHING;
      }
@@ -7845,6 +8313,16 @@ index 3c5ab6ee..160aa6c1 100644
  }
  
  void sub_808DFDC(s32 a1, DungeonMon* a2)
+@@ -1114,6 +1147,9 @@ bool8 CanMonLearnMove(u16 moveID, s16 _species)
+ 
+   if (species == MONSTER_DECOY) return 0;
+   if (species == MONSTER_NONE) return 0;
++#ifdef PLATFORM_3DS
++  if (gPortCheats[CHEAT_ANY_TM] && moveID != MOVE_STRUGGLE) return 1; // (Others > Cheats: Learn Any TM/HM)
++#endif
+   if (species == MONSTER_MUNCHLAX) return 0;
+   if (moveID == MOVE_STRUGGLE) return 0;
+ 
 diff --git a/src/pokemon_3.c b/src/pokemon_3.c
 index 96874793..2aa20f5a 100644
 --- a/src/pokemon_3.c
@@ -7945,6 +8423,130 @@ index 96874793..2aa20f5a 100644
      FinishBitSerializer(&backup);
      return backup.count;
  }
+diff --git a/src/port_cheats.c b/src/port_cheats.c
+new file mode 100644
+index 00000000..ed3fc260
+--- /dev/null
++++ b/src/port_cheats.c
+@@ -0,0 +1,118 @@
++// 3DS port: Others > Cheats (in dungeons). The menu is in
++// dungeon_menu_others.c; the settings (gPortCheats, each Save Data's own) in
++// port/core/options.c. What they do, here and where the game asks:
++//   Infinite HP      the team's HP 999, kept there (PortCheats_Turn; and
++//                    after each hit, dungeon_damage.c)
++//   Infinite PP      the team's moves' PP 99, kept there (PortCheats_Turn)
++//   Infinite Belly   the leader's Belly 200, kept there (PortCheats_Turn)
++//   One-Hit KOs      the team's damaging moves do 1000 (CalcDamage)
++//   100% Accuracy    the team's moves never miss (AccuracyCalc)
++//   Exp. Multiplier  the team's Exp. Points 2x-128x (AddExpPoints)
++//   Learn Any TM/HM  any Pokémon can learn any TM or HM (CanMonLearnMove)
++//   100% Recruit Rate  a Pokémon the leader defeats always asks to join,
++//                    whether or not its friend area is had or the dungeon
++//                    lets Pokémon join (TryRecruitMonster)
++//   Permanent X-Ray Specs, No-Stick Cap, Goggle Specs, Weather Band, Twist
++//                    Band, Mobile Scarf, Pierce Band, Sneak Scarf: the team
++//                    as if each held one (HasHeldItem)
++//   Permanent Luminous Orb  each floor's map shown, as the orb shows it
++//                    (PortCheats_Turn)
++#include "global.h"
++#include "globaldata.h"
++#include "constants/item.h"
++#include "dungeon_map.h"
++#include "dungeon_map_access.h"
++#include "dungeon_tilemap.h"
++#include "dungeon_util.h"
++#include "moves.h"
++#include "number_util.h"
++#include "port_new_run.h"
++#include "structs/str_dungeon.h"
++
++#ifdef PLATFORM_3DS
++
++bool8 PortCheats_TeamMember(Entity *entity)
++{
++    return entity != NULL && EntityIsValid(entity) && GetEntityType(entity) == ENTITY_MONSTER
++        && !GetEntInfo(entity)->isNotTeamMember;
++}
++
++// HasHeldItem: the team as if holding the cheats' items
++bool8 PortCheats_HeldItem(Entity *entity, u8 id)
++{
++    s32 cheat;
++    switch (id) {
++        case ITEM_X_RAY_SPECS: cheat = CHEAT_XRAY; break;
++        case ITEM_NOSTICK_CAP: cheat = CHEAT_NOSTICK; break;
++        case ITEM_GOGGLE_SPECS: cheat = CHEAT_GOGGLE; break;
++        case ITEM_WEATHER_BAND: cheat = CHEAT_WEATHER; break;
++        case ITEM_TWIST_BAND: cheat = CHEAT_TWIST; break;
++        case ITEM_MOBILE_SCARF: cheat = CHEAT_MOBILE; break;
++        case ITEM_PIERCE_BAND: cheat = CHEAT_PIERCE; break;
++        case ITEM_SNEAK_SCARF: cheat = CHEAT_SNEAK; break;
++        default: return FALSE;
++    }
++    return gPortCheats[cheat] && PortCheats_TeamMember(entity);
++}
++
++// AddExpPoints: a team member's Exp. Points multiplied
++s32 PortCheats_Exp(Entity *receiver, s32 exp)
++{
++    s32 shift = gPortCheats[CHEAT_EXP];
++    if (shift <= 0 || shift > CHEAT_EXP_MAX || exp <= 0 || !PortCheats_TeamMember(receiver))
++        return exp;
++    if (exp > (9999999 >> shift))
++        return 9999999;
++    return exp << shift;
++}
++
++// Infinite HP: after a hit on a team member (dungeon_damage.c)
++void PortCheats_KeepHP(Entity *target)
++{
++    if (gPortCheats[CHEAT_INF_HP] && PortCheats_TeamMember(target))
++        GetEntInfo(target)->HP = 999;
++}
++
++static bool8 sXRayShown; // (Permanent X-Ray Specs: the camera made again when it changes)
++
++// Every turn (run_dungeon.c), and when the Cheats menu closes
++void PortCheats_Turn(void)
++{
++    s32 i, k;
++
++    if (gDungeon == NULL)
++        return;
++    for (i = 0; i < MAX_TEAM_MEMBERS; i++) {
++        Entity *e = gDungeon->teamPokemon[i];
++        EntityInfo *info;
++        if (!PortCheats_TeamMember(e))
++            continue;
++        info = GetEntInfo(e);
++        if (gPortCheats[CHEAT_INF_HP] && info->HP > 0)
++            info->HP = 999;
++        if (gPortCheats[CHEAT_INF_PP])
++            for (k = 0; k < MAX_MON_MOVES; k++)
++                if (MoveFlagExists(&info->moves.moves[k]))
++                    info->moves.moves[k].PP = 99;
++        if (gPortCheats[CHEAT_INF_BELLY] && info->isTeamLeader)
++            info->belly = IntToFixedPoint(200);
++    }
++    // Permanent Luminous Orb: as the orb shows the floor (no message)
++    if (gPortCheats[CHEAT_LUMINOUS] && !gDungeon->unk181e8.allTilesRevealed) {
++        s32 x, y;
++        gDungeon->unk181e8.allTilesRevealed = TRUE;
++        for (y = 0; y < DUNGEON_MAX_SIZE_Y; y++)
++            for (x = 0; x < DUNGEON_MAX_SIZE_X; x++)
++                GetTileMut(x, y)->spawnOrVisibilityFlags.visibility |= VISIBILITY_FLAG_REVEALED;
++        UpdateCamera(0);
++        UpdateTrapsVisibility();
++        UpdateMinimap();
++    }
++    if (sXRayShown != (gPortCheats[CHEAT_XRAY] != 0)) {
++        sXRayShown = gPortCheats[CHEAT_XRAY] != 0;
++        UpdateCamera(1);
++        UpdateMinimap();
++    }
++}
++
++#endif
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
 index 00000000..23e8ad99
@@ -8866,10 +9468,16 @@ index e6872a26..c6368b99 100644
  
      REG_IME = 0;
 diff --git a/src/run_dungeon.c b/src/run_dungeon.c
-index f6108c72..c1f0a5b0 100644
+index f6108c72..5b90a3a3 100644
 --- a/src/run_dungeon.c
 +++ b/src/run_dungeon.c
-@@ -65,6 +65,20 @@
+@@ -1,4 +1,5 @@
+ #include "global.h"
++#include "port_cheats.h"
+ #include "globaldata.h"
+ #include "run_dungeon.h"
+ #include "constants/dungeon.h"
+@@ -65,6 +66,20 @@
  #include "adventure_info.h"
  #include "decompress_sir.h"
  
@@ -8890,7 +9498,7 @@ index f6108c72..c1f0a5b0 100644
  EWRAM_INIT struct UnkStruct_203B414 *gUnknown_203B414 = NULL;
  EWRAM_INIT Dungeon *gDungeon = NULL;
  static EWRAM_INIT u8 *gSerializedData_203B41C = NULL;
-@@ -390,6 +404,13 @@ void RunDungeon_Async(DungeonSetupStruct *setupPtr)
+@@ -390,6 +405,13 @@ void RunDungeon_Async(DungeonSetupStruct *setupPtr)
              sub_806AB2C();
          }
  
@@ -8904,7 +9512,17 @@ index f6108c72..c1f0a5b0 100644
          if (gDungeon->unk7 == 0) {
              sub_803E748();
          }
-@@ -495,6 +516,18 @@ void RunDungeon_Async(DungeonSetupStruct *setupPtr)
+@@ -456,6 +478,9 @@ void RunDungeon_Async(DungeonSetupStruct *setupPtr)
+             gDungeon->unk181e8.unk18218 = 0;
+             gDungeon->unk181e8.unk18219 = 1;
+             do {
++#ifdef PLATFORM_3DS
++                PortCheats_Turn(); // (Others > Cheats)
++#endif
+                 RunFractionalTurn_Async(param);
+                 param = FALSE;
+             } while (!IsFloorOver());
+@@ -495,6 +520,18 @@ void RunDungeon_Async(DungeonSetupStruct *setupPtr)
          }
  
          DungeonWaitFrames_Async(4, 0x4F);

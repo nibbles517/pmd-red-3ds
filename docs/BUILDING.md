@@ -145,3 +145,14 @@ ROM's data they stay in `build/` (never committed); without them the menu
 looks as on the GBA. On the title, Graphics Options changes take effect only
 when it is left: "Changes saved.", then the menu fades out and back in with
 them.
+
+### Cheats
+
+In dungeons, Others > Cheats has two lists, Stats (Infinite HP, PP and
+Belly, One-Hit KOs, 100% Accuracy, Exp. Multiplier) and Effects (Learn Any
+TM/HM, 100% Recruit Rate, and the Permanent items: X-Ray Specs, Luminous Orb,
+No-Stick Cap, Goggle Specs, Weather Band, Twist Band, Mobile Scarf, Pierce
+Band, Sneak Scarf). A turns one on or off (a star while on). They are each
+Save Data's own, kept in `config.ini` under its `[Save Data N]` section
+(`Cheat: <name> = On/Off`; Exp. Multiplier `Off`, `2x` to `128x`). What each
+does: build/upstream/src/port_cheats.c.
