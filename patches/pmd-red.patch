@@ -8736,7 +8736,7 @@ index e6872a26..c6368b99 100644
  
      REG_IME = 0;
 diff --git a/src/run_dungeon.c b/src/run_dungeon.c
-index f6108c72..60ff6c90 100644
+index f6108c72..c1f0a5b0 100644
 --- a/src/run_dungeon.c
 +++ b/src/run_dungeon.c
 @@ -65,6 +65,20 @@
@@ -8773,6 +8773,25 @@ index f6108c72..60ff6c90 100644
 +#endif
          if (gDungeon->unk7 == 0) {
              sub_803E748();
+         }
+@@ -495,6 +516,18 @@ void RunDungeon_Async(DungeonSetupStruct *setupPtr)
+         }
+ 
+         DungeonWaitFrames_Async(4, 0x4F);
++#ifdef PLATFORM_3DS
++        // The dungeon is over (not another floor: as decided below): the
++        // port's second screen fades out with this floor and stays black
++        // through the results, to the town (or the title).
++        if (gDungeon->unk3 != 0 || gDungeon->unk644.unk10 == 1 || gDungeon->unk11 != 0
++            || (gDungeon->unk644.missionKind == DUNGEON_MISSION_OUTONRESCUE && GetFloorType() == FLOOR_TYPE_RESCUE
++                && gDungeon->unk644.unk10 == 2)
++            || gDungeon->unk644.dungeonLocation.floor + 1 >= gDungeon->unk1CEC8) {
++            void Port_SubScreenDungeonOver(void);
++            Port_SubScreenDungeonOver();
++        }
++#endif
+         if (gDungeon->unk7 == 0) {
+             sub_803E830();
          }
 diff --git a/src/save.c b/src/save.c
 index ee2ca650..032da776 100644

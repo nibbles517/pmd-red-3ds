@@ -1887,6 +1887,8 @@ static bool8 DrawWorldMap(void)
 //   the town, black while the map is up;
 // - entering a dungeon: fades out with the town, black on the world map and
 //   the dungeon's name banner, fades in with the first floor;
+// - the end of a dungeon (cleared, escaped, fainted, quicksaved): fades out
+//   with its last floor, black through the results, fades in with the town;
 // - closing the dungeon results window: cuts to black with the main screen,
 //   fades in with the town;
 // - in the intro's scenes and on the title menu, it fades in and out with
@@ -1898,6 +1900,7 @@ enum {
     TR_FRIEND_MAP, // the friend areas map is up
     TR_DUNGEON,    // on the way into a dungeon
     TR_CUT,        // the results window was closed; still in the dungeon
+    TR_OVER,       // the dungeon is over: its last floor fading out
     TR_TOWN_IN,    // following the town's fade in
 };
 static int sTransition;
@@ -1905,6 +1908,13 @@ static int sTransition;
 void Port_SubScreenCutToBlack(void)
 {
     sTransition = TR_CUT;
+}
+
+static bool8 sOverBlack; // (TR_OVER: the floor went)
+void Port_SubScreenDungeonOver(void) // (run_dungeon.c)
+{
+    sTransition = TR_OVER;
+    sOverBlack = FALSE;
 }
 
 static int GroundLevel(void) { return Port_GroundBrightness(); } // 0-0x100
@@ -2000,6 +2010,23 @@ static int TransitionBrightness(void)
         case TR_CUT:
             if (gDungeon != NULL)
                 return 0;
+            sTransition = TR_TOWN_IN;
+            break;
+        case TR_OVER:
+            if (gDungeon != NULL) {
+                // Following the floor's fade (gUnknown_203B40C: the floor
+                // is up), then black. (A floor up again: another floor
+                // after all, faded in as on the way into a dungeon.)
+                if (!gUnknown_203B40C) {
+                    sOverBlack = TRUE;
+                    return 0;
+                }
+                if (sOverBlack) {
+                    sTransition = TR_DUNGEON;
+                    return gDungeonBrightness * 0x100 / 31;
+                }
+                return gDungeonBrightness < 31 ? gDungeonBrightness * 0x100 / 31 : 0x100;
+            }
             sTransition = TR_TOWN_IN;
             break;
     }
