@@ -906,7 +906,7 @@ static bool8 DrawTeamPanel(void)
             sBoxX0 = W; sBoxY0 = H; sBoxX1 = 0; sBoxY1 = 0;
             sClipX0 = sClipY0 = sClipX1 = sClipY1 = 0;
             if (row->used) {
-                DrawRowSprite(row, 23, y0 + 41 + ROW_EXTRA); // feet on the middle of the floor
+                DrawRowSprite(row, 23, y0 + 33 + ROW_EXTRA); // feet on the middle of the floor (8 up)
                 if (FIT)
                     DrawRowSymbols(row, y0);
             }
@@ -940,7 +940,7 @@ static bool8 DrawTeamPanel(void)
         const int *b = sSprBox[i];
         if (!sRows[i].used || b[0] >= b[2] || b[2] <= area[0] || b[0] >= area[2] || b[3] <= area[1] || b[1] >= area[3])
             continue;
-        DrawRowSprite(&sRows[i], 23, i * ROW_H + 41 + ROW_EXTRA);
+        DrawRowSprite(&sRows[i], 23, i * ROW_H + 33 + ROW_EXTRA);
         if (FIT)
             DrawRowSymbols(&sRows[i], i * ROW_H);
         drawn = TRUE;

@@ -5715,7 +5715,7 @@ index aeeb69ed..8d2fd375 100644
  
      a0->unk26 = 0;
 diff --git a/src/music.c b/src/music.c
-index a5a58dec..96fea30c 100644
+index a5a58dec..f7df7f17 100644
 --- a/src/music.c
 +++ b/src/music.c
 @@ -3,6 +3,11 @@
@@ -5740,7 +5740,7 @@ index a5a58dec..96fea30c 100644
  
      if (sFanfareMusicPlayerState != 0) {
          switch (sFanfareMusicPlayerState) {
-@@ -651,6 +659,178 @@ void UpdateSound(void)
+@@ -651,6 +659,181 @@ void UpdateSound(void)
      }
  }
  
@@ -5910,8 +5910,11 @@ index a5a58dec..96fea30c 100644
 +    Port_MusicSlot(0, bgm, TRUE, !PlayerAudible(&gMPlayInfo_BGM), PlayerVolume(&gMPlayInfo_BGM));
 +    if (gPortMatchBgm >= 0) // Sound Effect Matching: a song of the player's choice under the effects
 +        Port_MusicSlot(0, gPortMatchBgm, TRUE, FALSE, 64);
-+    if (sFanfareMusicPlayerState != FANFARE_PLAYER_STATE_PLAYING)
-+        fanfare = -1; // (once the GBA player plays it)
++    // (once the GBA player plays it: from FANFARE_PLAYER_STATE_PLAYING, and
++    // on through state 4, which waits for it to end before the background
++    // music comes back; earlier it only played the one frame before then)
++    if (sFanfareMusicPlayerState != FANFARE_PLAYER_STATE_PLAYING && sFanfareMusicPlayerState != 4)
++        fanfare = -1;
 +    Port_MusicSlot(1, fanfare, FALSE, FALSE, PlayerVolume(&gMPlayInfo_Fanfare));
 +}
 +#endif
