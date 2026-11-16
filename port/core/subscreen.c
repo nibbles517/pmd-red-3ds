@@ -105,8 +105,18 @@ bool8 PortShiny_SlotColors(s32 slot, u16 *out); // port_shiny.c: a shiny's colou
 
 // The colours of OBJ palette pal as the game set them (the main screen's
 // fades and flashes do not reach the second screen).
+static bool8 LoadPalet(void);
+static u16 sPalet[256];
+// An item's OBJ palette: from "palet", as the dungeon loads it (the items
+// share the monsters' palettes). (Port_PaletteColor reads the ground's
+// palette buffer, which the dungeon doesn't keep: whatever the last place
+// left there, black after some.)
 static void ObjPalette(int pal, u16 *out)
 {
+    if ((pal & 15) < 15 && LoadPalet()) {
+        memcpy(out, &sPalet[(pal & 15) * 16], 16 * sizeof(u16));
+        return;
+    }
     for (int i = 0; i < 16; i++)
         out[i] = Port_PaletteColor(256 + (pal & 15) * 16 + i) & 0x7FFF;
 }
@@ -376,7 +386,6 @@ static const void *FindFile(const FileArchive *arc, const char *name);
 // Monster palettes, as the game sets them in OBJ palette RAM from "palet"
 // (GetPokemonOverworldPalette picks one per species). Read from the file, so
 // the screen fades and colour effects of the main screen don't reach them.
-static u16 sPalet[256];
 static bool8 sPaletLoaded;
 
 static bool8 LoadPalet(void)
