@@ -72,6 +72,21 @@ $(CORE_OBJ)/options.o $(CORE_OBJ)/subscreen.o: $(CORE_OBJ)/%.o: port/core/%.c po
 
 PORT_OBJS := $(CORE_SRCS:port/core/%.c=$(CORE_OBJ)/%.o) $(NDSMUSIC_OBJS) $(CORE_OBJ)/sound.o $(CORE_OBJ)/options.o $(CORE_OBJ)/subscreen.o $(CORE_OBJ)/m4a_1.o
 
+# The title menu's backgrounds in the sizes past GBA (port_view.h): the PNGs
+# in build/menu_bgs/{ds,fit,3ds}/ (made from the game's art, so like the
+# ROM's data: build/ only, never committed). Without them, the game's own.
+MENU_BGS := $(BUILD)/menu_bgs
+ifneq ($(wildcard $(MENU_BGS)/3ds),)
+PORT_OBJS += $(CORE_OBJ)/menu_bgs.o
+$(CORE_OBJ)/menu_bgs.bin: tools/menu_bgs.py $(wildcard $(MENU_BGS)/*/*.png)
+	@mkdir -p $(dir $@)
+	@python3 tools/menu_bgs.py $(MENU_BGS) $@
+$(CORE_OBJ)/menu_bgs.o: $(CORE_OBJ)/menu_bgs.bin
+	@printf '.section .rodata.menu_bgs,"a"\n.balign 4\n.global gPortMenuPicCount\ngPortMenuPicCount:\n.global gPortMenuPics\n.set gPortMenuPics, gPortMenuPicCount + 4\n.incbin "%s"\n' $< > $(CORE_OBJ)/menu_bgs.s
+	@$(PREFIX)as -o $@ $(CORE_OBJ)/menu_bgs.s
+	@echo "  AS   menu_bgs ($(MENU_BGS))"
+endif
+
 HARNESS_OBJ := $(BUILD)/harness
 HARNESS_ELF := $(BUILD)/pmd-red-harness.elf
 

@@ -1087,6 +1087,8 @@ static unsigned WindowMask(int line, uint16_t dispcnt, uint8_t *wm, uint8_t *win
 // mask, tracking each pixel's top two layers; then the colour effect (alpha,
 // brighten or darken) is applied in one pass. Equivalent to the reference's
 // per-pixel search for the top two visible layers, without the per-pixel work.
+const uint16_t *gPpuBackPic;
+
 static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio[4], uint16_t dispcnt)
 {
     static uint8_t wm[W] __attribute__((aligned(4))), topL[W], secL[W];
@@ -1134,12 +1136,20 @@ static void Compose(int line, uint16_t *dst, const int bgOn[4], const int bgPrio
     }
 
     uint16_t backdrop = Pal(0);
-    Fill16(dst, backdrop, sW);
+    // (the title menu's picture, wide: in the backdrop's place, gPpuBackPic)
+    const uint16_t *back = gPpuBackPic != NULL && sWide && line < sViewH ? gPpuBackPic + line * sW : NULL;
+    if (back != NULL)
+        memcpy(dst, back, sW * sizeof(uint16_t));
+    else
+        Fill16(dst, backdrop, sW);
     memset(topL, L_BD, sizeof(topL));
     int needSec = (effect == 1) || sObjSemiAny;
     if (needSec) {
         memset(secL, L_BD, sizeof(secL));
-        Fill16(secC, backdrop, sW);
+        if (back != NULL)
+            memcpy(secC, back, sW * sizeof(uint16_t));
+        else
+            Fill16(secC, backdrop, sW);
     }
 
     // Back to front: within a priority, BG3..BG0, then sprites (a sprite beats

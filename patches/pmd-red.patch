@@ -89,7 +89,7 @@ index 9d59c8fc..10cdcf67 100644
  @ I/O register offsets
  	.set OFFSET_REG_DISPCNT,     0x0
 diff --git a/include/constants/main_menu.h b/include/constants/main_menu.h
-index 76eb3bd6..0b54676c 100644
+index 76eb3bd6..1097a2b4 100644
 --- a/include/constants/main_menu.h
 +++ b/include/constants/main_menu.h
 @@ -25,7 +25,8 @@ enum MainMenuScreens
@@ -102,12 +102,13 @@ index 76eb3bd6..0b54676c 100644
      MENU_DELETE_SAVE = 46,
      MENU_DEBUG_DUNGEON,
      MENU_DEBUG_FIELD,
-@@ -33,6 +34,8 @@ enum MainMenuScreens
+@@ -33,6 +34,9 @@ enum MainMenuScreens
      MENU_DEBUG_FIELD_SCRIPT,
      MENU_DEBUG_DEBUG_MENU,
      MENU_DEBUG_UNKNOWN_1,
 +    MENU_RELOAD_SAVE, // 3DS port: another save was chosen; read it as at power-on
 +    MENU_PORT_DEBUG_ROOM, // 3DS port: Game Options > Debug Room: the save loaded into the debug room
++    MENU_PORT_APPLY_GRAPHICS, // 3DS port: Graphics Options changed on the title: the menu fades out, then back with them
      MENU_NO_SCREEN_CHANGE = 65500 // (s16)-36
  };
  
@@ -309,10 +310,10 @@ index 1ac7b0fe..9540874d 100644
  void ResetScheduledMemCopies(void);
  void ScheduleMemCopy(u32 *, const u32 *, u32);
 diff --git a/include/options_menu1.h b/include/options_menu1.h
-index d927bef9..7b597dd9 100644
+index d927bef9..921af126 100644
 --- a/include/options_menu1.h
 +++ b/include/options_menu1.h
-@@ -20,5 +20,11 @@ struct unkStruct_203B25C
+@@ -20,5 +20,12 @@ struct unkStruct_203B25C
  bool8 sub_801DCC4(void);
  u32 sub_801DCE8(void);
  void sub_801DD50(void);
@@ -320,6 +321,7 @@ index d927bef9..7b597dd9 100644
 +void Port_OptionsMenuFromTitle(bool8 fromTitle);
 +bool8 Port_OptionsMenuLoadedSave(void);
 +bool8 Port_OptionsMenuDebugRoom(void);
++bool8 Port_OptionsMenuApplyGraphics(void); // (main menu: MENU_PORT_APPLY_GRAPHICS)
 +bool8 Port_OthersReturnToTitle(void); // Others > Return to Main Menu: saved // Change Current Save Data was used
 +#endif
  
@@ -371,17 +373,21 @@ index 00000000..c344c9ce
 +#endif
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..46348dc7
+index 00000000..c2ead2bc
 --- /dev/null
 +++ b/include/port_screen_menu.h
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,18 @@
 +#ifndef GUARD_PORT_SCREEN_MENU_H
 +#define GUARD_PORT_SCREEN_MENU_H
 +
 +// 3DS port: Others > Screen Options (src/port_screen_menu.c).
 +#include "game_options.h"
 +
-+void PortScreenMenu_Create(GameOptions *options);
++// deferred (the title's main menu): the changes take effect only through
++// PortScreenMenu_SavePending (when it closes) and PortScreenMenu_Commit
++void PortScreenMenu_Create(GameOptions *options, bool8 deferred);
++void PortScreenMenu_SavePending(void);
++void PortScreenMenu_Commit(void);
 +void PortControlMenu_Create(GameOptions *options); // Others > Controls Options
 +void PortMusicMenu_Create(GameOptions *options, bool8 locked, s32 entry); // the title's Music Options
 +u32 PortScreenMenu_Update(void);
@@ -5313,21 +5319,22 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..4e5dc346 100644
+index 372641a7..c2012301 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
-@@ -1,4 +1,10 @@
+@@ -1,4 +1,11 @@
  #include "global.h"
 +#ifdef PLATFORM_3DS
 +#include "port_new_run.h"
 +#endif
 +#ifdef PLATFORM_3DS
 +#include "port_game.h"
++#include "port_screen_menu.h"
 +#endif
  #include "globaldata.h"
  #include "constants/bg_music.h"
  #include "constants/friend_area.h"
-@@ -60,6 +66,19 @@ typedef struct unkTalkTable
+@@ -60,6 +67,36 @@ typedef struct unkTalkTable
  } unkTalkTable;
  
  static EWRAM_DATA s32 sTitleBrightness = 0; // NDS=210FAC0
@@ -5343,11 +5350,28 @@ index 372641a7..4e5dc346 100644
 +{
 +    return sTitleBrightness;
 +}
++
++// The title menu in the sizes past GBA, with the port's menu backgrounds
++// (port_view.h): the wide view, as the overworld (its windows placed as
++// there), with a bundled picture instead of the game's (BG2, BG3).
++static bool8 PortMenuPicOn(void)
++{
++    return gPortTitleMenu && PORT_WIDE_SIZE && Port_MenuPicCount() > 0;
++}
++
++static void PortMenuPicFrame(void)
++{
++    if (!PortMenuPicOn())
++        return;
++    gPortWideView = 2;
++    gPortMenuPic = 2;
++    gPortMenuPicLevel = sTitleBrightness > 31 ? 31 : sTitleBrightness;
++}
 +#endif
  // TODO: I think there's a 2nd s32 here for the bottom screen TitleBrightness.
  
  static EWRAM_INIT OpenedFile *sTitlePaletteFile = NULL;
-@@ -108,6 +127,9 @@ static void NDS_LoadOverlay_GroundMain();
+@@ -108,6 +145,9 @@ static void NDS_LoadOverlay_GroundMain();
  static void RemoveAllMoneyAndItems(void);
  static void RemoveMoneyAndRandomItems(void);
  static u32 RunGameMode_Async(u32 param_1);
@@ -5357,7 +5381,7 @@ index 372641a7..4e5dc346 100644
  static u32 xxx_script_related_8001334_Async(u32 startMode);
  static u8 sub_8001170(void);
  static void sub_80011CC(DungeonSetupSubstruct *info, u8 dungId);
-@@ -140,6 +162,9 @@ void GameLoop_Async(void)
+@@ -140,6 +180,9 @@ void GameLoop_Async(void)
      LoadMailInfo();
      sub_800CD64(0x8000, FALSE);
      sub_8012284();
@@ -5367,7 +5391,7 @@ index 372641a7..4e5dc346 100644
      InitializeGameOptions(TRUE);
      SetWindowTitle(_("PKDi ver 1.0 [Apr 28 2006] 16:37:54"));
      sub_800DAAC();
-@@ -149,13 +174,26 @@ void GameLoop_Async(void)
+@@ -149,13 +192,26 @@ void GameLoop_Async(void)
      if (ReadSaveFromPak(&tmp))
          ThoroughlyResetScriptVars();
  
@@ -5394,7 +5418,7 @@ index 372641a7..4e5dc346 100644
  
      while (TRUE) {
          sMainLoopsUnk = MAINLOOPS_UNK_0;
-@@ -166,6 +204,18 @@ void GameLoop_Async(void)
+@@ -166,6 +222,18 @@ void GameLoop_Async(void)
          sub_800CDA8(2);
          ShowWindows(NULL, TRUE, TRUE);
          gUnknown_2026E4E = 0x1000;
@@ -5413,7 +5437,7 @@ index 372641a7..4e5dc346 100644
          LoadTitleScreen();
          SetBG2RegOffsets(0, 0);
          SetBG3RegOffsets(0, 0);
-@@ -224,6 +274,12 @@ void GameLoop_Async(void)
+@@ -224,6 +292,14 @@ void GameLoop_Async(void)
                  break;
              if (nextMenu == MENU_NEW_GAME)
                  break;
@@ -5422,11 +5446,13 @@ index 372641a7..4e5dc346 100644
 +                break;
 +            if (nextMenu == MENU_PORT_DEBUG_ROOM)
 +                break;
++            if (nextMenu == MENU_PORT_APPLY_GRAPHICS)
++                break;
 +#endif
          }
  
          DeleteMainMenu();
-@@ -241,7 +297,31 @@ void GameLoop_Async(void)
+@@ -241,7 +317,40 @@ void GameLoop_Async(void)
          }
  
          CloseFile(sTitlePaletteFile);
@@ -5448,6 +5474,15 @@ index 372641a7..4e5dc346 100644
 +        }
 +#endif
 +#ifdef PLATFORM_3DS
++        if (nextMenu == MENU_PORT_APPLY_GRAPHICS) {
++            // the title's Graphics Options: its changes in effect while
++            // black, then the main menu fades in again (in the new size:
++            // its windows, picture and all)
++            PortScreenMenu_Commit();
++            MainLoops_RunFrameActions(0);
++            tmp3 = 0; // (the save as it was read: not again)
++            continue;
++        }
 +        if (nextMenu == MENU_PORT_DEBUG_ROOM) {
 +            // Game Options > Debug Room: the loaded save, started as the
 +            // debug start does (the debug room, map 0: DEBUG_SCRIPT)
@@ -5459,7 +5494,7 @@ index 372641a7..4e5dc346 100644
          switch (nextMenu) {
              case 2: {
                  s32 mailIndex = GetFirstIndexofMailType(7);
-@@ -259,6 +339,9 @@ void GameLoop_Async(void)
+@@ -259,6 +368,9 @@ void GameLoop_Async(void)
                  break;
              }
              case MENU_NEW_GAME: {
@@ -5469,7 +5504,28 @@ index 372641a7..4e5dc346 100644
                  sub_80122A8();
                  nullsub_33();
                  tmp3 = RunGameMode_Async(0);
-@@ -559,6 +642,12 @@ static u32 RunGameMode_Async(u32 a0)
+@@ -278,6 +390,9 @@ static void MainLoops_RunFrameActions(u32 unused)
+ 
+     sub_8005180();
+     // Extra call here in blue. Seems to be for 2nd screen sprites
++#ifdef PLATFORM_3DS
++    PortMenuPicFrame();
++#endif
+ 
+     ToggleWindowBgBuffer();
+     UpdateSoundEffectCounters();
+@@ -311,6 +426,10 @@ static void LoadTitleScreen(void)
+     s32 i, j;
+     TitleMenuFile *stru = MemoryAlloc(sizeof(TitleMenuFile), MEMALLOC_GROUP_0);
+     s32 rnd = RandInt(3);
++#ifdef PLATFORM_3DS
++    gPortMenuPicIndex = Port_MenuPicPick(); // (the port's pictures: one of them, wide)
++    PortMenuPicFrame(); // (the wide view from now: the menu's windows placed for it)
++#endif
+ 
+     sTitlePaletteFile = OpenFileAndGetFileDataPtr(renPal[rnd], &gTitleMenuFileArchive);
+     bgFile = OpenFileAndGetFileDataPtr(renBG[rnd], &gTitleMenuFileArchive);
+@@ -559,6 +678,12 @@ static u32 RunGameMode_Async(u32 a0)
      else if (mode != STARTMODE_NEW_GAME && mode != STARTMODE_11) {
          mode = STARTMODE_CONTINUE_GAME;
      }
@@ -5482,7 +5538,7 @@ index 372641a7..4e5dc346 100644
  
      ClearScriptVarArray(NULL, EVENT_S08E01);
      while (TRUE) {
-@@ -1095,7 +1184,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -1095,7 +1220,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
@@ -5501,7 +5557,7 @@ index 372641a7..4e5dc346 100644
  
  // arm9.bin::0200CA1C
 diff --git a/src/main_menu1.c b/src/main_menu1.c
-index f803cc06..413e7d0c 100644
+index f803cc06..bb0ada70 100644
 --- a/src/main_menu1.c
 +++ b/src/main_menu1.c
 @@ -14,6 +14,7 @@
@@ -5525,7 +5581,7 @@ index f803cc06..413e7d0c 100644
      }
  
      sMainMenu->currMenu = sMainMenu->nextMenu;
-@@ -202,6 +209,13 @@ s32 UpdateMenu(void)
+@@ -202,6 +209,14 @@ s32 UpdateMenu(void)
          case MENU_DEBUG:
              nextMenu = UpdateDebugMenu();
              break;
@@ -5533,13 +5589,14 @@ index f803cc06..413e7d0c 100644
 +        case MENU_GAME_OPTIONS:
 +            if (sub_801DCE8() == 3)
 +                nextMenu = Port_OptionsMenuLoadedSave() ? MENU_RELOAD_SAVE
-+                         : Port_OptionsMenuDebugRoom() ? MENU_PORT_DEBUG_ROOM : MENU_MAIN_SCREEN;
++                         : Port_OptionsMenuDebugRoom() ? MENU_PORT_DEBUG_ROOM
++                         : Port_OptionsMenuApplyGraphics() ? MENU_PORT_APPLY_GRAPHICS : MENU_MAIN_SCREEN;
 +            break;
 +#endif
      }
  
      if (nextMenu != MENU_NO_SCREEN_CHANGE)
-@@ -269,6 +283,14 @@ void CleanUpMenu(void)
+@@ -269,6 +284,14 @@ void CleanUpMenu(void)
          case MENU_DEBUG:
              DeleteDebugMenu();
              break;
@@ -5955,7 +6012,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..a11fd65c 100644
+index 86f582c2..0202783b 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -6026,7 +6083,7 @@ index 86f582c2..a11fd65c 100644
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +89,126 @@ static void sub_801DED0(void);
+@@ -48,6 +89,135 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -6045,6 +6102,9 @@ index 86f582c2..a11fd65c 100644
 +static GameOptions sOpenedOptions;
 +static struct PortConfig sOpenedConfig; // the port's settings in Windows Options
 +static bool8 sSaveGameOptions, sSavePortConfig;
++// The title's Graphics Options was left with changes: written, then the
++// main menu fades out and comes back with them (main_loops.c)
++static bool8 sApplyGraphics;
 +// opened from the title's main menu as "Game Options": no Hints there
 +static bool8 sFromTitle;
 +ALIGNED(4) static const u8 sTitleGameOptions[] = _("Game Options");
@@ -6123,6 +6183,7 @@ index 86f582c2..a11fd65c 100644
 +void Port_OptionsMenuFromTitle(bool8 fromTitle)
 +{
 +    sFromTitle = fromTitle;
++    sApplyGraphics = FALSE;
 +    sReloadSave = FALSE;
 +    sDebugRoomChosen = FALSE;
 +}
@@ -6135,6 +6196,11 @@ index 86f582c2..a11fd65c 100644
 +bool8 Port_OptionsMenuLoadedSave(void)
 +{
 +    return sReloadSave;
++}
++
++bool8 Port_OptionsMenuApplyGraphics(void)
++{
++    return sApplyGraphics;
 +}
 +
 +// The Game Options window, as in OPTIONS_MENU_MAIN
@@ -6153,7 +6219,7 @@ index 86f582c2..a11fd65c 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +237,63 @@ u32 sub_801DCE8(void)
+@@ -76,8 +246,63 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -6162,7 +6228,7 @@ index 86f582c2..a11fd65c 100644
 +#else
              HandleChangeSettingsMenu();
 +#endif
-             break;
++            break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SCREEN:
 +        case OPTIONS_MENU_CONTROLS:
@@ -6188,7 +6254,7 @@ index 86f582c2..a11fd65c 100644
 +            break;
 +        case OPTIONS_MENU_MUSIC_MATCH:
 +            HandleMatchMenu();
-+            break;
+             break;
 +        case OPTIONS_MENU_RETURN_ASK: {
 +            s32 menuAction;
 +            if (sub_80144A4(&menuAction) == 0)
@@ -6217,7 +6283,7 @@ index 86f582c2..a11fd65c 100644
          default:
              break;
      }
-@@ -120,9 +336,13 @@ static void sub_801DD84(void)
+@@ -120,9 +345,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -6232,7 +6298,7 @@ index 86f582c2..a11fd65c 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +350,32 @@ static void sub_801DD84(void)
+@@ -130,10 +359,32 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -6255,18 +6321,18 @@ index 86f582c2..a11fd65c 100644
 +            SetGameOptionsWindow();
 +            sUnknown_203B25C->unkBC.id[1] = sSaveDataWindow;
 +            sub_8012D08(&sUnknown_203B25C->unkBC.id[1], 3);
-             break;
++            break;
 +        case OPTIONS_MENU_MUSIC:
 +        case OPTIONS_MENU_MUSIC_MATCH:
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetMusicWindows();
-+            break;
+             break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +392,10 @@ static void sub_801DED0(void)
+@@ -150,6 +401,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -6277,7 +6343,7 @@ index 86f582c2..a11fd65c 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +410,84 @@ static void sub_801DED0(void)
+@@ -164,12 +419,88 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -6291,7 +6357,7 @@ index 86f582c2..a11fd65c 100644
 +        case OPTIONS_MENU_SCREEN:
 +            sUnknown_203B25C->newOptions = *gGameOptionsRef;
 +            sOpenedOptions = *gGameOptionsRef;
-+            PortScreenMenu_Create(&sUnknown_203B25C->newOptions);
++            PortScreenMenu_Create(&sUnknown_203B25C->newOptions, sFromTitle);
 +            break;
 +        case OPTIONS_MENU_CONTROLS:
 +            sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -6347,10 +6413,14 @@ index 86f582c2..a11fd65c 100644
 +            break;
 +        case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
 +            // write what changed, then say so (like "Save completed.")
-+            if (sSaveGameOptions)
-+                Port_WriteGameOptionsToPak();
-+            if (sSavePortConfig)
-+                Port_SaveConfig();
++            if (sApplyGraphics)
++                PortScreenMenu_SavePending(); // (the title's Graphics Options: in effect after the fade)
++            else {
++                if (sSaveGameOptions)
++                    Port_WriteGameOptionsToPak();
++                if (sSavePortConfig)
++                    Port_SaveConfig();
++            }
 +            CreateDialogueBoxAndPortrait(sChangesSaved, 0, NULL, 0x101);
 +            break;
 +#else
@@ -6362,7 +6432,7 @@ index 86f582c2..a11fd65c 100644
      }
  }
  
-@@ -180,12 +498,57 @@ static void CreateOthersMenu(void)
+@@ -180,12 +511,57 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -6420,7 +6490,7 @@ index 86f582c2..a11fd65c 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +592,48 @@ static void HandleOthersMenu(void)
+@@ -229,6 +605,48 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -6469,7 +6539,7 @@ index 86f582c2..a11fd65c 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +677,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +690,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -6486,7 +6556,7 @@ index 86f582c2..a11fd65c 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,11 +697,981 @@ static void sub_801E0FC(void)
+@@ -282,12 +710,987 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -6529,11 +6599,16 @@ index 86f582c2..a11fd65c 100644
 +        case 2:
 +        case 3:
 +            PortScreenMenu_Destroy();
-+            LeaveSettings(PortScreenMenu_Changed());
-+            break;
-+    }
-+}
-+
++            if (sFromTitle && sUnknown_203B25C->state == OPTIONS_MENU_SCREEN && PortScreenMenu_Changed()) {
++                sApplyGraphics = TRUE; // "Changes saved.", then the fade (Port_OptionsMenuApplyGraphics)
++                SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
++            }
++            else
++                LeaveSettings(PortScreenMenu_Changed());
+             break;
+     }
+ }
+ 
 +// Save Data 1-3: that save file is used from now on (and next time); the
 +// main menu then reads it as at power-on.
 +static void HandleSaveDataMenu(void)
@@ -6828,7 +6903,7 @@ index 86f582c2..a11fd65c 100644
 +            Port_MusicClose();
 +            Port_DsMusicRecheck(); // (Music Style: DS opens the ROM again)
 +            LeaveSettings(memcmp(&sOpenedConfig, &gPortConfig, sizeof(gPortConfig)) != 0);
-             break;
++            break;
 +        case 3: // A on Music Player
 +            PortScreenMenu_Destroy();
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC);
@@ -7137,7 +7212,7 @@ index 86f582c2..a11fd65c 100644
 +        }
 +        else
 +            PrintStringOnWindow(x, y, (const u8 *)"-", MUSIC_LIST_WIN, 0);
-     }
++    }
 +    sub_80073E0(MUSIC_LIST_WIN);
 +}
 +
@@ -7462,12 +7537,13 @@ index 86f582c2..a11fd65c 100644
 +    s32 menuAction;
 +
 +    if (sub_80144A4(&menuAction) == 0)
-+        SetOptionsMenuState(OPTIONS_MENU_MAIN);
- }
++        SetOptionsMenuState(sApplyGraphics ? OPTIONS_MENU_EXIT : OPTIONS_MENU_MAIN);
++}
 +#endif
- 
++
  static void HandleChangeSettingsMenu(void)
  {
+     s32 menuAction;
 diff --git a/src/options_menu2.c b/src/options_menu2.c
 index 03531690..0d6913a0 100644
 --- a/src/options_menu2.c
@@ -8041,10 +8117,10 @@ index 00000000..23e8ad99
 +#endif // PLATFORM_3DS
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..e3eb1731
+index 00000000..ea7f2899
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,450 @@
+@@ -0,0 +1,501 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -8063,7 +8139,10 @@ index 00000000..e3eb1731
 +//                          then the same Size and Scale
 +// The page settings live in the port's own config file (gPortConfig). Every
 +// toggle takes effect as soon as it changes; the file is written when the
-+// menu is left (options_menu1.c, "Changes saved.").
++// menu is left (options_menu1.c, "Changes saved."). On the title's main menu
++// (deferred), Graphics Options changes nothing until it is left: then the
++// file is written, the menu fades out and comes back with them
++// (PortScreenMenu_Commit, main_loops.c).
 +#include <stdio.h>
 +#include <string.h>
 +#include "global.h"
@@ -8074,6 +8153,8 @@ index 00000000..e3eb1731
 +#include "input.h"
 +#include "menu_input.h"
 +#include "port_screen_menu.h"
++#include "game_options.h"
++#include "save.h"
 +#include "port_game.h"
 +#include "text_1.h"
 +#include "text_2.h"
@@ -8102,7 +8183,12 @@ index 00000000..e3eb1731
 +    s32 page;
 +    struct PortConfig startConfig; // the settings when the menu was opened
 +    bool8 musicLocked; // Music Options for another game's ROM: GBA music only
++    bool8 deferred; // the title's Graphics Options: the settings changed in `pending` (and pendingTop)
++    struct PortConfig pending;
++    u8 pendingTop;
++    struct PortConfig *cfg; // the settings changed: gPortConfig, or pending
 +} sMenu;
++#define CFG (*sMenu.cfg)
 +
 +static const WindowTemplate sNoWindow = { 0, 3, 0, 0, 0, 0, 0, 0, NULL };
 +static const WindowHeader sHeader = { 1, 0, 15, 0 };
@@ -8200,18 +8286,18 @@ index 00000000..e3eb1731
 +{
 +    s32 screen = sMenu.page == PAGE_MAIN_SCREEN ? 0 : 1;
 +    if (setting == SETTING_BUTTONS)
-+        return &gPortConfig.buttonStyle;
++        return &CFG.buttonStyle;
 +    if (setting == SETTING_TOUCH)
-+        return &gPortConfig.touchScreenOff;
++        return &CFG.touchScreenOff;
 +    if (setting == SETTING_MUSIC_STYLE)
-+        return &gPortConfig.musicStyle;
++        return &CFG.musicStyle;
 +    if (setting == SETTING_SFX_STYLE)
-+        return &gPortConfig.sfxStyle;
++        return &CFG.sfxStyle;
 +    if (setting == SETTING_ENABLED)
-+        return &gPortConfig.subScreenDisabled;
++        return &CFG.subScreenDisabled;
 +    if (setting == SETTING_FRAMESKIP)
-+        return &gPortConfig.frameSkip;
-+    return &gPortConfig.layout[screen][setting - SETTING_SIZE];
++        return &CFG.frameSkip;
++    return &CFG.layout[screen][setting - SETTING_SIZE];
 +}
 +
 +// The first choice a setting offers on this page: the second screen has no
@@ -8258,7 +8344,7 @@ index 00000000..e3eb1731
 +    sub_80073B8(win);
 +
 +    if (sMenu.page == PAGE_TOP) {
-+        s32 c, skip = gPortConfig.frameSkip < 3 ? gPortConfig.frameSkip : PORT_FRAMESKIP_AUTO;
++        s32 c, skip = CFG.frameSkip < 3 ? CFG.frameSkip : PORT_FRAMESKIP_AUTO;
 +        PrintStringOnWindow(16, 0, sTitleTop, win, 0);
 +        y = GetMenuEntryYCoord(&sMenu.input, TOP_FRAMESKIP);
 +        PrintStringOnWindow(8, y, sFrameSkip, win, 0);
@@ -8269,23 +8355,23 @@ index 00000000..e3eb1731
 +        PrintStringOnWindow(8, y, sDualCore, win, 0);
 +        PrintStringOnWindow(FRAMESKIP_X(0), y, sOff, win, 0);
 +        PrintStringOnWindow(FRAMESKIP_X(1), y, sOn, win, 0);
-+        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.dualCore ? 1 : 0), y + 10,
-+                                     GetStringLineWidth(gPortConfig.dualCore ? sOn : sOff), COLOR_WHITE_2);
++        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(CFG.dualCore ? 1 : 0), y + 10,
++                                     GetStringLineWidth(CFG.dualCore ? sOn : sOff), COLOR_WHITE_2);
 +        y = GetMenuEntryYCoord(&sMenu.input, TOP_GPU);
 +        PrintStringOnWindow(8, y, sGpuDraw, win, 0);
 +        PrintStringOnWindow(FRAMESKIP_X(0), y, sOff, win, 0);
 +        PrintStringOnWindow(FRAMESKIP_X(1), y, sOn, win, 0);
-+        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.gpuDrawOff ? 0 : 1), y + 10,
-+                                     GetStringLineWidth(gPortConfig.gpuDrawOff ? sOff : sOn), COLOR_WHITE_2);
++        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(CFG.gpuDrawOff ? 0 : 1), y + 10,
++                                     GetStringLineWidth(CFG.gpuDrawOff ? sOff : sOn), COLOR_WHITE_2);
 +        y = GetMenuEntryYCoord(&sMenu.input, TOP_BUSY);
 +        PrintStringOnWindow(8, y, sBusy, win, 0);
 +        PrintStringOnWindow(FRAMESKIP_X(0), y, sWait, win, 0);
 +        PrintStringOnWindow(FRAMESKIP_X(1), y, sSkip, win, 0);
-+        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(gPortConfig.busyWait ? 0 : 1), y + 10,
-+                                     GetStringLineWidth(gPortConfig.busyWait ? sWait : sSkip), COLOR_WHITE_2);
++        AddDoubleUnderScoreHighlight(win, FRAMESKIP_X(CFG.busyWait ? 0 : 1), y + 10,
++                                     GetStringLineWidth(CFG.busyWait ? sWait : sSkip), COLOR_WHITE_2);
 +        y = GetMenuEntryYCoord(&sMenu.input, TOP_MAIN_SCREEN);
 +        PrintStringOnWindow(8, y, sMainScreen, win, 0);
-+        if (sMenu.options->touchScreen)
++        if (sMenu.deferred ? sMenu.pendingTop : sMenu.options->touchScreen)
 +            AddDoubleUnderScoreHighlight(win, 80, y + 10, GetStringLineWidth(sTop), COLOR_WHITE_2);
 +        else
 +            AddDoubleUnderScoreHighlight(win, 120, y + 10, GetStringLineWidth(sBottom), COLOR_WHITE_2);
@@ -8304,7 +8390,7 @@ index 00000000..e3eb1731
 +            if (setting < 0) { // a volume: its percent (Left/Right: 10% less/more)
 +                u8 text[24];
 +                bool8 sfx = setting == ENTRY_SFX_VOLUME;
-+                s32 v = (sfx ? gPortConfig.sfxVolume : gPortConfig.musicVolume) * 10;
++                s32 v = (sfx ? CFG.sfxVolume : CFG.musicVolume) * 10;
 +                y = GetMenuEntryYCoord(&sMenu.input, i);
 +                PrintText(8, y, sfx ? sSfxVolume : sMusicVolume, win, sMenu.musicLocked);
 +                snprintf((char *)text, sizeof(text), "%d%%", v);
@@ -8340,7 +8426,7 @@ index 00000000..e3eb1731
 +    Draw();
 +}
 +
-+void PortScreenMenu_Create(GameOptions *options)
++void PortScreenMenu_Create(GameOptions *options, bool8 deferred)
 +{
 +    sMenu.options = options;
 +    sMenu.windowId = 0;
@@ -8348,7 +8434,37 @@ index 00000000..e3eb1731
 +    if (gPortConfig.layout[1][0] < PORT_SIZE_DS) // the second screen is DS-sized
 +        gPortConfig.layout[1][0] = PORT_SIZE_DS;
 +    sMenu.startConfig = gPortConfig;
++    sMenu.deferred = deferred;
++    sMenu.pending = gPortConfig;
++    sMenu.pendingTop = options->touchScreen;
++    sMenu.cfg = deferred ? &sMenu.pending : &gPortConfig;
 +    ShowPage(0);
++}
++
++// Deferred: the changed settings written (the config file; the game options,
++// Main Screen, in the save) without taking effect yet
++void PortScreenMenu_SavePending(void)
++{
++    struct PortConfig live = gPortConfig;
++    u8 liveTop = gGameOptionsRef->touchScreen;
++    gPortConfig = sMenu.pending;
++    Port_SaveConfig();
++    if (sMenu.pendingTop != liveTop) {
++        gGameOptionsRef->touchScreen = sMenu.pendingTop;
++        Port_WriteGameOptionsToPak();
++    }
++    gPortConfig = live;
++    gGameOptionsRef->touchScreen = liveTop;
++}
++
++// ... and then made the ones in effect (the screen black: main_loops.c)
++void PortScreenMenu_Commit(void)
++{
++    gPortConfig = sMenu.pending;
++    gGameOptionsRef->touchScreen = sMenu.pendingTop;
++    sMenu.deferred = FALSE;
++    sMenu.cfg = &gPortConfig;
++    Port_UpdateScreenSize();
 +}
 +
 +// Others > Controls Options: the same window, with only its page
@@ -8358,6 +8474,8 @@ index 00000000..e3eb1731
 +    sMenu.windowId = 0;
 +    sMenu.page = PAGE_CONTROLS;
 +    sMenu.startConfig = gPortConfig;
++    sMenu.deferred = FALSE;
++    sMenu.cfg = &gPortConfig;
 +    ShowPage(0);
 +}
 +
@@ -8377,12 +8495,17 @@ index 00000000..e3eb1731
 +        entry = MUSIC_PLAYER;
 +    }
 +    sMenu.startConfig = gPortConfig;
++    sMenu.deferred = FALSE;
++    sMenu.cfg = &gPortConfig;
 +    ShowPage(entry);
 +}
 +
 +// Whether the port settings changed since the menu was opened.
 +bool8 PortScreenMenu_Changed(void)
 +{
++    if (sMenu.deferred)
++        return memcmp(&sMenu.startConfig, &sMenu.pending, sizeof(gPortConfig)) != 0
++            || sMenu.pendingTop != gGameOptionsRef->touchScreen;
 +    return memcmp(&sMenu.startConfig, &gPortConfig, sizeof(gPortConfig)) != 0;
 +}
 +
@@ -8430,24 +8553,27 @@ index 00000000..e3eb1731
 +            s32 step = input == INPUT_DPAD_LEFT ? -1 : 1;
 +            if (sMenu.page == PAGE_TOP) {
 +                if (index == TOP_FRAMESKIP) {
-+                    s32 v = gPortConfig.frameSkip < 3 ? gPortConfig.frameSkip : PORT_FRAMESKIP_AUTO;
-+                    gPortConfig.frameSkip = (u8)((v + 3 + step) % 3);
++                    s32 v = CFG.frameSkip < 3 ? CFG.frameSkip : PORT_FRAMESKIP_AUTO;
++                    CFG.frameSkip = (u8)((v + 3 + step) % 3);
 +                    changed = TRUE;
 +                }
 +                else if (index == TOP_GPU) {
-+                    gPortConfig.gpuDrawOff = !gPortConfig.gpuDrawOff;
++                    CFG.gpuDrawOff = !CFG.gpuDrawOff;
 +                    changed = TRUE;
 +                }
 +                else if (index == TOP_BUSY) {
-+                    gPortConfig.busyWait = !gPortConfig.busyWait;
++                    CFG.busyWait = !CFG.busyWait;
 +                    changed = TRUE;
 +                }
 +                else if (index == TOP_DUALCORE) {
-+                    gPortConfig.dualCore = !gPortConfig.dualCore;
++                    CFG.dualCore = !CFG.dualCore;
 +                    changed = TRUE;
 +                }
 +                else if (index == TOP_MAIN_SCREEN) {
-+                    sMenu.options->touchScreen = !sMenu.options->touchScreen;
++                    if (sMenu.deferred)
++                        sMenu.pendingTop = !sMenu.pendingTop;
++                    else
++                        sMenu.options->touchScreen = !sMenu.options->touchScreen;
 +                    changed = TRUE;
 +                }
 +            }
@@ -8456,7 +8582,7 @@ index 00000000..e3eb1731
 +            }
 +            else if (sMenu.page == PAGE_MUSIC && (index == MUSIC_VOLUME || index == MUSIC_SFX_VOLUME)) {
 +                // 10% a press (heard at once: the DS music, and this menu's own sounds)
-+                u8 *v = index == MUSIC_VOLUME ? &gPortConfig.musicVolume : &gPortConfig.sfxVolume;
++                u8 *v = index == MUSIC_VOLUME ? &CFG.musicVolume : &CFG.sfxVolume;
 +                s32 n = *v + step;
 +                if (n >= VOLUME_MIN && n <= VOLUME_MAX) {
 +                    *v = (u8)n;
@@ -8470,7 +8596,8 @@ index 00000000..e3eb1731
 +                u8 *value = SettingValue(setting);
 +                s32 v = *value < first || *value >= sSettings[setting].count ? 0 : *value - first;
 +                *value = (u8)(first + (v + n + step) % n);
-+                Port_UpdateScreenSize();
++                if (!sMenu.deferred)
++                    Port_UpdateScreenSize();
 +                changed = TRUE;
 +            }
 +            if (changed)

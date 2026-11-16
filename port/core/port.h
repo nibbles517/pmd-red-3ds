@@ -40,6 +40,9 @@ extern void (*gPortLineHook)(int line);
 void Ppu_BeginFrame(void);
 void Ppu_RenderLine(int line, uint16_t *dst);
 void Ppu_SetView(int wide); // wide: SCREEN_W-pixel lines, lines past 159 too (port_view.h)
+// The wide view's backdrop as a picture instead (SCREEN_W pixels a row, a
+// row a line): the title menu's (frame.c); NULL: the backdrop colour
+extern const uint16_t *gPpuBackPic;
 // The registers the lines are drawn from: a copy made as the line went by
 // (a frame that was to be drawn from the drawing list), NULL: the live ones
 void Ppu_SetLineRegs(const uint8_t *regs);

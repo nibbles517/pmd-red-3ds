@@ -550,6 +550,74 @@ static int ListTitleSea(void)
     return !l->full;
 }
 
+// --- The title menu's picture (port_view.h) ------------------------------
+//
+// The pictures (Makefile: build/menu_bgs, made by tools/menu_bgs.py; not in
+// the harness or a build without them): gPortMenuPicCount of each size, DS
+// (256x192), then Fit (320x240), then 3DS (400x240), each BGR555 a row at a
+// time, at full brightness.
+extern const uint16_t gPortMenuPics[] __attribute__((weak));
+extern const uint32_t gPortMenuPicCount __attribute__((weak));
+uint8_t gPortMenuPic, gPortMenuPicIndex, gPortMenuPicLevel;
+static const int sPicW[3] = { 256, 320, 400 }, sPicH[3] = { 192, 240, 240 };
+static uint32_t sFrameCount; // (frames since the start: Port_MenuPicPick's chance)
+
+int Port_MenuPicCount(void)
+{
+    return &gPortMenuPicCount != NULL && gPortMenuPics != NULL ? (int)gPortMenuPicCount : 0;
+}
+
+int Port_MenuPicPick(void)
+{
+    static int sLast = -1;
+    int n = Port_MenuPicCount();
+    if (n <= 0)
+        return 0;
+    uint32_t r = sFrameCount * 2654435761u;
+    int pick = (int)((r >> 16) % (uint32_t)n);
+    if (n > 1 && pick == sLast) // (not the same one twice in a row)
+        pick = (pick + 1 + (int)((r >> 8) % (uint32_t)(n - 1))) % n;
+    sLast = pick;
+    return pick;
+}
+
+// The picture for this frame at its brightness (SCREEN_W x SCREEN_H, made
+// again only when the picture or its brightness changes), or NULL: none for
+// this size
+static const uint16_t *MenuPicFrame(void)
+{
+    static uint16_t sPic[SCREEN_W_MAX * SCREEN_H_MAX];
+    static int sPicKey = -1;
+    int n = Port_MenuPicCount(), size = -1;
+    for (int k = 0; k < 3; k++)
+        if (SCREEN_W == sPicW[k] && SCREEN_H == sPicH[k])
+            size = k;
+    if (n <= 0 || size < 0)
+        return NULL;
+    int index = gPortMenuPicIndex % n, level = gPortMenuPicLevel > 31 ? 31 : gPortMenuPicLevel;
+    int key = (size * 64 + index) * 64 + level;
+    if (key != sPicKey) {
+        sPicKey = key;
+        const uint16_t *src = gPortMenuPics;
+        for (int k = 0; k < size; k++)
+            src += (size_t)n * sPicW[k] * sPicH[k];
+        src += (size_t)index * sPicW[size] * sPicH[size];
+        int count = sPicW[size] * sPicH[size];
+        if (level >= 31)
+            memcpy(sPic, src, count * sizeof(uint16_t));
+        else {
+            uint8_t ramp[32]; // (as the game's palette fades: each channel * level / 31)
+            for (int c = 0; c < 32; c++)
+                ramp[c] = (uint8_t)(c * level / 31);
+            for (int i = 0; i < count; i++) {
+                uint16_t c = src[i];
+                sPic[i] = (uint16_t)(ramp[c & 31] | (ramp[(c >> 5) & 31] << 5) | (ramp[(c >> 10) & 31] << 10));
+            }
+        }
+    }
+    return sPic;
+}
+
 // The game half's commit and when it was made (Makefile: prelink; the harness has none)
 extern const char gPortBuildStamp[] __attribute__((weak));
 
@@ -571,6 +639,10 @@ static void RunFrame(void)
     int wide = ds && gPortWideView != 0;
     int mode = !ds ? VIEW_GBA : wide ? VIEW_WIDE : VIEW_FRAMED;
     int title = wide && gPortTitleView;
+    const uint16_t *menuPic = wide && gPortMenuPic ? MenuPicFrame() : NULL;
+    sFrameCount++;
+    if (gPortMenuPic)
+        gPortMenuPic--;
     if (gPortWideView)
         gPortWideView--;
     if (gPortTitleView)
@@ -590,6 +662,18 @@ static void RunFrame(void)
         sLatched = live; // (the title: as it is. Its blinking moves the camera between two pictures on its map, whose rows
                          // the game rewrites in place: a frame late, the old scroll would show the other's rows)
     LoadWide(&sLatched);
+    // The title menu's picture: the game's (BG2, BG3) not drawn, nor
+    // anything a map left in the wide view's state; the picture in the
+    // backdrop's place (the CPU's lines: gPpuBackPic; the list: strips,
+    // below), its DISPCNT back after the frame
+    uint16_t picDispcnt = R16(0x00);
+    if (menuPic != NULL) {
+        memset(gPortWideBg, 0, sizeof(gPortWideBg));
+        memset(gPortTileBg, 0, sizeof(gPortTileBg));
+        gPortHudLines = 0;
+        W16(0x00, picDispcnt & ~0x0C00);
+        gPpuBackPic = menuPic;
+    }
 
     // Graphics Options > Frame Skip: the game runs every frame, but the
     // picture is not drawn on some (the main screen keeps the last one).
@@ -611,7 +695,8 @@ static void RunFrame(void)
     // drawn at once (Backend_PresentList), instead of describing a frame
     // nothing of which shows (the next map's tiles, loaded while the screen
     // is black, are decoded when it fades in)
-    int black = !skip && mode == sViewMode && SCREEN_W == sViewW && PictureBlack() && Backend_GpuListMode() == 3;
+    int black = !skip && mode == sViewMode && SCREEN_W == sViewW && PictureBlack() && Backend_GpuListMode() == 3
+             && (menuPic == NULL || gPortMenuPicLevel == 0); // (the title menu's picture: not black while it shows)
     sBlackRun = black ? sBlackRun + 1 : 0;
     if (black)
         skip = 1; // (not drawn: below)
@@ -722,6 +807,14 @@ static void RunFrame(void)
         if (listMode)
             gGpuList.border = fillBorder ? (uint16_t)(border | 0x8000) : 0;
     }
+    if (menuPic != NULL && !skip && listMode && listOk) {
+        // behind everything (strips of slot 3: BG3 is off)
+        int flags = GQ_PREFADED | (gGpuList.bdSecond ? GQ_SECOND : 0);
+        for (int y = 0; y < SCREEN_H && listOk; y++) {
+            GpuList_StripLine(y, 3, 0xFFFF, flags, &menuPic[y * SCREEN_W], 0, SCREEN_W);
+            listOk = !gGpuList.full;
+        }
+    }
     if (title && !skip && listMode && listOk)
         listOk = ListTitleSea(); // (0: drawn from the copies, ListFrameDone, then ExtendTitleSea)
     if (listMode)
@@ -737,6 +830,10 @@ static void RunFrame(void)
     if (title && !skip && (!listMode || !listOk))
         ExtendTitleSea();
     Backend_Mark(PORT_MARK_DRAWN, skip && !black);
+    if (menuPic != NULL) {
+        W16(0x00, picDispcnt);
+        gPpuBackPic = NULL;
+    }
     LoadWide(&live); // the game's again
     sLatched = live;
     sLatchValid = 1;
@@ -784,7 +881,8 @@ static void RunFrame(void)
         const GpuList *l = &gGpuList;
         // (black: faded to it, or the palettes it shows are black as they are)
         int nowBlack = (l->fadeOn && l->fade.mul == 0 && !(l->fade.add[0] | l->fade.add[1] | l->fade.add[2]))
-                       || (((R16(0x50) >> 6) & 3) != 2 && BanksBlack(l->usedBanks)); // (not brightened)
+                       || (((R16(0x50) >> 6) & 3) != 2 && BanksBlack(l->usedBanks) // (not brightened)
+                           && (menuPic == NULL || gPortMenuPicLevel == 0)); // (the title menu's picture showing)
         if (nowBlack)
             sHeld = 0;
         hold = sShowingBlack && !nowBlack && sHeld < 4;

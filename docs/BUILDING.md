@@ -131,3 +131,17 @@ make prelink                            # -> build/pmd-red-game.o
 Needs an `arm-none-eabi` GCC, host GCC, libpng and Python 3, as pret/pmd-red
 does (see its INSTALL.md). For the test harness, also Unicorn: see
 `tools/harness.py`.
+
+### Title menu backgrounds
+
+In the sizes past GBA, the title's main menu is shown like the overworld
+(its windows placed as there) over a background bundled with the build
+instead of the game's own: put the PNGs in `build/menu_bgs/ds/`
+(256x192), `build/menu_bgs/fit/` (320x240) and `build/menu_bgs/3ds/`
+(400x240), the same pictures in each (`1.png`, `2.png`, ...), before
+`make prelink` (tools/menu_bgs.py converts them). One is picked at random
+each time the menu comes up. They are made from the game's art, so like the
+ROM's data they stay in `build/` (never committed); without them the menu
+looks as on the GBA. On the title, Graphics Options changes take effect only
+when it is left: "Changes saved.", then the menu fades out and back in with
+them.

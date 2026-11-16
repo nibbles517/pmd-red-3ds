@@ -58,6 +58,17 @@ extern uint8_t gPortBorderFill;
 // GPU, ExtendTitleSea when drawn by the CPU).
 extern uint8_t gPortTitleView;
 
+// The title's main menu in the wide view (set by the game every frame it
+// shows it, like gPortWideView): its picture (BG2 and BG3) not drawn; behind
+// everything instead, a menu background bundled with the port (Makefile:
+// build/menu_bgs, tools/menu_bgs.py) at the drawing size: picture
+// gPortMenuPicIndex, at brightness gPortMenuPicLevel (0-31, as the game's
+// palette fades). Port_MenuPicCount: how many there are (0: none, the
+// game's own pictures as on the GBA); Port_MenuPicPick: one at random.
+extern uint8_t gPortMenuPic, gPortMenuPicIndex, gPortMenuPicLevel;
+int Port_MenuPicCount(void);
+int Port_MenuPicPick(void);
+
 // Backgrounds drawn by the game for the wide view, instead of from VRAM: a
 // 64x64-entry map (512x512 pixels, wrapping) and its scroll, in GBA screen
 // coordinates (the pixel at GBA screen (0,0) is map pixel (scrollX, scrollY)).
