@@ -177,6 +177,7 @@ void Backend_FileClose(void *file);
 // Music Options: the DS ROM's path on the SD card, as picked there (Blue
 // Rescue Team's only, kept in config.ini); "" for none (options.c)
 extern char gPortDsRom[256];
+extern char gPortExtraRom[256]; // Music Options > Extra Music: Explorers of Sky's ROM (music.c)
 void Port_SaveConfig(void);
 #ifndef PORT_DIR_ENTRY_DEFINED
 #define PORT_DIR_ENTRY_DEFINED

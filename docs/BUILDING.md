@@ -66,6 +66,20 @@ ROM says so and plays in Music Options only, until the game is closed, and is
 not remembered. If the remembered ROM isn't there at start, the game plays the
 GBA music and sounds. (Without one picked, `pmd-blue.nds` in
 `SD:/3ds/pmd-red-3ds/` is still used.)
+Music Options > Extra Music (Off | On) plays songs from Pokémon Mystery
+Dungeon: Explorers of Sky on some dungeon floors, in place of the floor's own
+music (only the floor's music: Monster Houses, bosses and fanfares play as
+ever). Turning it on the first time asks for Explorers of Sky's ROM, found as
+the DS ROM is (Explorers of Sky's only: another game's, even Explorers of Time
+or Darkness, is refused); it's remembered (`config.ini`, `Extra Music ROM`),
+and works with either Music Style. Which floors play which song is built in
+(port/core/music.c, `sExtraBuiltIn`), or, to try songs out, given by
+`extra-music.txt` in `SD:/3ds/pmd-red-3ds/` instead, one line each:
+`<dungeon> <first floor>-<last floor> = <song>` (or `<dungeon> <floor> =
+<song>`), where the dungeon is its number in `include/constants/dungeon.h`
+(Purity Forest 62, Western Cave 23, Wish Cave 26, Murky Cave 40, ...), the
+floors are as shown in the game, and the song is Explorers of Sky's
+`bgmNNNN` number (as the NDS Music Player lists them); `;` starts a comment.
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 The Music Player lists the ROM's sound effects after its music (in green);

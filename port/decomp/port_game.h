@@ -51,6 +51,7 @@ struct PortConfig
     u8 busyWait;            // Graphics Options > Busy Screen: 0 Skip, 1 Wait (version 12; Skip at first since version 14)
     u8 mainScreenTop;       // Graphics Options > Main Screen: 0 Bottom, 1 Top (in config.ini; was in the save,
                             // in the game options' touch screen bit, which now just follows it: game_options.c)
+    u8 extraMusic;          // Music Options > Extra Music: 0 Off, 1 On (Explorers of Sky's songs on some floors)
 };
 
 extern struct PortConfig gPortConfig;
@@ -115,6 +116,12 @@ int Port_MusicRomIsBlue(void); // APHE, APHP or APHJ
 // 1 Blue Rescue Team's (kept), 0 another game's (until closed), -1 not one
 int Port_MusicTryRom(const char *path);
 const char *Port_MusicRomPath(void); // the ROM picked ("": none, pmd-blue.nds)
+// Music Options > Extra Music (port/core/music.c): Explorers of Sky's ROM
+int Port_ExtraMusicOpen(void); // the ROM picked open (1), or not there / not Explorers of Sky's (0)
+int Port_ExtraMusicTryRom(const char *path); // 1 Explorers of Sky's (kept), 0 another game's, -1 not a ROM
+const char *Port_ExtraMusicRomPath(void); // the ROM picked for it ("": none)
+int Port_ExtraMusicTrack(int song); // the slot track of its background music `song`, or -1
+int Port_ExtraMusicFor(int dungeon, int floor); // its song for that floor, or -1
 #ifndef PORT_DIR_ENTRY_DEFINED
 #define PORT_DIR_ENTRY_DEFINED
 typedef struct { // (128 bytes, whatever the ABI pads a struct to)

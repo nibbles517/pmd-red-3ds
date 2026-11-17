@@ -182,6 +182,8 @@ static void CheckConfig(void)
         gPortConfig.musicStyle = PORT_MUSIC_GBA;
     if (gPortConfig.sfxStyle > PORT_MUSIC_DS)
         gPortConfig.sfxStyle = PORT_MUSIC_GBA;
+    if (gPortConfig.extraMusic > 1)
+        gPortConfig.extraMusic = 0;
     if (gPortConfig.musicVolume < 1 || gPortConfig.musicVolume > 40)
         gPortConfig.musicVolume = 19;
     if (gPortConfig.sfxVolume < 1 || gPortConfig.sfxVolume > 40)
@@ -357,6 +359,7 @@ static const IniSetting sIni[] = {
     { "Controls Options", "Button Style", &gPortConfig.buttonStyle, sIniButtons },
     { "Music Options", "Music Style", &gPortConfig.musicStyle, sIniStyles },
     { "Music Options", "Sound Effects", &gPortConfig.sfxStyle, sIniStyles },
+    { "Music Options", "Extra Music", &gPortConfig.extraMusic, sIniOffOn },
     { "Music Options", "Music Volume", &gPortConfig.musicVolume, NULL },
     { "Music Options", "SFX Volume", &gPortConfig.sfxVolume, NULL },
     { "Save Data", "Current Save Data", &gPortConfig.saveSlot, sIniSlots },
@@ -462,17 +465,19 @@ static void IniLoad(const char *text, uint32_t len)
         for (unsigned i = 0; i < sizeof(sIni) / sizeof(sIni[0]); i++)
             if (IniSame(section, sectionLen, sIni[i].section) && IniSame(line, keyLen, sIni[i].key))
                 IniValue(&sIni[i], eq + 1, valueLen);
-        if (IniSame(section, sectionLen, "Music Options") && IniSame(line, keyLen, "DS ROM")) {
+        bool8 extraRom = IniSame(section, sectionLen, "Music Options") && IniSame(line, keyLen, "Extra Music ROM");
+        if (extraRom || (IniSame(section, sectionLen, "Music Options") && IniSame(line, keyLen, "DS ROM"))) {
+            char *dst = extraRom ? gPortExtraRom : gPortDsRom;
             // the path as written, spaces at either end left out (not ; or #:
             // the comment, as for every line)
             const char *v = eq + 1, *ve = stop;
             while (v < ve && (*v == ' ' || *v == '\t')) v++;
             while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t')) ve--;
             int n = (int)(ve - v);
-            if (n >= (int)sizeof(gPortDsRom))
+            if (n >= 256)
                 n = 0;
-            memcpy(gPortDsRom, v, n);
-            gPortDsRom[n] = 0;
+            memcpy(dst, v, n);
+            dst[n] = 0;
         }
     }
 }
@@ -518,7 +523,10 @@ static bool8 IniSave(void)
         // after Music Options' own settings: the DS ROM picked there
         if (strcmp(s->section, "Music Options") == 0
             && (i + 1 == sizeof(sIni) / sizeof(sIni[0]) || strcmp(sIni[i + 1].section, s->section) != 0))
+        {
             INI_PRINT("DS ROM = %s\n", gPortDsRom);
+            INI_PRINT("Extra Music ROM = %s\n", gPortExtraRom);
+        }
     }
     for (int slot = 0; slot < 3; slot++) {
         INI_PRINT("\n[Save Data %d]\n", slot + 1);

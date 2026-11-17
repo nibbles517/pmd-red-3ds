@@ -43,6 +43,12 @@ typedef struct {
 
 static NdsMusic sRom;
 static int sOpen;
+// Music Options > Extra Music: Explorers of Sky's ROM (gPortExtraRom), its DSE
+// songs played on some dungeon floors (Port_ExtraMusicFor). A slot plays one
+// as track EXTRA_TRACK + its index in sExtra.dse.
+static NdsMusic sExtra;
+static int sExtraOpen;
+#define EXTRA_TRACK 0x4000
 static Track *sTracks;
 static int sCount, sSongCount; // all the tracks; the music (the sound effects come after it)
 
@@ -881,14 +887,19 @@ static void ApplySlots(void)
 {
     for (int i = 0; i < SLOTS; i++) {
         Slot *s = &sSlots[i];
-        int want = sOpen ? s->want : -1;
+        int want = (s->want >= EXTRA_TRACK ? sExtraOpen : sOpen) ? s->want : -1;
         if (want != s->track || s->wantSerial != s->serial) {
             song_close(s->song);
             s->song = NULL;
             s->track = want;
             s->serial = s->wantSerial;
             s->ended = 0;
-            if (want >= 0 && want < sCount) {
+            if (want >= EXTRA_TRACK) { // (Extra Music: an Explorers of Sky song)
+                s->song = song_open_dse(&sExtra.dse, want - EXTRA_TRACK, sMixRate);
+                if (s->song != NULL)
+                    song_set_loops(s->song, s->loop ? 0 : 1, 0);
+            }
+            else if (want >= 0 && want < sCount) {
                 s->song = OpenTrack(&sTracks[want]);
                 if (s->song != NULL)
                     song_set_loops(s->song, s->loop ? 0 : i >= SLOT_SFX ? 0 : 1, 0);
@@ -1046,7 +1057,7 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
         sMixRate = 2 * (uint32_t)rate;
     // (at twice the rate whenever the ROM is open, so that the rate doesn't
     // change, nor the sound with it, between one track and the next)
-    if (!sOpen || count <= 0 || count > 1024)
+    if ((!sOpen && !sExtraOpen) || count <= 0 || count > 1024)
         return 0;
     MusicSync(); // the samples made for this frame
     InitSlots();
@@ -1103,4 +1114,153 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     }
     *outRate = 2 * rate;
     return count * 2;
+}
+
+// --- Extra Music ---------------------------------------------------------------
+//
+// Music Options > Extra Music: On: on the dungeon floors given below (or in
+// extra-music.txt), Explorers of Sky's songs play instead of the floor's own
+// music, from its ROM (picked in Music Options, gPortExtraRom; that game's
+// only: C2SE, C2SP, C2SJ). The game (port_extra_music.c) asks which song
+// for the floor, then plays it in the background music's slot.
+
+char gPortExtraRom[256];
+const char *Port_ExtraMusicRomPath(void) { return gPortExtraRom; }
+static char sExtraTried[256]; // (a ROM that wouldn't open: not tried again each frame)
+
+static int IsSky(const NdsMusic *m)
+{
+    const char *c = m->hdr.gamecode;
+    return c[0] == 'C' && c[1] == '2' && c[2] == 'S';
+}
+
+void Port_ExtraMusicClose(void)
+{
+    MusicSync();
+    if (!sExtraOpen)
+        return;
+    for (int i = 0; i < SLOTS; i++) // (its songs read the ROM as they play)
+        if (sSlots[i].track >= EXTRA_TRACK) {
+            song_close(sSlots[i].song);
+            sSlots[i].song = NULL;
+            sSlots[i].track = -1;
+        }
+    nds_music_close(&sExtra);
+    sExtraOpen = 0;
+}
+
+// The ROM picked (gPortExtraRom) open: Explorers of Sky's, with its songs
+int Port_ExtraMusicOpen(void)
+{
+    if (sExtraOpen)
+        return 1;
+    if (gPortExtraRom[0] == 0 || strcmp(sExtraTried, gPortExtraRom) == 0)
+        return 0;
+    snprintf(sExtraTried, sizeof(sExtraTried), "%s", gPortExtraRom);
+    MusicSync();
+    if (nds_music_open(&sExtra, gPortExtraRom) != NDSM_OK)
+        return 0;
+    if (!IsSky(&sExtra) || sExtra.dse.num == 0) {
+        nds_music_close(&sExtra);
+        return 0;
+    }
+    sExtraOpen = 1;
+    sExtraTried[0] = 0;
+    InitSlots();
+    return 1;
+}
+
+// Music Options found a ROM for Extra Music (a path on the SD card): 1
+// Explorers of Sky's, kept (config.ini) and open; 0 another game's (even
+// Explorers of Time or Darkness): not taken; -1 not a ROM that opens
+int Port_ExtraMusicTryRom(const char *path)
+{
+    NdsMusic m;
+    if (strlen(path) >= sizeof(gPortExtraRom))
+        return -1;
+    MusicSync();
+    if (nds_music_open(&m, path) != NDSM_OK)
+        return -1;
+    int sky = IsSky(&m) && m.dse.num > 0;
+    nds_music_close(&m);
+    if (!sky)
+        return 0;
+    Port_ExtraMusicClose();
+    snprintf(gPortExtraRom, sizeof(gPortExtraRom), "%s", path);
+    sExtraTried[0] = 0;
+    Port_SaveConfig();
+    return Port_ExtraMusicOpen() ? 1 : -1;
+}
+
+// The slot track of Explorers of Sky's background music number n (its
+// bgmNNNN.smd), or -1
+int Port_ExtraMusicTrack(int n)
+{
+    if (!Port_ExtraMusicOpen())
+        return -1;
+    int idx = dse_set_find(&sExtra.dse, DSE_GROUP_BGM, (uint32_t)n);
+    return idx >= 0 ? EXTRA_TRACK + idx : -1;
+}
+
+// Which floors play which song: dungeon (its number in the game: constants/
+// dungeon.h), its floors first..last, Explorers of Sky's song number.
+typedef struct {
+    uint8_t dungeon, first, last;
+    uint16_t song;
+} ExtraRule;
+// (built in: to be filled in)
+static const ExtraRule sExtraBuiltIn[] = {
+    { 0xFF, 0, 0, 0 }, // (none yet)
+};
+#define EXTRA_RULES_MAX 256
+static ExtraRule sExtraRules[EXTRA_RULES_MAX];
+static int sExtraRuleCount = -1; // -1: not read yet
+
+// extra-music.txt in the data folder, if it's there, in place of the
+// built-in ones: "<dungeon> <first>-<last> = <song>" (or one floor:
+// "<dungeon> <floor> = <song>"), all numbers; ; or # starts a comment
+static void LoadExtraRules(void)
+{
+    sExtraRuleCount = 0;
+    void *f = Backend_FileOpen("extra-music.txt");
+    if (f == NULL) {
+        for (unsigned i = 0; i < sizeof(sExtraBuiltIn) / sizeof(sExtraBuiltIn[0]); i++)
+            if (sExtraBuiltIn[i].dungeon != 0xFF && sExtraRuleCount < EXTRA_RULES_MAX)
+                sExtraRules[sExtraRuleCount++] = sExtraBuiltIn[i];
+        return;
+    }
+    uint32_t size = Backend_FileSize(f);
+    char *text = size < 65536 ? malloc(size + 1) : NULL;
+    if (text != NULL && Backend_FileRead(f, 0, text, size)) {
+        text[size] = 0;
+        for (char *line = text; line != NULL && *line; ) {
+            char *next = strchr(line, '\n');
+            if (next != NULL)
+                *next++ = 0;
+            for (char *c = line; *c; c++)
+                if (*c == ';' || *c == '#') { *c = 0; break; }
+            int d, a, b, song;
+            if (sExtraRuleCount < EXTRA_RULES_MAX
+                && (sscanf(line, " %d %d - %d = %d", &d, &a, &b, &song) == 4
+                    || (sscanf(line, " %d %d = %d", &d, &a, &song) == 3 && (b = a, 1)))
+                && d >= 0 && d < 255 && a >= 0 && b >= a && b < 256 && song >= 0) {
+                ExtraRule r = { (uint8_t)d, (uint8_t)a, (uint8_t)b, (uint16_t)song };
+                sExtraRules[sExtraRuleCount++] = r;
+            }
+            line = next;
+        }
+    }
+    free(text);
+    Backend_FileClose(f);
+}
+
+// Explorers of Sky's song for this dungeon's floor, or -1 (the floor's own music)
+int Port_ExtraMusicFor(int dungeon, int floor)
+{
+    if (sExtraRuleCount < 0)
+        LoadExtraRules();
+    for (int i = 0; i < sExtraRuleCount; i++)
+        if (sExtraRules[i].dungeon == dungeon && floor >= sExtraRules[i].first && floor <= sExtraRules[i].last)
+            return sExtraRules[i].song;
+    return -1;
 }
