@@ -362,6 +362,11 @@ static const IniSetting sIni[] = {
     { "Save Data", "Current Save Data", &gPortConfig.saveSlot, sIniSlots },
 };
 
+// Music Options: where the DS ROM is on the SD card ("/roms/nds/pmd-blue.nds"),
+// as picked there (Blue Rescue Team's only); "" for none (pmd-blue.nds in
+// the data folder, if it's there). config.ini: [Music Options] DS ROM.
+char gPortDsRom[256];
+
 static int IniLower(int c)
 {
     return c >= 'A' && c <= 'Z' ? c + 32 : c;
@@ -457,6 +462,18 @@ static void IniLoad(const char *text, uint32_t len)
         for (unsigned i = 0; i < sizeof(sIni) / sizeof(sIni[0]); i++)
             if (IniSame(section, sectionLen, sIni[i].section) && IniSame(line, keyLen, sIni[i].key))
                 IniValue(&sIni[i], eq + 1, valueLen);
+        if (IniSame(section, sectionLen, "Music Options") && IniSame(line, keyLen, "DS ROM")) {
+            // the path as written, spaces at either end left out (not ; or #:
+            // the comment, as for every line)
+            const char *v = eq + 1, *ve = stop;
+            while (v < ve && (*v == ' ' || *v == '\t')) v++;
+            while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t')) ve--;
+            int n = (int)(ve - v);
+            if (n >= (int)sizeof(gPortDsRom))
+                n = 0;
+            memcpy(gPortDsRom, v, n);
+            gPortDsRom[n] = 0;
+        }
     }
 }
 
@@ -498,6 +515,10 @@ static bool8 IniSave(void)
                 }
             INI_PRINT("\n");
         }
+        // after Music Options' own settings: the DS ROM picked there
+        if (strcmp(s->section, "Music Options") == 0
+            && (i + 1 == sizeof(sIni) / sizeof(sIni[0]) || strcmp(sIni[i + 1].section, s->section) != 0))
+            INI_PRINT("DS ROM = %s\n", gPortDsRom);
     }
     for (int slot = 0; slot < 3; slot++) {
         INI_PRINT("\n[Save Data %d]\n", slot + 1);

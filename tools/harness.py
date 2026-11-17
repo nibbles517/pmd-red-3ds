@@ -182,6 +182,11 @@ class Harness:
         # older binary one (config.bin), and config.ini is not read or written
         return bool(self.args.config) and self.args.config.lower().endswith('.ini')
 
+    def sd_path(self, name):
+        # the SD card: --sd DIR (default: the data folder)
+        root = self.args.sd or self.args.data or (os.path.dirname(self.args.save) if self.args.save else '.')
+        return os.path.join(root, name.lstrip('/'))
+
     def save_path(self):
         slot = getattr(self, 'save_slot', 0)
         if not self.args.save or slot == 0:
@@ -299,6 +304,8 @@ class Harness:
                 name = bytes(uc.mem_read(buf, length)).decode('latin-1')
                 folder = self.args.data or (os.path.dirname(self.args.save) if self.args.save else '.')
                 path = os.path.join(folder, name)
+                if name.startswith('/'):  # a path on the SD card: --sd DIR
+                    path = self.sd_path(name)
                 if name == 'config.ini':  # the settings: --config FILE.ini (else none)
                     path = self.args.config if self.ini_config() else ''
                 self.regs[8] = 0
@@ -328,6 +335,22 @@ class Harness:
                 if path:
                     open(path, 'wb').write(bytes(uc.mem_read(buf, length)))
                 self.regs[8] = 1
+            elif value == 11:  # a folder of the SD card (--sd DIR): 128-byte entries, 124-byte name + isDir byte
+                name = bytes(uc.mem_read(self.regs[20], self.regs[19])).decode('latin-1')
+                path, n = self.sd_path(name), 0
+                if os.path.isdir(path):
+                    for e in sorted(os.listdir(path)):
+                        if n >= length:
+                            break
+                        raw = e.encode('utf-8')
+                        if len(raw) >= 124:
+                            continue
+                        isdir = os.path.isdir(os.path.join(path, e))
+                        uc.mem_write(buf + n * 128, raw.ljust(124, b'\0') + bytes([1 if isdir else 0, 0, 0, 0]))
+                        n += 1
+                    self.regs[8] = n
+                else:
+                    self.regs[8] = 0xFFFFFFFF
             elif value == 2:
                 ok = 0
                 if save and os.path.exists(save):
@@ -473,6 +496,7 @@ def main():
     ap.add_argument('--out', default='build/shots')
     ap.add_argument('--save')
     ap.add_argument('--data', help='folder of the data files (pmd-blue.nds); default: the --save folder')
+    ap.add_argument('--sd', help='folder standing for the SD card (Music Options finding the DS ROM); default: the data folder')
     ap.add_argument('--config', help='the port settings file: FILE.ini (config.ini), or the older config.bin')
     ap.add_argument('--wav')
     ap.add_argument('--song', action='append', default=[], help='FRAME:N: stop the GBA music and start song N (loudness checks)')

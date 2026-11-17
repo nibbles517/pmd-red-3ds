@@ -6551,7 +6551,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..0202783b 100644
+index 86f582c2..eee1baac 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -6600,7 +6600,7 @@ index 86f582c2..0202783b 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +57,21 @@ enum OptionsMenuStates
+@@ -31,6 +57,22 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -6609,8 +6609,8 @@ index 86f582c2..0202783b 100644
 +    OPTIONS_MENU_SAVE_DATA, // 3DS port: picking Save Data 1-3
 +    OPTIONS_MENU_SAVE_LOADED, // 3DS port: "Loaded a new save data."
 +    OPTIONS_MENU_MUSIC, // 3DS port: Music Options' track list
-+    OPTIONS_MENU_MUSIC_MISSING, // 3DS port: "pmd-blue.nds was not found."
-+    OPTIONS_MENU_MUSIC_MISSING2, // ... "Please make sure ..."
++    OPTIONS_MENU_MUSIC_MISSING, // 3DS port: "The DS ROM was not found."
++    OPTIONS_MENU_MUSIC_MISSING2, // ... "Please find ...", then the SD card's folders
 +    OPTIONS_MENU_MUSIC_OTHER, // 3DS port: "The file appears to not be ..."
 +    OPTIONS_MENU_MUSIC_OTHER2, // ... "The music may only be played here. ..."
 +    OPTIONS_MENU_MUSIC_SETTINGS, // 3DS port: Music Style, Music Player
@@ -6619,10 +6619,11 @@ index 86f582c2..0202783b 100644
 +    OPTIONS_MENU_RETURN_ASK, // 3DS port: "Would you like to save ... main menu?"
 +    OPTIONS_MENU_RETURN_SAVE, // 3DS port: saving, as at a save point
 +    OPTIONS_MENU_DEBUG_ASK, // 3DS port: "Load the Debug Room ...?"
++    OPTIONS_MENU_ROM_BROWSE, // 3DS port: finding the DS ROM on the SD card
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +89,135 @@ static void sub_801DED0(void);
+@@ -48,6 +90,139 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -6667,20 +6668,24 @@ index 86f582c2..0202783b 100644
 +static bool8 sReturnToTitle; // saved: the field ends, for the title's main menu
 +static void CreateMatchMenu(void);
 +static void HandleMatchMenu(void);
-+ALIGNED(4) static const u8 sMusicMissing[] = _("pmd-blue.nds was not found.");
++ALIGNED(4) static const u8 sMusicMissing[] = _("The DS ROM was not found.");
 +ALIGNED(4) static const u8 sMusicOther[] = _("The file appears to not be a Pokémon\nMystery Dungeon: Blue Rescue Team file.");
 +ALIGNED(4) static const u8 sMusicOther2[] = _("The music may only be played here. In\ndungeons, you will need a Music Box to be\nable to play one of the tracks.");
 +// Pokémon Mystery Dungeon: Blue Rescue Team: APHE (North America), APHP
 +// (Europe), APHJ (Japan)
 +#define MUSIC_GAME_CODE "APH"
-+ALIGNED(4) static const u8 sMusicMissing2[] = _("Please make sure pmd-blue.nds is in the\nsame directory, and then try again.");
++ALIGNED(4) static const u8 sMusicMissing2[] = _("Please find your Pokémon Mystery Dungeon:\nBlue Rescue Team ROM (.nds) on the SD card.");
++static void CreateRomBrowser(void);
++static void HandleRomBrowser(void);
++static void SetRomBrowserWindows(void);
++static u8 sRomFor; // what the DS ROM was looked for: MENU_OPTION_MUSIC, _MUSIC_MATCH or _BALANCE
 +static void CreateMusicMenu(void);
 +static void HandleMusicMenu(void);
 +static void HandleMusicMissing(void);
 +static void SetMusicWindows(void);
 +static void HandleMusicSettings(void);
 +static MonPortraitMsg *MusicIconPortrait(void);
-+static bool8 sMusicLocked; // pmd-blue.nds is another game's: GBA music only
++static bool8 sMusicLocked; // the DS ROM is another game's: GBA music only
 +static s32 sMusicSettingsEntry; // where the cursor goes in Music Options
 +ALIGNED(4) static const u8 sSaveData1[] = _("Save Data 1");
 +ALIGNED(4) static const u8 sSaveData2[] = _("Save Data 2");
@@ -6758,7 +6763,7 @@ index 86f582c2..0202783b 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +246,63 @@ u32 sub_801DCE8(void)
+@@ -76,8 +251,66 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -6775,7 +6780,7 @@ index 86f582c2..0202783b 100644
 +            break;
 +        case OPTIONS_MENU_SAVE_DATA:
 +            HandleSaveDataMenu();
-+            break;
+             break;
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            HandleSaveDataLoaded();
 +            break;
@@ -6793,7 +6798,7 @@ index 86f582c2..0202783b 100644
 +            break;
 +        case OPTIONS_MENU_MUSIC_MATCH:
 +            HandleMatchMenu();
-             break;
++            break;
 +        case OPTIONS_MENU_RETURN_ASK: {
 +            s32 menuAction;
 +            if (sub_80144A4(&menuAction) == 0)
@@ -6818,11 +6823,14 @@ index 86f582c2..0202783b 100644
 +        case OPTIONS_MENU_MUSIC_MATCH_OTHER:
 +            HandleMusicMissing();
 +            break;
++        case OPTIONS_MENU_ROM_BROWSE:
++            HandleRomBrowser();
++            break;
 +#endif
          default:
              break;
      }
-@@ -120,9 +345,13 @@ static void sub_801DD84(void)
+@@ -120,9 +353,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -6837,7 +6845,7 @@ index 86f582c2..0202783b 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +359,32 @@ static void sub_801DD84(void)
+@@ -130,10 +367,37 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -6866,12 +6874,17 @@ index 86f582c2..0202783b 100644
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetMusicWindows();
++            break;
++        case OPTIONS_MENU_ROM_BROWSE:
++            for (i = 0; i < 4; i++)
++                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
++            SetRomBrowserWindows();
              break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +401,10 @@ static void sub_801DED0(void)
+@@ -150,6 +414,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -6882,7 +6895,7 @@ index 86f582c2..0202783b 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +419,88 @@ static void sub_801DED0(void)
+@@ -164,12 +432,91 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -6946,6 +6959,9 @@ index 86f582c2..0202783b 100644
 +        case OPTIONS_MENU_MUSIC_MATCH_OTHER:
 +            CreateDialogueBoxAndPortrait(sMusicOther, 0, MusicIconPortrait(), 0x101);
 +            break;
++        case OPTIONS_MENU_ROM_BROWSE:
++            CreateRomBrowser();
++            break;
 +        case OPTIONS_MENU_MUSIC_SETTINGS:
 +            sUnknown_203B25C->newOptions = *gGameOptionsRef;
 +            PortMusicMenu_Create(&sUnknown_203B25C->newOptions, sMusicLocked, sMusicSettingsEntry);
@@ -6971,7 +6987,7 @@ index 86f582c2..0202783b 100644
      }
  }
  
-@@ -180,12 +511,57 @@ static void CreateOthersMenu(void)
+@@ -180,12 +527,57 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -7029,7 +7045,7 @@ index 86f582c2..0202783b 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +605,48 @@ static void HandleOthersMenu(void)
+@@ -229,6 +621,51 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -7044,7 +7060,9 @@ index 86f582c2..0202783b 100644
 +            SetOptionsMenuState(OPTIONS_MENU_SAVE_DATA);
 +            break;
 +        case MENU_OPTION_MUSIC:
-+            // the DS version's music, from pmd-blue.nds (if it is there and usable)
++            // the DS version's music, from its ROM (if it is found and usable;
++            // else found on the SD card first)
++            sRomFor = MENU_OPTION_MUSIC;
 +            sOpenedOptions = *gGameOptionsRef;
 +            sOpenedConfig = gPortConfig;
 +            sMusicSettingsEntry = 0;
@@ -7067,6 +7085,7 @@ index 86f582c2..0202783b 100644
 +            // Blue Rescue Team's tracks only
 +            sBalance = menuAction == MENU_OPTION_BALANCE;
 +            sMatchSfx = FALSE; // (the music first)
++            sRomFor = menuAction;
 +            if (Port_MusicOpen() <= 0)
 +                SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING);
 +            else if (!Port_MusicRomIsBlue())
@@ -7078,7 +7097,7 @@ index 86f582c2..0202783b 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +690,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +709,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -7095,7 +7114,7 @@ index 86f582c2..0202783b 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,12 +710,987 @@ static void sub_801E0FC(void)
+@@ -282,12 +729,1251 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -7144,10 +7163,10 @@ index 86f582c2..0202783b 100644
 +            }
 +            else
 +                LeaveSettings(PortScreenMenu_Changed());
-             break;
-     }
- }
- 
++            break;
++    }
++}
++
 +// Save Data 1-3: that save file is used from now on (and next time); the
 +// main menu then reads it as at power-on.
 +static void HandleSaveDataMenu(void)
@@ -7261,6 +7280,267 @@ index 86f582c2..0202783b 100644
 +        out[n++] = c;
 +    }
 +    out[n] = '\0';
++}
++
++// --- Finding the DS ROM -------------------------------------------------------
++//
++// The SD card's folders and .nds files, in a paged list (folders first, by
++// name); below it, the folder and the controls. A opens a folder, or tries a
++// file: Blue Rescue Team's ROM is kept for next time (config.ini: DS ROM) and
++// Music Options (or DS Volume Balance) opens with it; another game's says so
++// as before, and plays in Music Options only, until the game is closed. B
++// goes up a folder (out of the top one: back), START goes back.
++
++#define ROM_PER_PAGE 8
++#define ROM_MAX 256
++#define ROM_LIST_WIN 0
++#define ROM_INFO_WIN 1
++
++static WindowHeader sRomHeader;
++static const WindowTemplate sRomListWindow = {
++    .flags = WINTEMPLATE_FLAG_NONE,
++    .type = WINDOW_TYPE_WITH_HEADER,
++    .pos = { 2, 1 },
++    .width = 26,
++    .height = 14,
++    .totalHeight = 14,
++    .unk12 = 0,
++    .header = &sRomHeader,
++};
++static const WindowTemplate sRomInfoWindow = {
++    .flags = WINTEMPLATE_FLAG_NONE,
++    .type = WINDOW_TYPE_NORMAL,
++    .pos = { 2, 15 },
++    .width = 26,
++    .height = 4,
++    .totalHeight = 4,
++    .unk12 = 0,
++    .header = NULL,
++};
++ALIGNED(4) static const u8 sRomTitle[] = _("Find the DS ROM");
++ALIGNED(4) static const u8 sRomControls[] = _("A Open  B Up a folder  START Back");
++ALIGNED(4) static const u8 sRomCantOpen[] = _("{COLOR RED}That file couldn't be opened as a ROM.{RESET}");
++ALIGNED(4) static const u8 sRomCantRead[] = _("{COLOR RED}This folder couldn't be read.{RESET}");
++ALIGNED(4) static const u8 sRomEmpty[] = _("(no folders or .nds files here)");
++
++static PortDirEntry sRomEntries[ROM_MAX];
++static s32 sRomCount;
++static char sRomDir[256] = "/"; // (kept while the game runs)
++static MenuInputStruct sRomInput;
++static const u8 *sRomStatus;
++
++static void SetRomBrowserWindows(void)
++{
++    sRomHeader.count = 1;
++    sRomHeader.currId = 0;
++    sRomHeader.width = 15;
++    sRomHeader.f3 = 0;
++    sUnknown_203B25C->unkBC.id[ROM_LIST_WIN] = sRomListWindow;
++    sub_8012D08(&sUnknown_203B25C->unkBC.id[ROM_LIST_WIN], ROM_PER_PAGE);
++    sUnknown_203B25C->unkBC.id[ROM_INFO_WIN] = sRomInfoWindow;
++}
++
++static s32 RomLower(s32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
++
++static bool8 RomIsNds(const char *name)
++{
++    size_t n = strlen(name);
++    return n > 4 && name[n - 4] == '.' && RomLower(name[n - 3]) == 'n' && RomLower(name[n - 2]) == 'd'
++        && RomLower(name[n - 1]) == 's';
++}
++
++static s32 RomCompare(const PortDirEntry *a, const PortDirEntry *b)
++{
++    const char *x = a->name, *y = b->name;
++    if (a->isDir != b->isDir)
++        return a->isDir ? -1 : 1;
++    while (*x && RomLower(*x) == RomLower(*y)) { x++; y++; }
++    return RomLower((u8)*x) - RomLower((u8)*y);
++}
++
++// sRomDir's folders and .nds files (not hidden ones), sorted
++static void RomReadDir(void)
++{
++    s32 i, j, n = Backend_DirList(sRomDir, sRomEntries, ROM_MAX);
++
++    sRomStatus = n < 0 ? sRomCantRead : NULL;
++    sRomCount = 0;
++    for (i = 0; i < n; i++) {
++        if (sRomEntries[i].name[0] == '.' || (!sRomEntries[i].isDir && !RomIsNds(sRomEntries[i].name)))
++            continue;
++        sRomEntries[sRomCount++] = sRomEntries[i];
++    }
++    for (i = 1; i < sRomCount; i++) { // (insertion sort: a few hundred at most)
++        PortDirEntry e = sRomEntries[i];
++        for (j = i; j > 0 && RomCompare(&sRomEntries[j - 1], &e) > 0; j--)
++            sRomEntries[j] = sRomEntries[j - 1];
++        sRomEntries[j] = e;
++    }
++}
++
++static void RomPath(char *out, s32 size, const char *name)
++{
++    snprintf(out, size, "%s%s%s", sRomDir, sRomDir[strlen(sRomDir) - 1] == '/' ? "" : "/", name);
++}
++
++static void DrawRomList(void)
++{
++    MenuInputStruct *in = &sRomInput;
++    u8 text[48];
++    char name[132];
++    s32 i;
++
++    CallPrepareTextbox_8008C54(ROM_LIST_WIN);
++    sub_80073B8(ROM_LIST_WIN);
++    PrintStringOnWindow(10, 0, sRomTitle, ROM_LIST_WIN, 0);
++    snprintf((char *)text, sizeof(text), "%d/%d", in->currPage + 1, in->pagesCount > 0 ? in->pagesCount : 1);
++    PrintStringOnWindow(100, 0, text, ROM_LIST_WIN, 0);
++    if (sRomCount == 0)
++        PrintStringOnWindow(8, GetMenuEntryYCoord(in, 0), sRomEmpty, ROM_LIST_WIN, 0);
++    for (i = 0; i < in->currPageEntries && sRomCount > 0; i++) {
++        const PortDirEntry *e = &sRomEntries[in->currPage * in->entriesPerPage + i];
++        snprintf(name, sizeof(name), "%s%s", e->name, e->isDir ? "/" : "");
++        MusicLabel(text, 38, name);
++        PrintStringOnWindow(8, GetMenuEntryYCoord(in, i), text, ROM_LIST_WIN, 0);
++    }
++    sub_80073E0(ROM_LIST_WIN);
++}
++
++static void DrawRomInfo(void)
++{
++    u8 text[48];
++    size_t n = strlen(sRomDir);
++    const char *dir = sRomDir;
++    char shown[48];
++
++    CallPrepareTextbox_8008C54(ROM_INFO_WIN);
++    sub_80073B8(ROM_INFO_WIN);
++    // the folder (its end, if it's long)
++    if (n > 38) {
++        snprintf(shown, sizeof(shown), "...%s", dir + n - 35);
++        dir = shown;
++    }
++    MusicLabel(text, sizeof(text), dir);
++    PrintStringOnWindow(4, 0, text, ROM_INFO_WIN, 0);
++    PrintStringOnWindow(4, 12, sRomStatus != NULL ? sRomStatus : sRomControls, ROM_INFO_WIN, 0);
++    sub_80073E0(ROM_INFO_WIN);
++}
++
++static void RomShowDir(s32 cursor)
++{
++    RomReadDir();
++    CreateMenuOnWindow(&sRomInput, sRomCount > 0 ? sRomCount : 1, ROM_PER_PAGE, ROM_LIST_WIN);
++    if (cursor > 0 && cursor < sRomCount)
++        MoveMenuToEntryId(&sRomInput, cursor);
++    DrawRomList();
++    DrawRomInfo();
++}
++
++static void CreateRomBrowser(void)
++{
++    const char *picked = Port_MusicRomPath();
++
++    // the folder of the ROM picked before (gone from there now), else the
++    // last one looked in
++    if (picked[0] == '/') {
++        const char *slash = strrchr(picked, '/');
++        s32 len = (s32)(slash - picked);
++        if (len < (s32)sizeof(sRomDir)) {
++            memcpy(sRomDir, picked, len);
++            sRomDir[len > 0 ? len : 1] = 0;
++            if (len == 0)
++                sRomDir[0] = '/';
++        }
++    }
++    if (Backend_DirList(sRomDir, sRomEntries, 1) < 0) // (that folder is gone: the top one)
++        strcpy(sRomDir, "/");
++    sMusicPrevKeys = Port_KeysHeld();
++    RomShowDir(0);
++}
++
++static void RomGoUp(void)
++{
++    char *slash = strrchr(sRomDir, '/');
++    char left[136];
++    s32 i;
++
++    snprintf(left, sizeof(left), "%s", slash + 1);
++    if (slash == sRomDir)
++        sRomDir[1] = 0;
++    else
++        *slash = 0;
++    RomReadDir();
++    for (i = 0; i < sRomCount; i++) // (the cursor on the folder just left)
++        if (sRomEntries[i].isDir && strcmp(sRomEntries[i].name, left) == 0)
++            break;
++    RomShowDir(i < sRomCount ? i : 0);
++}
++
++static void HandleRomBrowser(void)
++{
++    u16 keys = Port_KeysHeld();
++    u16 pressed = keys & ~sMusicPrevKeys;
++    char path[256];
++
++    sMusicPrevKeys = keys;
++    if (pressed & START_BUTTON) {
++        PlayMenuSoundEffect(MENU_SFX_BACK);
++        SetOptionsMenuState(OPTIONS_MENU_MAIN);
++        return;
++    }
++    switch (GetKeyPress(&sRomInput)) {
++        case INPUT_B_BUTTON:
++            PlayMenuSoundEffect(MENU_SFX_BACK);
++            if (strcmp(sRomDir, "/") == 0) {
++                SetOptionsMenuState(OPTIONS_MENU_MAIN);
++                return;
++            }
++            RomGoUp();
++            return;
++        case INPUT_A_BUTTON: {
++            const PortDirEntry *e;
++            s32 r;
++            if (sRomCount == 0)
++                return;
++            e = &sRomEntries[GET_CURRENT_MENU_ENTRY(sRomInput)];
++            RomPath(path, sizeof(path), e->name);
++            if (strlen(path) >= sizeof(sRomDir) - 1) {
++                sRomStatus = sRomCantRead;
++                DrawRomInfo();
++                return;
++            }
++            if (e->isDir) {
++                PlayMenuSoundEffect(MENU_SFX_ACCEPT);
++                strcpy(sRomDir, path);
++                RomShowDir(0);
++                return;
++            }
++            r = Port_MusicTryRom(path);
++            if (r < 0) {
++                PlayMenuSoundEffect(MENU_SFX_FAIL);
++                sRomStatus = sRomCantOpen;
++                DrawRomInfo();
++                return;
++            }
++            PlayMenuSoundEffect(MENU_SFX_ACCEPT);
++            if (sRomFor == MENU_OPTION_MUSIC) {
++                // Blue Rescue Team's: Music Options; another game's: says so,
++                // then its music here only (as before)
++                sMusicLocked = r == 0;
++                SetOptionsMenuState(sMusicLocked ? OPTIONS_MENU_MUSIC_OTHER : OPTIONS_MENU_MUSIC_SETTINGS);
++            }
++            else
++                SetOptionsMenuState(r == 0 ? OPTIONS_MENU_MUSIC_MATCH_OTHER : OPTIONS_MENU_MUSIC_MATCH);
++            return;
++        }
++        default:
++            if (MenuCursorUpdate(&sRomInput, TRUE)) {
++                sRomStatus = NULL;
++                DrawRomList();
++                DrawRomInfo();
++            }
++            break;
++    }
 +}
 +
 +static void DrawMusicList(void)
@@ -7446,10 +7726,10 @@ index 86f582c2..0202783b 100644
 +        case 3: // A on Music Player
 +            PortScreenMenu_Destroy();
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC);
-+            break;
-+    }
-+}
-+
+             break;
+     }
+ }
+ 
 +static void HandleMusicMenu(void)
 +{
 +    u16 keys = Port_KeysHeld();
@@ -8042,8 +8322,8 @@ index 86f582c2..0202783b 100644
 +    }
 +}
 +
-+// "pmd-blue.nds was not found.", then how to fix it; or, for another game's
-+// ROM, that it isn't Blue Rescue Team's, then the player
++// "The DS ROM was not found.", then to find it (the SD card's folders); or,
++// for another game's ROM, that it isn't Blue Rescue Team's, then the player
 +static void HandleMusicMissing(void)
 +{
 +    s32 menuAction;
@@ -8053,6 +8333,9 @@ index 86f582c2..0202783b 100644
 +    switch (sUnknown_203B25C->state) {
 +        case OPTIONS_MENU_MUSIC_MISSING:
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC_MISSING2);
++            break;
++        case OPTIONS_MENU_MUSIC_MISSING2:
++            SetOptionsMenuState(OPTIONS_MENU_ROM_BROWSE);
 +            break;
 +        case OPTIONS_MENU_MUSIC_OTHER:
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC_OTHER2);

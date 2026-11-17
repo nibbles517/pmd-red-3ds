@@ -163,12 +163,30 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
 // game's picture, 1 the second screen's
 enum { PORT_SCALE_NONE, PORT_SCALE_FULL, PORT_SCALE_STRETCH };
 int Port_ScreenScale(int screen);
-// A file of the port's data folder, read only (Music Options: pmd-blue.nds).
-// NULL if it isn't there. Reads are buffered by the backend.
+// A file of the port's data folder, read only (Music Options: pmd-blue.nds),
+// or with a name starting with / a file anywhere on the SD card (the DS ROM
+// picked in Music Options). NULL if it isn't there. Reads are buffered by
+// the backend.
 void *Backend_FileOpen(const char *name);
 uint32_t Backend_FileSize(void *file);
 bool Backend_FileRead(void *file, uint32_t offset, void *dest, uint32_t size);
 void Backend_FileClose(void *file);
+// A folder of the SD card ("/", "/roms/nds"): its folders and files (not
+// "." or ".."), up to max; -1 if it can't be read. (Music Options: finding
+// the DS ROM. Its path then opens with Backend_FileOpen("/roms/nds/..."))
+// Music Options: the DS ROM's path on the SD card, as picked there (Blue
+// Rescue Team's only, kept in config.ini); "" for none (options.c)
+extern char gPortDsRom[256];
+void Port_SaveConfig(void);
+#ifndef PORT_DIR_ENTRY_DEFINED
+#define PORT_DIR_ENTRY_DEFINED
+typedef struct { // (128 bytes, whatever the ABI pads a struct to)
+    char name[124];
+    unsigned char isDir;
+    unsigned char pad[3];
+} PortDirEntry;
+int Backend_DirList(const char *dir, PortDirEntry *out, int max); // a folder of the SD card
+#endif
 // Writes a whole file of the data folder (Music Matching's music-map.txt).
 bool Backend_FileWrite(const char *name, const void *data, uint32_t size);
 // The port's own settings (options.c), a few bytes kept apart from the save.

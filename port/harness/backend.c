@@ -24,7 +24,8 @@ enum {
     IO_SONG = 22,         // read each frame: nonzero = stop the GBA music and start this song (--song)
 };
 enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_LOAD = 4, CMD_SAVE_SLOT = 5,
-       CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9, CMD_FILE_WRITE = 10 };
+       CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9, CMD_FILE_WRITE = 10,
+       CMD_DIR_LIST = 11 };
 
 const int Backend_Version18_UpdateRepoIfMissing = 18;
 
@@ -185,6 +186,17 @@ void Backend_FileClose(void *file)
 {
     IO[IO_HANDLE] = (uint32_t)(uintptr_t)file;
     IO[IO_CMD] = CMD_FILE_CLOSE;
+}
+
+// A folder of harness.py --sd DIR (default: the data folder), as the SD card
+int Backend_DirList(const char *dir, PortDirEntry *out, int max)
+{
+    IO[IO_HANDLE] = (uint32_t)(uintptr_t)dir; // (the folder, here)
+    IO[IO_ARG] = (uint32_t)strlen(dir);
+    IO[IO_BUF] = (uint32_t)(uintptr_t)out;
+    IO[IO_LEN] = (uint32_t)max;
+    IO[IO_CMD] = CMD_DIR_LIST;
+    return (int)IO[IO_RESULT];
 }
 
 bool Backend_FileWrite(const char *name, const void *data, uint32_t size)

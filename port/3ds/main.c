@@ -11,8 +11,9 @@
 // The GPU (citro3d) puts both pictures on the screens, scaling them; see
 // "Video on the GPU". Sound goes through the DSP (needs sdmc:/3ds/dspfirm.cdc,
 // which most custom firmware setups already have).
-// The save is sdmc:/3ds/pmd-red-3ds/pmd-red.sav, a standard 128 KiB GBA save
-// (Save Data 1; Save Data 2 and 3 are pmd-red-2.sav and pmd-red-3.sav).
+// The save is sdmc:/3ds/pmd-red-3ds/pmd-red-1.sav, a standard 128 KiB GBA save
+// (Save Data 1; Save Data 2 and 3 are pmd-red-2.sav and pmd-red-3.sav). An
+// older pmd-red.sav is renamed pmd-red-1.sav at start (MoveOldSave).
 
 #include <3ds.h>
 #include <citro3d.h>
@@ -21,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include "../core/port.h"
 #include "../core/gpulist.h"
 #include "../core/bgcache.h"
@@ -29,10 +31,11 @@
 // Save Data 1 (Game Options > Change Current Save Data on the title picks
 // another: pmd-red-2.sav, pmd-red-3.sav)
 static const char *const sSavePaths[3] = {
-    DATA_DIR "/pmd-red.sav", DATA_DIR "/pmd-red-2.sav", DATA_DIR "/pmd-red-3.sav",
+    DATA_DIR "/pmd-red-1.sav", DATA_DIR "/pmd-red-2.sav", DATA_DIR "/pmd-red-3.sav",
 };
-static const char *sSavePath = DATA_DIR "/pmd-red.sav";
-static char sSaveTmpPath[64] = DATA_DIR "/pmd-red.sav.tmp";
+static const char *sSavePath = DATA_DIR "/pmd-red-1.sav";
+static char sSaveTmpPath[64] = DATA_DIR "/pmd-red-1.sav.tmp";
+#define OLD_SAVE_PATH DATA_DIR "/pmd-red.sav" // (Save Data 1, as it was named before)
 #define SAVE_PATH sSavePath
 #define LOG_PATH DATA_DIR "/port.log"
 #define CONFIG_PATH DATA_DIR "/config.bin"
@@ -2027,10 +2030,15 @@ typedef struct {
     uint32_t bufOff, bufLen;
 } DataFile;
 
+// A name starting with / is a path on the SD card (Music Options: the DS ROM,
+// wherever it was picked); else a file of the data folder.
 void *Backend_FileOpen(const char *name)
 {
-    char path[256];
-    snprintf(path, sizeof(path), DATA_DIR "/%s", name);
+    char path[320];
+    if (name[0] == '/')
+        snprintf(path, sizeof(path), "sdmc:%s", name);
+    else
+        snprintf(path, sizeof(path), DATA_DIR "/%s", name);
     FILE *f = fopen(path, "rb");
     if (f == NULL)
         return NULL;
@@ -2090,6 +2098,37 @@ void Backend_FileClose(void *file)
     fclose(d->f);
     free(d->buf);
     free(d);
+}
+
+// A folder of the SD card (dir: "/", "/roms/nds", ...): its folders and
+// files, up to max (the browser that finds the DS ROM, options_menu1.c)
+int Backend_DirList(const char *dir, PortDirEntry *out, int max)
+{
+    char path[320];
+    snprintf(path, sizeof(path), "sdmc:%s", dir);
+    DIR *d = opendir(path);
+    if (d == NULL)
+        return -1;
+    int n = 0;
+    struct dirent *e;
+    while (n < max && (e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+            continue;
+        if (strlen(e->d_name) >= sizeof(out[n].name))
+            continue; // (too long to be opened again by name)
+        bool isDir = e->d_type == DT_DIR;
+        if (e->d_type == DT_UNKNOWN) {
+            char full[640];
+            struct stat st;
+            snprintf(full, sizeof(full), "%s/%s", path, e->d_name);
+            isDir = stat(full, &st) == 0 && S_ISDIR(st.st_mode);
+        }
+        snprintf(out[n].name, sizeof(out[n].name), "%s", e->d_name);
+        out[n].isDir = isDir ? 1 : 0;
+        n++;
+    }
+    closedir(d);
+    return n;
 }
 
 bool Backend_FileWrite(const char *name, const void *data, uint32_t size)
@@ -2246,6 +2285,16 @@ void Backend_Fatal(const char *msg)
     exit(1);
 }
 
+// Save Data 1 was pmd-red.sav: now pmd-red-1.sav, as 2 and 3 are named
+// (renamed once; a pmd-red-1.sav already there is kept, the old one too)
+static void MoveOldSave(void)
+{
+    struct stat st;
+    if (stat(OLD_SAVE_PATH, &st) != 0 || stat(sSavePaths[0], &st) == 0)
+        return;
+    rename(OLD_SAVE_PATH, sSavePaths[0]);
+}
+
 int main(void)
 {
     gfxInitDefault();
@@ -2253,6 +2302,7 @@ int main(void)
 
     mkdir("sdmc:/3ds", 0777);
     mkdir(DATA_DIR, 0777);
+    MoveOldSave();
     FILE *flag = fopen(DEBUG_FLAG, "r");
     if (flag) {
         fclose(flag);

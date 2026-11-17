@@ -111,6 +111,19 @@ const char *Port_MusicRomTitle(void);
 int Port_MusicIcon(u8 *tiles, u8 *colors); // the DS Menu icon, 64x64 (8x8 tiles)
 const char *Port_MusicGameCode(void); // e.g. "APHE" (Blue Rescue Team, North America)
 int Port_MusicRomIsBlue(void); // APHE, APHP or APHJ
+// Music Options finding the ROM: a path on the SD card ("/roms/nds/x.nds");
+// 1 Blue Rescue Team's (kept), 0 another game's (until closed), -1 not one
+int Port_MusicTryRom(const char *path);
+const char *Port_MusicRomPath(void); // the ROM picked ("": none, pmd-blue.nds)
+#ifndef PORT_DIR_ENTRY_DEFINED
+#define PORT_DIR_ENTRY_DEFINED
+typedef struct { // (128 bytes, whatever the ABI pads a struct to)
+    char name[124];
+    unsigned char isDir;
+    unsigned char pad[3];
+} PortDirEntry;
+int Backend_DirList(const char *dir, PortDirEntry *out, int max); // a folder of the SD card
+#endif
 // GBA song -> DS track (track list index, -1: none); Music Matching saves them
 int Port_MusicMapGet(int gbaSong);
 void Port_MusicMapSet(int gbaSong, int track);

@@ -1,6 +1,8 @@
 // Music Options: the DS version's music (Pokémon Mystery Dungeon: Blue Rescue
-// Team), played from pmd-blue.nds in the port's data folder by the NDS Music
-// Player's core (port/ndsmusic).
+// Team), played from its ROM by the NDS Music Player's core (port/ndsmusic).
+// The ROM is wherever it was picked on the SD card (Music Options finds it:
+// gPortDsRom, config.ini's DS ROM), or else pmd-blue.nds in the port's data
+// folder.
 //
 // The game's menu (options_menu1.c) lists the ROM's tracks and drives
 // playback through the calls below. The track plays together with the game's
@@ -238,12 +240,26 @@ static void StopSlots(void);
 
 void Port_MusicClose(void);
 
+// Another game's ROM picked in Music Options: its music there until the game
+// is closed (not kept in config.ini); "" for none
+static char sSessionRom[256];
+
+static const char *RomPath(void)
+{
+    return sSessionRom[0] ? sSessionRom : gPortDsRom[0] ? gPortDsRom : MUSIC_FILE;
+}
+
+const char *Port_MusicRomPath(void)
+{
+    return sSessionRom[0] ? sSessionRom : gPortDsRom;
+}
+
 int Port_MusicOpen(void)
 {
     if (sOpen)
         return sCount;
     MusicSync();
-    if (nds_music_open(&sRom, MUSIC_FILE) != NDSM_OK)
+    if (nds_music_open(&sRom, RomPath()) != NDSM_OK)
         return -1;
     sOpen = 1;
 
@@ -424,6 +440,33 @@ int Port_MusicRomIsBlue(void)
 {
     const char *c = sRom.hdr.gamecode;
     return sOpen && c[0] == 'A' && c[1] == 'P' && c[2] == 'H' && (c[3] == 'E' || c[3] == 'P' || c[3] == 'J');
+}
+
+// Music Options found a ROM (path on the SD card, "/..."): opened in place of
+// the one before. 1: Blue Rescue Team's, kept (config.ini) for next time;
+// 0: another game's, its music in Music Options only, until the game is
+// closed; -1: not a ROM that opens (the one before stays)
+int Port_MusicTryRom(const char *path)
+{
+    char before[256];
+    int ok;
+
+    if (strlen(path) >= sizeof(sSessionRom))
+        return -1;
+    memcpy(before, sSessionRom, sizeof(before));
+    Port_MusicClose();
+    snprintf(sSessionRom, sizeof(sSessionRom), "%s", path);
+    ok = Port_MusicOpen() > 0;
+    if (!ok) {
+        memcpy(sSessionRom, before, sizeof(sSessionRom));
+        return -1;
+    }
+    if (!Port_MusicRomIsBlue())
+        return 0;
+    sSessionRom[0] = 0;
+    snprintf(gPortDsRom, sizeof(gPortDsRom), "%s", path);
+    Port_SaveConfig();
+    return 1;
 }
 
 // --- GBA song -> DS track ---------------------------------------------------

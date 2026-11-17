@@ -48,15 +48,24 @@ the CPU then copies them, as earlier builds did.
   Homebrew Launcher. Sound needs `SD:/3ds/dspfirm.cdc` (most custom firmware
   setups already have it).
 
-The save file is `SD:/3ds/pmd-red-3ds/pmd-red.sav`, a standard 128 KiB GBA save:
+The save file is `SD:/3ds/pmd-red-3ds/pmd-red-1.sav`, a standard 128 KiB GBA save
+(an older build's `pmd-red.sav` is renamed `pmd-red-1.sav` when the game starts):
 you can copy a save from a GBA emulator there, or take the port's save back to
 an emulator. Back up saves before testing early builds. That is Save Data 1;
 Game Options > Change Current Save Data on the title's main menu switches to
 Save Data 2 or 3 (`pmd-red-2.sav`, `pmd-red-3.sav` in the same folder).
 
 Game Options > Music Options on the title's main menu plays the DS version's
-music: put your own dump of Pokémon Mystery Dungeon: Blue Rescue Team, named
-`pmd-blue.nds`, in that same folder (`SD:/3ds/pmd-red-3ds/`).
+music from your own dump of Pokémon Mystery Dungeon: Blue Rescue Team, kept
+anywhere on the SD card. The first time (or when it's no longer there), Music
+Options says the DS ROM was not found and lists the SD card's folders and
+`.nds` files to find it: A opens a folder or picks a file, B goes up a folder,
+START goes back. Blue Rescue Team's ROM is remembered for next time
+(`config.ini`, `[Music Options] DS ROM = /path/on/the/sd.nds`); another game's
+ROM says so and plays in Music Options only, until the game is closed, and is
+not remembered. If the remembered ROM isn't there at start, the game plays the
+GBA music and sounds. (Without one picked, `pmd-blue.nds` in
+`SD:/3ds/pmd-red-3ds/` is still used.)
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 The Music Player lists the ROM's sound effects after its music (in green);
