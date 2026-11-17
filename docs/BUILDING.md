@@ -154,5 +154,5 @@ TM/HM, 100% Recruit Rate, and the Permanent items: X-Ray Specs, Luminous Orb,
 No-Stick Cap, Goggle Specs, Weather Band, Twist Band, Mobile Scarf, Pierce
 Band, Sneak Scarf). A turns one on or off (a star while on). They are each
 Save Data's own, kept in `config.ini` under its `[Save Data N]` section
-(`Cheat: <name> = On/Off`; Exp. Multiplier `Off`, `2x` to `128x`). What each
+(`Cheat: <name> = On/Off`; Exp. Multiplier `Off`, `0x` (no Exp. Points at all), `2x` to `128x`). What each
 does: build/upstream/src/port_cheats.c.

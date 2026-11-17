@@ -350,10 +350,10 @@ index 00000000..d576cc98
 +#endif
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..76ba1d1c
+index 00000000..1b7ab65e
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,54 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -394,14 +394,16 @@ index 00000000..76ba1d1c
 +
 +
 +// Others > Cheats (in dungeons: dungeon_menu_others.c), each Save Data's own
-+// (config.ini, as its run options). 0 off, 1 on; CHEAT_EXP: 0 off, 1-7 2x-128x.
++// (config.ini, as its run options). 0 off, 1 on; CHEAT_EXP: 0 off, 1 0x (no Exp.
++// Points gained at all), 2-8 2x-128x (by name in config.ini).
 +enum {
 +    CHEAT_INF_HP, CHEAT_INF_PP, CHEAT_INF_BELLY, CHEAT_ONE_HIT, CHEAT_ACCURACY, CHEAT_EXP, // Stats
 +    CHEAT_ANY_TM, CHEAT_RECRUIT, CHEAT_XRAY, CHEAT_LUMINOUS, CHEAT_NOSTICK, CHEAT_GOGGLE, // Effects
 +    CHEAT_WEATHER, CHEAT_TWIST, CHEAT_MOBILE, CHEAT_PIERCE, CHEAT_SNEAK,
 +    PORT_CHEATS
 +};
-+#define CHEAT_EXP_MAX 7
++#define CHEAT_EXP_MAX 8
++#define CHEAT_EXP_NONE 1 // (0x)
 +extern u8 gPortCheats[PORT_CHEATS];
 +void Port_CheatsSave(void); // (options.c: gPortCheats as its Save Data's, config.ini written)
 +
@@ -2336,7 +2338,7 @@ index 342c9fa5..d5ddcbe3 100644
              if (!var_30) {
                  if (sUnknown_202F258 > 1) {
 diff --git a/src/dungeon_menu_others.c b/src/dungeon_menu_others.c
-index 0680f301..3f4a5a2b 100644
+index 0680f301..533c80b9 100644
 --- a/src/dungeon_menu_others.c
 +++ b/src/dungeon_menu_others.c
 @@ -31,6 +31,12 @@
@@ -2931,7 +2933,7 @@ index 0680f301..3f4a5a2b 100644
          PrintFormattedStringOnWindow(8, 16, gHintsDescriptions[dsControls][hintId], 0, '\0');
          sub_80073E0(0);
  
-@@ -1013,3 +1440,229 @@ static void ShowChosenHintWindow(s32 hintId)
+@@ -1013,3 +1440,230 @@ static void ShowChosenHintWindow(s32 hintId)
              break;
      }
  }
@@ -2942,7 +2944,7 @@ index 0680f301..3f4a5a2b 100644
 +// Stats and Effects, each a list of cheats (port_new_run.h: gPortCheats, each
 +// Save Data's own; what they do: port_cheats.c): A turns one on or off, a
 +// star beside it while on. Exp. Multiplier: A opens a list to its right,
-+// Off and 2x-128x, the chosen one starred (and shown in the list).
++// Off, 0x (no Exp. Points at all) and 2x-128x, the chosen one starred (and shown in the list).
 +
 +static const u8 sTextCheatsTitle[] = _("Cheats");
 +static const u8 sTextCheatsStats[] = _("Stats");
@@ -2971,6 +2973,7 @@ index 0680f301..3f4a5a2b 100644
 +    sTextCheatWeather, sTextCheatTwist, sTextCheatMobile, sTextCheatPierce, sTextCheatSneak,
 +};
 +static const u8 sTextExpOff[] = _("Off");
++static const u8 sTextExp0[] = _("0x");
 +static const u8 sTextExp2[] = _("2x");
 +static const u8 sTextExp4[] = _("4x");
 +static const u8 sTextExp8[] = _("8x");
@@ -2979,7 +2982,7 @@ index 0680f301..3f4a5a2b 100644
 +static const u8 sTextExp64[] = _("64x");
 +static const u8 sTextExp128[] = _("128x");
 +static const u8 *const sExpTexts[CHEAT_EXP_MAX + 1] = {
-+    sTextExpOff, sTextExp2, sTextExp4, sTextExp8, sTextExp16, sTextExp32, sTextExp64, sTextExp128,
++    sTextExpOff, sTextExp0, sTextExp2, sTextExp4, sTextExp8, sTextExp16, sTextExp32, sTextExp64, sTextExp128,
 +};
 +// The lists: Stats (cheats 0-5), Effects (6 on)
 +static const u8 sCheatListFirst[2] = { CHEAT_INF_HP, CHEAT_ANY_TM };
@@ -8494,10 +8497,10 @@ index 96874793..2aa20f5a 100644
  }
 diff --git a/src/port_cheats.c b/src/port_cheats.c
 new file mode 100644
-index 00000000..ed3fc260
+index 00000000..e5a595bb
 --- /dev/null
 +++ b/src/port_cheats.c
-@@ -0,0 +1,118 @@
+@@ -0,0 +1,121 @@
 +// 3DS port: Others > Cheats (in dungeons). The menu is in
 +// dungeon_menu_others.c; the settings (gPortCheats, each Save Data's own) in
 +// port/core/options.c. What they do, here and where the game asks:
@@ -8507,7 +8510,8 @@ index 00000000..ed3fc260
 +//   Infinite Belly   the leader's Belly 200, kept there (PortCheats_Turn)
 +//   One-Hit KOs      the team's damaging moves do 1000 (CalcDamage)
 +//   100% Accuracy    the team's moves never miss (AccuracyCalc)
-+//   Exp. Multiplier  the team's Exp. Points 2x-128x (AddExpPoints)
++//   Exp. Multiplier  the team's Exp. Points 2x-128x, or none at all with 0x
++//                    (AddExpPoints)
 +//   Learn Any TM/HM  any Pokémon can learn any TM or HM (CanMonLearnMove)
 +//   100% Recruit Rate  a Pokémon the leader defeats always asks to join,
 +//                    whether or not its friend area is had or the dungeon
@@ -8558,9 +8562,11 @@ index 00000000..ed3fc260
 +// AddExpPoints: a team member's Exp. Points multiplied
 +s32 PortCheats_Exp(Entity *receiver, s32 exp)
 +{
-+    s32 shift = gPortCheats[CHEAT_EXP];
-+    if (shift <= 0 || shift > CHEAT_EXP_MAX || exp <= 0 || !PortCheats_TeamMember(receiver))
++    s32 shift = gPortCheats[CHEAT_EXP] - 1; // (2x: 1)
++    if (gPortCheats[CHEAT_EXP] == 0 || gPortCheats[CHEAT_EXP] > CHEAT_EXP_MAX || exp <= 0 || !PortCheats_TeamMember(receiver))
 +        return exp;
++    if (gPortCheats[CHEAT_EXP] == CHEAT_EXP_NONE)
++        return 0; // (0x: none gained)
 +    if (exp > (9999999 >> shift))
 +        return 9999999;
 +    return exp << shift;

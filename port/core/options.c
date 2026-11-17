@@ -29,7 +29,7 @@ static const char *const sCheatNames[PORT_CHEATS] = {
     "Permanent No-Stick Cap", "Permanent Goggle Specs", "Permanent Weather Band", "Permanent Twist Band",
     "Permanent Mobile Scarf", "Permanent Pierce Band", "Permanent Sneak Scarf",
 };
-static const char *const sCheatExp[CHEAT_EXP_MAX + 1] = { "Off", "2x", "4x", "8x", "16x", "32x", "64x", "128x" };
+static const char *const sCheatExp[CHEAT_EXP_MAX + 1] = { "Off", "0x", "2x", "4x", "8x", "16x", "32x", "64x", "128x" };
 static bool8 sRunOptionsPending;
 
 static void IniLoad(const char *text, uint32_t len);
