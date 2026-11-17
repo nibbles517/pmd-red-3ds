@@ -2170,8 +2170,15 @@ bool Port_RenderSubScreen(u16 *out)
         if (gDungeon == NULL) {
             sMapFinishNow = FALSE;
             u16 *saved = sOut;
+            int before = sLayoutDrawn;
             DrawWorldMap();
             sOut = saved;
+            // (out still holds the dungeon's layout: all of the map to it
+            // when it shows again, not only the water and the marker. A
+            // dungeon left for the place it was entered from, the map
+            // already made: the Dojo's mazes, Rock Path, Snow Path)
+            if (before != -2)
+                sOutBrightness = -2;
         }
         sWasBlack = TRUE;
     }
