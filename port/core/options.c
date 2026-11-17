@@ -13,7 +13,7 @@
 #define PORT_CONFIG_INI "config.ini"
 
 #define PORT_CONFIG_VERSION 14
-struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19, .sfxVolume = 10 };
+struct PortConfig gPortConfig = { .version = PORT_CONFIG_VERSION, .frameSkip = PORT_FRAMESKIP_AUTO, .musicVolume = 19, .sfxVolume = 10, .extraVolume = 10 };
 
 // The run options (port_new_run.c) of each Save Data, chosen at New Game; and
 // those of the adventure being played. Chosen ones replace the slot's when the
@@ -62,6 +62,7 @@ static void SetDefaultConfig(void)
     gPortConfig.musicVolume = 19;
     gPortConfig.sfxStyle = PORT_MUSIC_GBA;
     gPortConfig.sfxVolume = 10;
+    gPortConfig.extraVolume = 10;
     // Layout Options (in dungeons)
     gPortConfig.layoutSubScreen = PORT_SUB_LAYOUT_BLUE;
     gPortConfig.layoutInfo = 1; // Additional Info: On
@@ -188,6 +189,8 @@ static void CheckConfig(void)
         gPortConfig.musicVolume = 19;
     if (gPortConfig.sfxVolume < 1 || gPortConfig.sfxVolume > 40)
         gPortConfig.sfxVolume = 10;
+    if (gPortConfig.extraVolume < 1 || gPortConfig.extraVolume > 40)
+        gPortConfig.extraVolume = 10;
     if (gPortConfig.saveSlot > 2)
         gPortConfig.saveSlot = 0;
     if (gPortConfig.mainScreenTop > 1)
@@ -359,9 +362,10 @@ static const IniSetting sIni[] = {
     { "Controls Options", "Button Style", &gPortConfig.buttonStyle, sIniButtons },
     { "Music Options", "Music Style", &gPortConfig.musicStyle, sIniStyles },
     { "Music Options", "Sound Effects", &gPortConfig.sfxStyle, sIniStyles },
-    { "Music Options", "Extra Music", &gPortConfig.extraMusic, sIniOffOn },
     { "Music Options", "Music Volume", &gPortConfig.musicVolume, NULL },
     { "Music Options", "SFX Volume", &gPortConfig.sfxVolume, NULL },
+    { "Music Options", "Extra Music", &gPortConfig.extraMusic, sIniOffOn },
+    { "Music Options", "Extra Volume", &gPortConfig.extraVolume, NULL },
     { "Save Data", "Current Save Data", &gPortConfig.saveSlot, sIniSlots },
 };
 

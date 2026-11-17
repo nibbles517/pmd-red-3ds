@@ -82,7 +82,12 @@ songs out, given by
 (Purity Forest 62, Western Cave 23, Wish Cave 26, Murky Cave 40, ...), the
 floors are as shown in the game, and the song is Explorers of Sky's
 `bgmNNNN` number (as the NDS Music Player lists them), or `gba <n>` for one of
-this game's own songs (`include/constants/bg_music.h`); `;` starts a comment.
+this game's own songs (`include/constants/bg_music.h`); `;` starts a comment. A
+change of song fades the one playing out and starts the next about a second
+later (as the game does between floors); the same song plays on from floor to
+floor. Extra Volume (10%-400%) sets all its songs' volume, and Extra Music
+Volumes lists them (A plays/stops, L/R 1%, ZL/ZR 10%, START saves) for each
+one's own, kept in `extra-volumes.txt` (`BGM 044 = 85`).
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 The Music Player lists the ROM's sound effects after its music (in green);

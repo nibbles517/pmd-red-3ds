@@ -49,6 +49,14 @@ static int sOpen;
 static NdsMusic sExtra;
 static int sExtraOpen;
 #define EXTRA_TRACK 0x4000
+static uint8_t *sExtraGain;     // each of its songs' own volume (percent; extra-volumes.txt)
+static int sExtraVolume = 100;  // Music Options > Extra Volume (percent): all its songs
+#define EXTRA_GAIN_MAX 200
+static int ExtraVolume(int track) // (its volume, percent: Extra Volume and the song's own)
+{
+    int idx = track - EXTRA_TRACK;
+    return sExtraOpen && sExtraGain != NULL && idx >= 0 && idx < sExtra.dse.num ? sExtraVolume * sExtraGain[idx] / 100 : sExtraVolume;
+}
 static Track *sTracks;
 static int sCount, sSongCount; // all the tracks; the music (the sound effects come after it)
 
@@ -969,6 +977,23 @@ static void ApplyTiming(Song *g)
 
 int Port_MusicPlay(int i)
 {
+    if (i >= EXTRA_TRACK) { // (Extra Music's songs: heard in its volumes' list)
+        if (!sExtraOpen || i - EXTRA_TRACK >= sExtra.dse.num)
+            return 0;
+        Port_MusicStop();
+        Song *g = song_open_dse(&sExtra.dse, i - EXTRA_TRACK, sMixRate);
+        sPlaying = i;
+        if (g == NULL)
+            return 0;
+        song_set_loops(g, 0, 0); // (for ever, until stopped)
+        song_set_volume(g, ExtraVolume(i));
+        sSong = g;
+        sFound.done[JOB_PLAYER] = sJobFound.done[JOB_PLAYER] = 0;
+        sFound.posMs = sJobFound.posMs = 0;
+        sFound.loops = sJobFound.loops = 0;
+        sFound.voices = sJobFound.voices = 0;
+        return 1;
+    }
     if (!sOpen || i < 0 || i >= sCount)
         return 0;
     Port_MusicStop(); // (a stream reads the ROM file as it plays)
@@ -1086,7 +1111,8 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
     // core while the game runs (Dual Core), else now
     ApplySlots(); // (the tracks the game asked for since)
     if (sSong != NULL)
-        song_set_volume(sSong, sPlaying >= 0 && sPlaying < sCount
+        song_set_volume(sSong, sPlaying >= EXTRA_TRACK ? ExtraVolume(sPlaying)
+                               : sPlaying >= 0 && sPlaying < sCount
                                    ? (sTracks[sPlaying].isEffect ? sSfxVolume : sVolume) * sTracks[sPlaying].gain / 100
                                    : sVolume);
     int any = 0;
@@ -1096,6 +1122,7 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
         Slot *s = &sSlots[k];
         if (s->song != NULL)
             song_set_volume(s->song, k >= SLOT_SFX ? sSfxVolume * s->volume64 / 64 * Port_SfxGainGet(s->track) / 100
+                                     : s->track >= EXTRA_TRACK ? ExtraVolume(s->track) * s->volume64 / 64 // (Extra Volume: its own)
                                                    : sVolume * s->volume64 / 64 * TrackGain(s->track) / 100);
         sJobSong[JOB_SLOT0 + k] = s->paused ? NULL : s->song;
         any |= sJobSong[JOB_SLOT0 + k] != NULL;
@@ -1126,6 +1153,7 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
 
 char gPortExtraRom[256];
 const char *Port_ExtraMusicRomPath(void) { return gPortExtraRom; }
+static void LoadExtraGains(void);
 static char sExtraTried[256]; // (a ROM that wouldn't open: not tried again each frame)
 
 static int IsSky(const NdsMusic *m)
@@ -1145,8 +1173,12 @@ void Port_ExtraMusicClose(void)
             sSlots[i].song = NULL;
             sSlots[i].track = -1;
         }
+    if (sPlaying >= EXTRA_TRACK)
+        Port_MusicStop();
     nds_music_close(&sExtra);
     sExtraOpen = 0;
+    free(sExtraGain);
+    sExtraGain = NULL;
 }
 
 // The ROM picked (gPortExtraRom) open: Explorers of Sky's, with its songs
@@ -1166,8 +1198,82 @@ int Port_ExtraMusicOpen(void)
     }
     sExtraOpen = 1;
     sExtraTried[0] = 0;
+    LoadExtraGains();
     InitSlots();
     return 1;
+}
+
+// extra-volumes.txt in the data folder: each song's own volume ("BGM 044 =
+// 85"; 100 for one not there)
+#define EXTRA_VOLUMES_FILE "extra-volumes.txt"
+static void LoadExtraGains(void)
+{
+    free(sExtraGain);
+    sExtraGain = malloc((size_t)sExtra.dse.num);
+    if (sExtraGain == NULL)
+        return;
+    memset(sExtraGain, 100, (size_t)sExtra.dse.num);
+    void *f = Backend_FileOpen(EXTRA_VOLUMES_FILE);
+    if (f == NULL)
+        return;
+    uint32_t size = Backend_FileSize(f);
+    char *text = size < 65536 ? malloc(size + 1) : NULL;
+    if (text != NULL && Backend_FileRead(f, 0, text, size)) {
+        text[size] = 0;
+        for (char *line = text; line != NULL && *line; ) {
+            char *next = strchr(line, '\n');
+            if (next != NULL)
+                *next++ = 0;
+            int n, g;
+            if (sscanf(line, " BGM %d = %d", &n, &g) == 2 && g >= 0 && g <= EXTRA_GAIN_MAX) {
+                int idx = dse_set_find(&sExtra.dse, DSE_GROUP_BGM, (uint32_t)n);
+                if (idx >= 0)
+                    sExtraGain[idx] = (uint8_t)g;
+            }
+            line = next;
+        }
+    }
+    free(text);
+    Backend_FileClose(f);
+}
+
+// Extra Music's songs' own volumes (percent), by song number; Extra Volume
+// (all of them: set by the game each frame, from Music Options)
+int Port_ExtraGainGet(int n)
+{
+    int idx = sExtraOpen ? dse_set_find(&sExtra.dse, DSE_GROUP_BGM, (uint32_t)n) : -1;
+    return idx >= 0 && sExtraGain != NULL ? sExtraGain[idx] : 100;
+}
+
+void Port_ExtraGainSet(int n, int percent)
+{
+    int idx = sExtraOpen ? dse_set_find(&sExtra.dse, DSE_GROUP_BGM, (uint32_t)n) : -1;
+    if (idx >= 0 && sExtraGain != NULL)
+        sExtraGain[idx] = (uint8_t)(percent < 0 ? 0 : percent > EXTRA_GAIN_MAX ? EXTRA_GAIN_MAX : percent);
+}
+
+int Port_ExtraGainMax(void) { return EXTRA_GAIN_MAX; }
+
+void Port_ExtraMusicSetVolume(int percent)
+{
+    sExtraVolume = percent;
+}
+
+// Writes extra-volumes.txt (the songs not at 100%)
+int Port_ExtraGainsSave(void)
+{
+    if (!sExtraOpen || sExtraGain == NULL)
+        return 0;
+    char *text = malloc(96 + (size_t)sExtra.dse.num * 32);
+    if (text == NULL)
+        return 0;
+    int len = snprintf(text, 96, "; Extra Music: each Explorers of Sky song's own volume (percent)\n");
+    for (int i = 0; i < sExtra.dse.num; i++)
+        if (sExtraGain[i] != 100 && sExtra.dse.songs[i].group == DSE_GROUP_BGM)
+            len += snprintf(text + len, 32, "BGM %03u = %u\n", (unsigned)sExtra.dse.songs[i].number, sExtraGain[i]);
+    int ok = Backend_FileWrite(EXTRA_VOLUMES_FILE, text, (uint32_t)len);
+    free(text);
+    return ok;
 }
 
 // Music Options found a ROM for Extra Music (a path on the SD card): 1
@@ -1256,7 +1362,7 @@ static const ExtraRule sExtraBuiltIn[] = {
     { D_GRAND_SEA, ALL_FLOORS, 60 },
     { D_FAR_OFF_SEA, ALL_FLOORS, 37 },
     { D_SOLAR_CAVE, 1, 10, 43 },
-    { D_SOLAR_CAVE, 11, 19, 44 },
+    { D_SOLAR_CAVE, 11, 20, 44 },
     { D_MARVELOUS_SEA, ALL_FLOORS, 45 },
     { D_FANTASY_STRAIT, ALL_FLOORS, 152 },
     { D_REMAINS_ISLAND, ALL_FLOORS, 52 },
@@ -1328,4 +1434,70 @@ int Port_ExtraMusicFor(int dungeon, int floor)
         if (sExtraRules[i].dungeon == dungeon && floor >= sExtraRules[i].first && floor <= sExtraRules[i].last)
             return sExtraRules[i].song;
     return -1;
+}
+
+// The dungeons' names (the ones the built-in floors name), for the songs' list
+static const struct { uint8_t id; const char *name; } sExtraDungeonNames[] = {
+    { D_STORMY_SEA, "Stormy Sea" }, { D_SILVER_TRENCH, "Silver Trench" }, { D_METEOR_CAVE, "Meteor Cave" },
+    { D_WESTERN_CAVE, "Western Cave" }, { D_WISH_CAVE, "Wish Cave" }, { D_BURIED_RELIC, "Buried Relic" },
+    { D_PITFALL_VALLEY, "Pitfall Valley" }, { D_NORTHERN_RANGE, "Northern Range" }, { D_DESERT_REGION, "Desert Region" },
+    { D_SOUTHERN_CAVERN, "Southern Cavern" }, { D_WYVERN_HILL, "Wyvern Hill" }, { D_FIERY_FIELD, "Fiery Field" },
+    { D_NORTHWIND_FIELD, "Northwind Field" }, { D_SOLAR_CAVE, "Solar Cave" }, { D_LIGHTNING_FIELD, "Lightning Field" },
+    { D_DARKNIGHT_RELIC, "Darknight Relic" }, { D_MURKY_CAVE, "Murky Cave" }, { D_GRAND_SEA, "Grand Sea" },
+    { D_REMAINS_ISLAND, "Remains Island" }, { D_MARVELOUS_SEA, "Marvelous Sea" }, { D_FANTASY_STRAIT, "Fantasy Strait" },
+    { D_HOWLING_FOREST, "Howling Forest" }, { D_WATERFALL_POND, "Waterfall Pond" }, { D_UNOWN_RELIC, "Unown Relic" },
+    { D_JOYOUS_TOWER, "Joyous Tower" }, { D_FAR_OFF_SEA, "Far-off Sea" }, { D_MT_FARAWAY, "Mt. Faraway" },
+};
+
+// The Explorers of Sky songs the floors name (each once, by number): up to max
+int Port_ExtraMusicSongs(int *out, int max)
+{
+    int n = 0;
+    if (sExtraRuleCount < 0)
+        LoadExtraRules();
+    for (int i = 0; i < sExtraRuleCount; i++) {
+        int song = sExtraRules[i].song, k;
+        if (song & EXTRA_GBA)
+            continue;
+        for (k = 0; k < n && out[k] != song; k++)
+            ;
+        if (k == n && n < max)
+            out[n++] = song;
+    }
+    for (int i = 1; i < n; i++) // (by number)
+        for (int k = i; k > 0 && out[k - 1] > out[k]; k--) {
+            int t = out[k]; out[k] = out[k - 1]; out[k - 1] = t;
+        }
+    return n;
+}
+
+// Where song n plays: "Solar Cave 11F-20F" (the first floors naming it; "+" if more)
+void Port_ExtraMusicSongWhere(int song, char *out, int size)
+{
+    int found = 0;
+    out[0] = 0;
+    if (sExtraRuleCount < 0)
+        LoadExtraRules();
+    for (int i = 0; i < sExtraRuleCount; i++) {
+        const ExtraRule *r = &sExtraRules[i];
+        if (r->song != song)
+            continue;
+        if (found++) {
+            snprintf(out + strlen(out), size - strlen(out), " +");
+            break;
+        }
+        const char *name = NULL;
+        for (unsigned k = 0; k < sizeof(sExtraDungeonNames) / sizeof(sExtraDungeonNames[0]); k++)
+            if (sExtraDungeonNames[k].id == r->dungeon)
+                name = sExtraDungeonNames[k].name;
+        char d[24];
+        if (name == NULL)
+            snprintf(d, sizeof(d), "Dungeon %u", r->dungeon);
+        if (r->first == 0 && r->last == 255)
+            snprintf(out, size, "%s", name != NULL ? name : d);
+        else if (r->first == r->last)
+            snprintf(out, size, "%s %uF", name != NULL ? name : d, r->first);
+        else
+            snprintf(out, size, "%s %uF-%uF", name != NULL ? name : d, r->first, r->last);
+    }
 }

@@ -410,10 +410,10 @@ index 00000000..1b7ab65e
 +#endif
 diff --git a/include/port_screen_menu.h b/include/port_screen_menu.h
 new file mode 100644
-index 00000000..92ab8754
+index 00000000..8157e54e
 --- /dev/null
 +++ b/include/port_screen_menu.h
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,21 @@
 +#ifndef GUARD_PORT_SCREEN_MENU_H
 +#define GUARD_PORT_SCREEN_MENU_H
 +
@@ -427,8 +427,9 @@ index 00000000..92ab8754
 +void PortScreenMenu_Commit(void);
 +void PortControlMenu_Create(GameOptions *options); // Others > Controls Options
 +void PortMusicMenu_Create(GameOptions *options, bool8 locked, s32 entry); // the title's Music Options
-+#define PORT_MUSIC_ENTRY_EXTRA 2 // (its entries: Extra Music, Music Player)
-+#define PORT_MUSIC_ENTRY_PLAYER 5
++#define PORT_MUSIC_ENTRY_EXTRA 4 // (its entries: Extra Music, Extra Music Volumes, Music Player)
++#define PORT_MUSIC_ENTRY_EXTRA_TRACKS 6
++#define PORT_MUSIC_ENTRY_PLAYER 7
 +u32 PortScreenMenu_Update(void);
 +void PortScreenMenu_Destroy(void);
 +bool8 PortScreenMenu_Changed(void);
@@ -6313,7 +6314,7 @@ index aeeb69ed..8d2fd375 100644
  
      a0->unk26 = 0;
 diff --git a/src/music.c b/src/music.c
-index a5a58dec..b5afa3cc 100644
+index a5a58dec..19b4c796 100644
 --- a/src/music.c
 +++ b/src/music.c
 @@ -3,6 +3,11 @@
@@ -6376,7 +6377,7 @@ index a5a58dec..b5afa3cc 100644
  
      if (sFanfareMusicPlayerState != 0) {
          switch (sFanfareMusicPlayerState) {
-@@ -651,6 +672,187 @@ void UpdateSound(void)
+@@ -651,6 +672,239 @@ void UpdateSound(void)
      }
  }
  
@@ -6526,18 +6527,63 @@ index a5a58dec..b5afa3cc 100644
 +    }
 +}
 +
-+s32 Port_ExtraMusicNow(u16 song); // port_extra_music.c
++s32 Port_ExtraMusicWant(void); // port_extra_music.c
++
++// Extra Music: Explorers of Sky's song for the dungeon floor, in place of its
++// own music. A change of song (to another one, or from the game's to one)
++// fades the one playing out, then the next starts EXTRA_CHANGE_FRAMES after,
++// as the game does between floors; the same song plays on from floor to
++// floor, whatever the game would have changed to; back to the game's music
++// (a Monster House...), it fades out as the game's starts.
++static s32 sExtraCur = -1;    // the Explorers of Sky song playing (slot track), or -1: the game's music
++static s32 sExtraTarget = -1; // the one to change to (sExtraCur: none)
++static s32 sExtraTime;        // frames into the change
++static bool8 sExtraGbaFade;   // the game's song turned down (m4aMPlayVolumeControl), to change from it
++#define EXTRA_FADE_FRAMES 30
++#define EXTRA_CHANGE_FRAMES 60
++
++// The Extra Music change this frame: its volume now (0-64)
++static s32 Port_ExtraMusicChange(void)
++{
++    s32 want = gPortDsMusicOff ? -1 : Port_ExtraMusicWant();
++    s32 fade = 64;
++
++    if (want != sExtraTarget) {
++        sExtraTarget = want;
++        sExtraTime = 0;
++    }
++    if (sExtraTarget != sExtraCur) {
++        sExtraTime++;
++        fade = sExtraTime >= EXTRA_FADE_FRAMES ? 0 : 64 * (EXTRA_FADE_FRAMES - sExtraTime) / EXTRA_FADE_FRAMES;
++        if (sExtraTime >= (sExtraTarget < 0 ? EXTRA_FADE_FRAMES : EXTRA_CHANGE_FRAMES)) {
++            sExtraCur = sExtraTarget;
++            fade = 64;
++        }
++    }
++    // from the game's song: it's turned down (the GBA player, and its DS
++    // track with it), then silent until the Explorers of Sky song starts
++    if (sExtraCur < 0 && sExtraTarget >= 0) {
++        m4aMPlayVolumeControl(&gMPlayInfo_BGM, 0xFF, fade * 4);
++        sExtraGbaFade = TRUE;
++    }
++    else if (sExtraGbaFade) {
++        m4aMPlayVolumeControl(&gMPlayInfo_BGM, 0xFF, 0x100);
++        sExtraGbaFade = FALSE;
++    }
++    return fade;
++}
 +
 +static void Port_DsMusicFrame(void)
 +{
 +    s32 bgm = -1, fanfare = -1;
-+    // Extra Music: Explorers of Sky's song for this dungeon floor, in place of its own music
-+    s32 extra = gPortDsMusicOff ? -1 : Port_ExtraMusicNow(sCurrentBGSong);
++    s32 extraFade = Port_ExtraMusicChange();
++    bool8 extra = sExtraCur >= 0;
 +
-+    if (Port_DsSfxOn() || Port_DsMusicOn() || extra >= 0) { // (Music Options' volumes)
++    if (Port_DsSfxOn() || Port_DsMusicOn() || extra || sExtraTarget >= 0) { // (Music Options' volumes)
 +        Port_MusicSetVolume(gPortConfig.musicVolume * 10);
 +        Port_MusicSetSfxVolume(gPortConfig.sfxVolume * 10);
 +    }
++    Port_ExtraMusicSetVolume(gPortConfig.extraVolume * 10);
 +    Port_DsSfxFrame();
 +    if (Port_DsMusicOn()) {
 +        if (sCurrentBGSong != STOP_BGM)
@@ -6545,11 +6591,18 @@ index a5a58dec..b5afa3cc 100644
 +        if (sFanfareMusicPlayerState != 0 && sCurrentFanfareSong != STOP_SOUND_EFFECT)
 +            fanfare = Port_MusicMapGet(sCurrentFanfareSong);
 +    }
-+    if (extra >= 0)
-+        bgm = extra;
-+    SetMute(&gMPlayInfo_BGM, &sMuteBgm, bgm >= 0);
++    if (extra) {
++        // (its own: paused only for a fanfare, not by the game's song changing)
++        SetMute(&gMPlayInfo_BGM, &sMuteBgm, TRUE);
++        Port_MusicSlot(0, sExtraCur, TRUE, sFanfareMusicPlayerState != 0, extraFade);
++    }
++    else {
++        if (sExtraTarget >= 0 && extraFade == 0)
++            bgm = -1; // (the game's song faded out: silence, until the change)
++        SetMute(&gMPlayInfo_BGM, &sMuteBgm, bgm >= 0 || (sExtraTarget >= 0 && extraFade == 0));
++        Port_MusicSlot(0, bgm, TRUE, !PlayerAudible(&gMPlayInfo_BGM), PlayerVolume(&gMPlayInfo_BGM));
++    }
 +    SetMute(&gMPlayInfo_Fanfare, &sMuteFanfare, fanfare >= 0);
-+    Port_MusicSlot(0, bgm, TRUE, !PlayerAudible(&gMPlayInfo_BGM), PlayerVolume(&gMPlayInfo_BGM));
 +    if (gPortMatchBgm >= 0) // Sound Effect Matching: a song of the player's choice under the effects
 +        Port_MusicSlot(0, gPortMatchBgm, TRUE, FALSE, 64);
 +    // (once the GBA player plays it: from FANFARE_PLAYER_STATE_PLAYING, and
@@ -6597,7 +6650,7 @@ index d24034e1..79edce4b 100644
  
      sNamingScreen->inputCursorFrames = 0;
 diff --git a/src/options_menu1.c b/src/options_menu1.c
-index 86f582c2..e6f39727 100644
+index 86f582c2..455cd165 100644
 --- a/src/options_menu1.c
 +++ b/src/options_menu1.c
 @@ -1,3 +1,4 @@
@@ -6646,7 +6699,7 @@ index 86f582c2..e6f39727 100644
  };
  
  enum OptionsMenuStates
-@@ -31,6 +57,25 @@ enum OptionsMenuStates
+@@ -31,6 +57,26 @@ enum OptionsMenuStates
      OPTIONS_MENU_DISPLAY_HINT,
      OPTIONS_MENU_UNKNOWN_6,
      OPTIONS_MENU_CONFIRM_NEW_OPTIONS,
@@ -6669,10 +6722,11 @@ index 86f582c2..e6f39727 100644
 +    OPTIONS_MENU_EXTRA_MISSING, // 3DS port: Extra Music without its ROM: "Extra Music plays ..."
 +    OPTIONS_MENU_EXTRA_MISSING2, // ... "Please find ...", then the SD card's folders
 +    OPTIONS_MENU_EXTRA_WRONG, // ... another game's ROM: "That isn't the right ROM. ..."
++    OPTIONS_MENU_EXTRA_VOLUMES, // 3DS port: Extra Music Volumes (each Explorers of Sky song's own)
  };
  
  static EWRAM_INIT struct unkStruct_203B25C *sUnknown_203B25C = {NULL};
-@@ -48,6 +93,143 @@ static void sub_801DED0(void);
+@@ -48,6 +94,145 @@ static void sub_801DED0(void);
  static void sub_801E088(void);
  static void sub_801E0E0(void);
  static void sub_801E0FC(void);
@@ -6726,6 +6780,8 @@ index 86f582c2..e6f39727 100644
 +ALIGNED(4) static const u8 sMusicMissing2[] = _("Please find your Pokémon Mystery Dungeon:\nBlue Rescue Team ROM (.nds) on the SD card.");
 +static void CreateRomBrowser(void);
 +static void HandleRomBrowser(void);
++static void CreateExtraVolumes(void);
++static void HandleExtraVolumes(void);
 +static void SetRomBrowserWindows(void);
 +static u8 sRomFor; // what the DS ROM was looked for: MENU_OPTION_MUSIC, _MUSIC_MATCH or _BALANCE; or ROM_FOR_EXTRA
 +#define ROM_FOR_EXTRA 0xFE // Extra Music: Explorers of Sky's ROM
@@ -6816,7 +6872,7 @@ index 86f582c2..e6f39727 100644
  
  bool8 sub_801DCC4(void)
  {
-@@ -76,8 +258,71 @@ u32 sub_801DCE8(void)
+@@ -76,8 +261,74 @@ u32 sub_801DCE8(void)
              sub_801E0FC();
              break;
          case OPTIONS_MENU_CONFIRM_NEW_OPTIONS:
@@ -6836,7 +6892,7 @@ index 86f582c2..e6f39727 100644
 +            break;
 +        case OPTIONS_MENU_SAVE_LOADED:
 +            HandleSaveDataLoaded();
-             break;
++            break;
 +        case OPTIONS_MENU_MUSIC:
 +            HandleMusicMenu();
 +            break;
@@ -6845,7 +6901,7 @@ index 86f582c2..e6f39727 100644
 +        case OPTIONS_MENU_MUSIC_OTHER:
 +        case OPTIONS_MENU_MUSIC_OTHER2:
 +            HandleMusicMissing();
-+            break;
+             break;
 +        case OPTIONS_MENU_MUSIC_SETTINGS:
 +            HandleMusicSettings();
 +            break;
@@ -6884,11 +6940,14 @@ index 86f582c2..e6f39727 100644
 +        case OPTIONS_MENU_EXTRA_WRONG:
 +            HandleMusicMissing();
 +            break;
++        case OPTIONS_MENU_EXTRA_VOLUMES:
++            HandleExtraVolumes();
++            break;
 +#endif
          default:
              break;
      }
-@@ -120,9 +365,13 @@ static void sub_801DD84(void)
+@@ -120,9 +371,13 @@ static void sub_801DD84(void)
              for(i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -6903,7 +6962,7 @@ index 86f582c2..e6f39727 100644
              break;
          case OPTIONS_MENU_MAIN:
              CreateOthersMenu();
-@@ -130,10 +379,37 @@ static void sub_801DD84(void)
+@@ -130,10 +385,38 @@ static void sub_801DD84(void)
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
  
@@ -6915,7 +6974,7 @@ index 86f582c2..e6f39727 100644
 -            sUnknown_203B25C->unkBC.id[0].width = 10;
 +            sUnknown_203B25C->unkBC.id[0].width = OTHERS_MENU_WIDTH;
 +#endif
-+            break;
+             break;
 +#ifdef PLATFORM_3DS
 +        case OPTIONS_MENU_SAVE_DATA:
 +            CreateOthersMenu();
@@ -6934,15 +6993,16 @@ index 86f582c2..e6f39727 100644
 +            SetMusicWindows();
 +            break;
 +        case OPTIONS_MENU_ROM_BROWSE:
++        case OPTIONS_MENU_EXTRA_VOLUMES:
 +            for (i = 0; i < 4; i++)
 +                sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
 +            SetRomBrowserWindows();
-             break;
++            break;
 +#endif
          default:
              for (i = 0; i < 4; i++)
                  sUnknown_203B25C->unkBC.id[i] = sUnknown_80DBFB0;
-@@ -150,6 +426,10 @@ static void sub_801DED0(void)
+@@ -150,6 +433,10 @@ static void sub_801DED0(void)
          case OPTIONS_MENU_INIT:
          case OPTIONS_MENU_MAIN:
              sUnknown_203B25C->menu.unk0 = sOthers;
@@ -6953,7 +7013,7 @@ index 86f582c2..e6f39727 100644
              sub_8012D60(&sUnknown_203B25C->menu, sUnknown_203B25C->menuItems, 0, sUnknown_203B25C->unkAC, sUnknown_203B25C->menuAction, 0);
              break;
          case OPTIONS_MENU_PRE_HINT_SELECTION:
-@@ -164,12 +444,100 @@ static void sub_801DED0(void)
+@@ -164,12 +451,103 @@ static void sub_801DED0(void)
          case 6:
              // Load our current options?
              sUnknown_203B25C->newOptions = *gGameOptionsRef;
@@ -7020,6 +7080,9 @@ index 86f582c2..e6f39727 100644
 +        case OPTIONS_MENU_ROM_BROWSE:
 +            CreateRomBrowser();
 +            break;
++        case OPTIONS_MENU_EXTRA_VOLUMES:
++            CreateExtraVolumes();
++            break;
 +        case OPTIONS_MENU_EXTRA_MISSING:
 +            CreateDialogueBoxAndPortrait(sExtraMissing, 0, NULL, 0x101);
 +            break;
@@ -7054,7 +7117,7 @@ index 86f582c2..e6f39727 100644
      }
  }
  
-@@ -180,12 +548,57 @@ static void CreateOthersMenu(void)
+@@ -180,12 +558,57 @@ static void CreateOthersMenu(void)
      MemoryFill16(sUnknown_203B25C->unkAC, 0, sizeof(sUnknown_203B25C->unkAC));
      loopMax = 0;
  
@@ -7112,7 +7175,7 @@ index 86f582c2..e6f39727 100644
  
      loopMax++;
      sUnknown_203B25C->menuItems[loopMax].text = NULL;
-@@ -229,6 +642,51 @@ static void HandleOthersMenu(void)
+@@ -229,6 +652,51 @@ static void HandleOthersMenu(void)
          case MENU_OPTION_GAMEOPTIONS:
              SetOptionsMenuState(6);
              break;
@@ -7164,7 +7227,7 @@ index 86f582c2..e6f39727 100644
          case MENU_OPTION_DEFAULT:
              SetOptionsMenuState(OPTIONS_MENU_EXIT);
              break;
-@@ -272,6 +730,16 @@ static void sub_801E0E0(void)
+@@ -272,6 +740,16 @@ static void sub_801E0E0(void)
  static void sub_801E0FC(void)
  {
      switch (sub_801E218()) {
@@ -7181,7 +7244,7 @@ index 86f582c2..e6f39727 100644
          case 2:
          case 3:
              sub_801E2C4();
-@@ -282,11 +750,1283 @@ static void sub_801E0FC(void)
+@@ -282,12 +760,1421 @@ static void sub_801E0FC(void)
              else
                  SetOptionsMenuState(OPTIONS_MENU_CONFIRM_NEW_OPTIONS);
              break;
@@ -7632,6 +7695,138 @@ index 86f582c2..e6f39727 100644
 +    }
 +}
 +
++// --- Extra Music Volumes -------------------------------------------------------
++//
++// The Explorers of Sky songs the floors play (Extra Music), each with its own
++// volume (on top of Extra Volume): A plays or stops one, L/R 1% less/more,
++// ZL/ZR 10%; START saves (extra-volumes.txt), B goes back (saving changes).
++// (The ROM browser's windows: the list, then the song and the controls.)
++
++#define EXTRA_SONGS_MAX 64
++static s32 sExtraSongs[EXTRA_SONGS_MAX];
++static s32 sExtraSongCount;
++static MenuInputStruct sExtraInput;
++static bool8 sExtraChanged;
++static const u8 *sExtraStatus;
++ALIGNED(4) static const u8 sExtraVolTitle[] = _("Extra Music Volumes");
++ALIGNED(4) static const u8 sExtraVolControls[] = _("A Play/Stop  L/R 1%  ZL/ZR 10%  START Save");
++ALIGNED(4) static const u8 sExtraVolSaved[] = _("{COLOR CYAN}Saved.{RESET}");
++ALIGNED(4) static const u8 sExtraVolNotSaved[] = _("{COLOR RED}Couldn't save the volumes.{RESET}");
++
++static void DrawExtraVolumes(void)
++{
++    MenuInputStruct *in = &sExtraInput;
++    u8 text[64];
++    char where[48], line[64];
++    s32 i;
++
++    CallPrepareTextbox_8008C54(ROM_LIST_WIN);
++    sub_80073B8(ROM_LIST_WIN);
++    PrintStringOnWindow(10, 0, sExtraVolTitle, ROM_LIST_WIN, 0);
++    snprintf((char *)text, sizeof(text), "%d/%d", in->currPage + 1, in->pagesCount > 0 ? in->pagesCount : 1);
++    PrintStringOnWindow(124, 0, text, ROM_LIST_WIN, 0);
++    for (i = 0; i < in->currPageEntries && sExtraSongCount > 0; i++) {
++        s32 song = sExtraSongs[in->currPage * in->entriesPerPage + i];
++        Port_ExtraMusicSongWhere(song, where, sizeof(where));
++        snprintf(line, sizeof(line), "%03d %s", (int)song, where);
++        MusicLabel(text, 30, line);
++        PrintStringOnWindow(8, GetMenuEntryYCoord(in, i), text, ROM_LIST_WIN, 0);
++        snprintf((char *)text, sizeof(text), "%d%%", Port_ExtraGainGet(song));
++        PrintStringOnWindow(176, GetMenuEntryYCoord(in, i), text, ROM_LIST_WIN, 0);
++    }
++    sub_80073E0(ROM_LIST_WIN);
++
++    CallPrepareTextbox_8008C54(ROM_INFO_WIN);
++    sub_80073B8(ROM_INFO_WIN);
++    if (sExtraSongCount > 0) {
++        s32 song = sExtraSongs[GET_CURRENT_MENU_ENTRY(sExtraInput)];
++        bool8 playing = Port_MusicPlaying() >= 0 && Port_MusicPlaying() == Port_ExtraMusicTrack(song);
++        snprintf((char *)text, sizeof(text), "%03d  %d%%  (all: %d%%)%s", (int)song, Port_ExtraGainGet(song),
++                 gPortConfig.extraVolume * 10, playing ? "  Playing" : "");
++        PrintStringOnWindow(4, 0, text, ROM_INFO_WIN, 0);
++    }
++    PrintStringOnWindow(4, 12, sExtraStatus != NULL ? sExtraStatus : sExtraVolControls, ROM_INFO_WIN, 0);
++    sub_80073E0(ROM_INFO_WIN);
++}
++
++static void CreateExtraVolumes(void)
++{
++    sExtraSongCount = Port_ExtraMusicSongs((int *)sExtraSongs, EXTRA_SONGS_MAX);
++    sExtraChanged = FALSE;
++    sExtraStatus = NULL;
++    sMusicPrevKeys = Port_KeysHeld();
++    CreateMenuOnWindow(&sExtraInput, sExtraSongCount > 0 ? sExtraSongCount : 1, ROM_PER_PAGE, ROM_LIST_WIN);
++    DrawExtraVolumes();
++}
++
++static void LeaveExtraVolumes(void)
++{
++    Port_MusicStop();
++    if (sMusicStoppedBgm) {
++        StartNewBGM(MUS_FILE_SELECT); // the title's music again
++        sMusicStoppedBgm = FALSE;
++    }
++    SetOptionsMenuState(OPTIONS_MENU_MUSIC_SETTINGS);
++}
++
++static void HandleExtraVolumes(void)
++{
++    u16 keys = Port_KeysHeld();
++    u16 pressed = keys & ~sMusicPrevKeys;
++    s32 step = (gRealInputs.pressed & L_BUTTON) ? -1 : (gRealInputs.pressed & R_BUTTON) ? 1
++             : (pressed & PORT_KEY_ZL) ? -10 : (pressed & PORT_KEY_ZR) ? 10 : 0;
++    s32 song = sExtraSongCount > 0 ? sExtraSongs[GET_CURRENT_MENU_ENTRY(sExtraInput)] : -1;
++
++    sMusicPrevKeys = keys;
++    if (step != 0 && song >= 0) { // (heard at once, if it's playing)
++        s32 g = Port_ExtraGainGet(song) + step, max = Port_ExtraGainMax();
++        Port_ExtraGainSet(song, g < 0 ? 0 : g > max ? max : g);
++        sExtraChanged = TRUE;
++        sExtraStatus = NULL;
++        PlayMenuSoundEffect(MENU_SFX_NAVIGATE);
++        DrawExtraVolumes();
++        return;
++    }
++    if (pressed & START_BUTTON) {
++        bool8 ok = Port_ExtraGainsSave();
++        sExtraStatus = ok ? sExtraVolSaved : sExtraVolNotSaved;
++        if (ok)
++            sExtraChanged = FALSE;
++        PlayMenuSoundEffect(ok ? MENU_SFX_ACCEPT : MENU_SFX_FAIL);
++        DrawExtraVolumes();
++        return;
++    }
++    switch (GetKeyPress(&sExtraInput)) {
++        case INPUT_B_BUTTON:
++            PlayMenuSoundEffect(MENU_SFX_BACK);
++            if (sExtraChanged)
++                Port_ExtraGainsSave();
++            LeaveExtraVolumes();
++            return;
++        case INPUT_A_BUTTON:
++            if (song < 0)
++                return;
++            if (Port_MusicPlaying() >= 0 && Port_MusicPlaying() == Port_ExtraMusicTrack(song))
++                Port_MusicStop();
++            else {
++                if (!sMusicStoppedBgm) {
++                    StopBGMusic(); // the title's music
++                    sMusicStoppedBgm = TRUE;
++                }
++                Port_MusicPlay(Port_ExtraMusicTrack(song));
++            }
++            sExtraStatus = NULL;
++            DrawExtraVolumes();
++            return;
++        default:
++            if (MenuCursorUpdate(&sExtraInput, TRUE)) {
++                sExtraStatus = NULL;
++                DrawExtraVolumes();
++            }
++            break;
++    }
++}
++
 +static void DrawMusicList(void)
 +{
 +    MenuInputStruct *in = &sMusicInput;
@@ -7775,7 +7970,7 @@ index 86f582c2..e6f39727 100644
 +    for (tries = 0; tries < 64; tries++) {
 +        s32 next = track + dir;
 +        if (next < 0 || next >= Port_MusicCount())
-             break;
++            break;
 +        if (PlayMusicTrack(next))
 +            return;
 +        track = next;
@@ -7796,7 +7991,7 @@ index 86f582c2..e6f39727 100644
 +    if (sMusicStoppedBgm) {
 +        StartNewBGM(MUS_FILE_SELECT); // the title's music again
 +        sMusicStoppedBgm = FALSE;
-     }
++    }
 +    sMusicSettingsEntry = PORT_MUSIC_ENTRY_PLAYER;
 +    SetOptionsMenuState(OPTIONS_MENU_MUSIC_SETTINGS);
 +}
@@ -7815,6 +8010,11 @@ index 86f582c2..e6f39727 100644
 +        case 3: // A on Music Player
 +            PortScreenMenu_Destroy();
 +            SetOptionsMenuState(OPTIONS_MENU_MUSIC);
++            break;
++        case 5: // A on Extra Music Volumes
++            PortScreenMenu_Destroy();
++            sMusicSettingsEntry = PORT_MUSIC_ENTRY_EXTRA_TRACKS;
++            SetOptionsMenuState(OPTIONS_MENU_EXTRA_VOLUMES);
 +            break;
 +        case 4: // Extra Music turned on, without Explorers of Sky's ROM: found first
 +            PortScreenMenu_Destroy();
@@ -8450,21 +8650,22 @@ index 86f582c2..e6f39727 100644
 +            break;
 +        default:
 +            SetOptionsMenuState(OPTIONS_MENU_MAIN);
-+            break;
-+    }
-+}
-+
+             break;
+     }
+ }
+ 
 +static void HandleChangesSaved(void)
 +{
 +    s32 menuAction;
 +
 +    if (sub_80144A4(&menuAction) == 0)
 +        SetOptionsMenuState(sApplyGraphics ? OPTIONS_MENU_EXIT : OPTIONS_MENU_MAIN);
- }
++}
 +#endif
- 
++
  static void HandleChangeSettingsMenu(void)
  {
+     s32 menuAction;
 diff --git a/src/options_menu2.c b/src/options_menu2.c
 index 03531690..0d6913a0 100644
 --- a/src/options_menu2.c
@@ -9006,10 +9207,10 @@ index 00000000..e5a595bb
 +#endif
 diff --git a/src/port_extra_music.c b/src/port_extra_music.c
 new file mode 100644
-index 00000000..5913c5ec
+index 00000000..da5be0fc
 --- /dev/null
 +++ b/src/port_extra_music.c
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,72 @@
 +// 3DS port: Music Options > Extra Music. On the dungeon floors the port gives
 +// a song for (port/core/music.c: Port_ExtraMusicFor, or extra-music.txt),
 +// Explorers of Sky's song plays instead of the floor's own music, from that
@@ -9041,11 +9242,34 @@ index 00000000..5913c5ec
 +    return Port_ExtraMusicFor(gDungeon->unk644.dungeonLocation.id, gDungeon->startFloorId + gDungeon->unk644.dungeonLocation.floor);
 +}
 +
-+// The slot track to play for the background music `song` now (an Explorers
-+// of Sky song), or -1
-+s32 Port_ExtraMusicNow(u16 song)
++#define DUNGEON_MUSIC_FADE_IN 0x8000 // (dungeon_music.c)
++static u16 sLastFloorSong = STOP_BGM; // (the last floor's own music, still asked for as the next floor starts)
++
++// The Explorers of Sky song (slot track) this floor plays now, or -1: while
++// the dungeon's music is the floor's own (not a Monster House's, a boss's, a
++// shop's, a thief's...; and on, unbroken, as the next floor starts, so the
++// same song plays on from floor to floor). music.c fades from one to the next.
++s32 Port_ExtraMusicWant(void)
 +{
-+    s32 n = FloorSong(song);
++    u16 queued, floorSong;
++    s32 n;
++
++    if (!gPortConfig.extraMusic || gDungeon == NULL) {
++        sLastFloorSong = STOP_BGM;
++        return -1;
++    }
++    if (gDungeon->unk644.bossSongIndex != STOP_BGM || gDungeon->unk644.unk2B != 0
++        || gDungeon->unk644.monsterHouseTriggeredEvent || gDungeon->unk644.unk55 != 0)
++        return -1; // (the game's music for those)
++    if (gDungeon->unk3A10 < 0 || gDungeon->unk3A10 >= (s32)ARRAY_COUNT(gDungeonMusic))
++        return -1;
++    floorSong = (u16)gDungeonMusic[gDungeon->unk3A10];
++    queued = gDungeon->musPlayer.queuedSongIndex & ~DUNGEON_MUSIC_FADE_IN;
++    if (queued == floorSong)
++        sLastFloorSong = floorSong;
++    else if (queued == STOP_BGM || queued != sLastFloorSong)
++        return -1; // (its music stopped: the dungeon's end...)
++    n = Port_ExtraMusicFor(gDungeon->unk644.dungeonLocation.id, gDungeon->startFloorId + gDungeon->unk644.dungeonLocation.floor);
 +    return n < 0 || (n & EXTRA_GBA) ? -1 : Port_ExtraMusicTrack(n);
 +}
 +
@@ -9231,10 +9455,10 @@ index 00000000..23e8ad99
 +#endif // PLATFORM_3DS
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
-index 00000000..3f59e064
+index 00000000..189cd504
 --- /dev/null
 +++ b/src/port_screen_menu.c
-@@ -0,0 +1,512 @@
+@@ -0,0 +1,529 @@
 +// 3DS port: Others > Graphics Options (outside dungeons).
 +//
 +// Built like the game's own Game Options window (options_menu2.c):
@@ -9285,10 +9509,11 @@ index 00000000..3f59e064
 +
 +enum { SETTING_ENABLED, SETTING_SIZE, SETTING_SCALE, SETTING_FRAMESKIP, SETTING_BUTTONS, SETTING_TOUCH, SETTING_MUSIC_STYLE, SETTING_SFX_STYLE, SETTING_EXTRA_MUSIC };
 +// Music Options: Music Style, ..., then Music Player (no choices: opens the player)
-+enum { MUSIC_STYLE, MUSIC_SFX, MUSIC_EXTRA, MUSIC_VOLUME, MUSIC_SFX_VOLUME, MUSIC_PLAYER };
-+_Static_assert(MUSIC_EXTRA == PORT_MUSIC_ENTRY_EXTRA && MUSIC_PLAYER == PORT_MUSIC_ENTRY_PLAYER, "port_screen_menu.h");
++enum { MUSIC_STYLE, MUSIC_SFX, MUSIC_VOLUME, MUSIC_SFX_VOLUME, MUSIC_EXTRA, MUSIC_EXTRA_VOLUME, MUSIC_EXTRA_TRACKS, MUSIC_PLAYER };
++_Static_assert(MUSIC_EXTRA == PORT_MUSIC_ENTRY_EXTRA && MUSIC_EXTRA_TRACKS == PORT_MUSIC_ENTRY_EXTRA_TRACKS
++               && MUSIC_PLAYER == PORT_MUSIC_ENTRY_PLAYER, "port_screen_menu.h");
 +// (entries that aren't settings with choices: EntrySetting's)
-+enum { ENTRY_PLAYER = -1, ENTRY_MUSIC_VOLUME = -2, ENTRY_SFX_VOLUME = -3 };
++enum { ENTRY_PLAYER = -1, ENTRY_MUSIC_VOLUME = -2, ENTRY_SFX_VOLUME = -3, ENTRY_EXTRA_VOLUME = -4, ENTRY_EXTRA_TRACKS = -5 };
 +
 +static struct {
 +    GameOptions *options;
@@ -9356,6 +9581,8 @@ index 00000000..3f59e064
 +ALIGNED(4) static const u8 sExtraMusic[] = _("Extra Music");
 +ALIGNED(4) static const u8 sMusicVolume[] = _("Music Volume");
 +ALIGNED(4) static const u8 sSfxVolume[] = _("SFX Volume");
++ALIGNED(4) static const u8 sExtraVolume[] = _("Extra Volume");
++ALIGNED(4) static const u8 sExtraTracks[] = _("Extra Music Volumes");
 +#define VOLUME_MIN 1 // (tens of percent, as gPortConfig.musicVolume / sfxVolume)
 +#define VOLUME_MAX 40
 +static const struct {
@@ -9383,7 +9610,7 @@ index 00000000..3f59e064
 +        case PAGE_TOP: return TOP_ENTRIES;
 +        case PAGE_SUB_SCREEN: return 3;
 +        case PAGE_CONTROLS: return 1;
-+        case PAGE_MUSIC: return 6;
++        case PAGE_MUSIC: return 8;
 +        default: return 2;
 +    }
 +}
@@ -9395,7 +9622,8 @@ index 00000000..3f59e064
 +        return SETTING_BUTTONS + i;
 +    if (sMenu.page == PAGE_MUSIC)
 +        return i == MUSIC_STYLE ? SETTING_MUSIC_STYLE : i == MUSIC_SFX ? SETTING_SFX_STYLE : i == MUSIC_EXTRA ? SETTING_EXTRA_MUSIC
-+             : i == MUSIC_VOLUME ? ENTRY_MUSIC_VOLUME : i == MUSIC_SFX_VOLUME ? ENTRY_SFX_VOLUME : ENTRY_PLAYER;
++             : i == MUSIC_VOLUME ? ENTRY_MUSIC_VOLUME : i == MUSIC_SFX_VOLUME ? ENTRY_SFX_VOLUME
++             : i == MUSIC_EXTRA_VOLUME ? ENTRY_EXTRA_VOLUME : i == MUSIC_EXTRA_TRACKS ? ENTRY_EXTRA_TRACKS : ENTRY_PLAYER;
 +    return sMenu.page == PAGE_SUB_SCREEN ? i : i + 1;
 +}
 +
@@ -9506,12 +9734,16 @@ index 00000000..3f59e064
 +                PrintStringOnWindow(8, GetMenuEntryYCoord(&sMenu.input, i), sMusicPlayer, win, 0);
 +                continue;
 +            }
++            if (setting == ENTRY_EXTRA_TRACKS) { // (no Explorers of Sky ROM: red)
++                PrintText(8, GetMenuEntryYCoord(&sMenu.input, i), sExtraTracks, win, sMenu.musicLocked || !Port_ExtraMusicOpen());
++                continue;
++            }
 +            if (setting < 0) { // a volume: its percent (Left/Right: 10% less/more)
 +                u8 text[24];
-+                bool8 sfx = setting == ENTRY_SFX_VOLUME;
-+                s32 v = (sfx ? CFG.sfxVolume : CFG.musicVolume) * 10;
++                bool8 sfx = setting == ENTRY_SFX_VOLUME, ex = setting == ENTRY_EXTRA_VOLUME;
++                s32 v = (ex ? CFG.extraVolume : sfx ? CFG.sfxVolume : CFG.musicVolume) * 10;
 +                y = GetMenuEntryYCoord(&sMenu.input, i);
-+                PrintText(8, y, sfx ? sSfxVolume : sMusicVolume, win, sMenu.musicLocked);
++                PrintText(8, y, ex ? sExtraVolume : sfx ? sSfxVolume : sMusicVolume, win, sMenu.musicLocked);
 +                snprintf((char *)text, sizeof(text), "%d%%", v);
 +                PrintText(CHOICE_X(0), y, text, win, sMenu.musicLocked);
 +                continue;
@@ -9629,7 +9861,8 @@ index 00000000..3f59e064
 +}
 +
 +// 0: still open; 1: redrawn; 2: closed with B; 3: closed with A; 4: Extra Music
-+// turned on without its ROM (to be found; still open, unchanged).
++// turned on without its ROM (to be found; still open, unchanged); 5: A on Extra
++// Music Volumes (closed).
 +u32 PortScreenMenu_Update(void)
 +{
 +    bool8 changed = FALSE;
@@ -9646,6 +9879,14 @@ index 00000000..3f59e064
 +                return accept ? 3 : 2;
 +            }
 +            if (sMenu.page == PAGE_MUSIC) { // A on Music Player opens it
++                if (accept && index == MUSIC_EXTRA_TRACKS && !sMenu.musicLocked) { // ... and its songs' volumes
++                    if (!Port_ExtraMusicOpen()) {
++                        PlayMenuSoundEffect(MENU_SFX_FAIL);
++                        break;
++                    }
++                    PlayMenuSoundEffect(MENU_SFX_ACCEPT);
++                    return 5;
++                }
 +                if (accept && index != MUSIC_PLAYER)
 +                    break;
 +                PlayMenuSoundEffect(accept ? MENU_SFX_ACCEPT : MENU_SFX_BACK);
@@ -9697,12 +9938,12 @@ index 00000000..3f59e064
 +                    changed = TRUE;
 +                }
 +            }
-+            else if (sMenu.page == PAGE_MUSIC && (index == MUSIC_PLAYER || sMenu.musicLocked)) {
++            else if (sMenu.page == PAGE_MUSIC && (index == MUSIC_PLAYER || index == MUSIC_EXTRA_TRACKS || sMenu.musicLocked)) {
 +                // (Music Player has no choices; a locked Music Style stays GBA)
 +            }
-+            else if (sMenu.page == PAGE_MUSIC && (index == MUSIC_VOLUME || index == MUSIC_SFX_VOLUME)) {
++            else if (sMenu.page == PAGE_MUSIC && (index == MUSIC_VOLUME || index == MUSIC_SFX_VOLUME || index == MUSIC_EXTRA_VOLUME)) {
 +                // 10% a press (heard at once: the DS music, and this menu's own sounds)
-+                u8 *v = index == MUSIC_VOLUME ? &CFG.musicVolume : &CFG.sfxVolume;
++                u8 *v = index == MUSIC_VOLUME ? &CFG.musicVolume : index == MUSIC_EXTRA_VOLUME ? &CFG.extraVolume : &CFG.sfxVolume;
 +                s32 n = *v + step;
 +                if (n >= VOLUME_MIN && n <= VOLUME_MAX) {
 +                    *v = (u8)n;
