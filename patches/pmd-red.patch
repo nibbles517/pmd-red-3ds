@@ -6313,7 +6313,7 @@ index aeeb69ed..8d2fd375 100644
  
      a0->unk26 = 0;
 diff --git a/src/music.c b/src/music.c
-index a5a58dec..d8d68592 100644
+index a5a58dec..b5afa3cc 100644
 --- a/src/music.c
 +++ b/src/music.c
 @@ -3,6 +3,11 @@
@@ -6328,7 +6328,45 @@ index a5a58dec..d8d68592 100644
  
  static EWRAM_DATA u16 sBGMusicPlayerstate = {0};
  static EWRAM_DATA u16 sCurrentBGSong = {0};
-@@ -517,6 +522,9 @@ void UpdateSound(void)
+@@ -62,10 +67,17 @@ UNUSED static void StopAllMusic(void)
+     StopFanfareSE(STOP_SOUND_EFFECT);
+ }
+ 
++#ifdef PLATFORM_3DS
++u16 Port_ExtraMusicSwap(u16 song); // port_extra_music.c
++#endif
++
+ void StartNewBGM(u16 songIndex)
+ {
+     bool8 interruptFlag;
+ 
++#ifdef PLATFORM_3DS
++    songIndex = Port_ExtraMusicSwap(songIndex); // (Extra Music: the floor's song kept on)
++#endif
+     if (!IsBGSong(songIndex))
+         return;
+     if (songIndex == STOP_BGM)
+@@ -95,6 +107,9 @@ void FadeInNewBGM(u16 songIndex, u16 speed)
+ {
+     bool8 interruptFlag;
+ 
++#ifdef PLATFORM_3DS
++    songIndex = Port_ExtraMusicSwap(songIndex);
++#endif
+     if (!IsBGSong(songIndex))
+         return;
+     if (songIndex == STOP_BGM)
+@@ -131,6 +146,9 @@ void FadeInNewBGM(u16 songIndex, u16 speed)
+ 
+ void QueueBGM(u16 songIndex)
+ {
++#ifdef PLATFORM_3DS
++    songIndex = Port_ExtraMusicSwap(songIndex);
++#endif
+     if (sCurrentBGSong == STOP_BGM) {
+         StartNewBGM(songIndex);
+         sQueuedBGSong = STOP_BGM;
+@@ -517,6 +535,9 @@ void UpdateSound(void)
      s32 musicPlayerIndex;
  
      m4aSoundMain();
@@ -6338,7 +6376,7 @@ index a5a58dec..d8d68592 100644
  
      if (sFanfareMusicPlayerState != 0) {
          switch (sFanfareMusicPlayerState) {
-@@ -651,6 +659,187 @@ void UpdateSound(void)
+@@ -651,6 +672,187 @@ void UpdateSound(void)
      }
  }
  
@@ -8968,14 +9006,15 @@ index 00000000..e5a595bb
 +#endif
 diff --git a/src/port_extra_music.c b/src/port_extra_music.c
 new file mode 100644
-index 00000000..469a63d9
+index 00000000..5913c5ec
 --- /dev/null
 +++ b/src/port_extra_music.c
-@@ -0,0 +1,31 @@
+@@ -0,0 +1,49 @@
 +// 3DS port: Music Options > Extra Music. On the dungeon floors the port gives
 +// a song for (port/core/music.c: Port_ExtraMusicFor, or extra-music.txt),
 +// Explorers of Sky's song plays instead of the floor's own music, from that
-+// game's ROM (picked in Music Options). Only the floor's music: a Monster
++// game's ROM (picked in Music Options); or one of the game's own songs, where
++// a floor keeps a song on for longer than the game does. Only the floor's music: a Monster
 +// House, a boss, the fanfares and the rest play as ever. music.c plays it in
 +// the background music's DS slot (as Music Style: DS plays its tracks).
 +#include "global.h"
@@ -8987,19 +9026,36 @@ index 00000000..469a63d9
 +
 +#ifdef PLATFORM_3DS
 +
-+// The slot track to play for the background music `song` now, or -1
-+s32 Port_ExtraMusicNow(u16 song)
-+{
-+    s32 n;
++#define EXTRA_GBA 0x8000 // (Port_ExtraMusicFor: one of the game's own songs)
 +
++// The floor's song (Port_ExtraMusicFor) if `song` is the floor's own music
++// and Extra Music is on, else -1
++static s32 FloorSong(u16 song)
++{
 +    if (!gPortConfig.extraMusic || gDungeon == NULL || song == STOP_BGM)
 +        return -1;
 +    if (gDungeon->unk3A10 < 0 || gDungeon->unk3A10 >= (s32)ARRAY_COUNT(gDungeonMusic)
 +        || song != (u16)gDungeonMusic[gDungeon->unk3A10])
 +        return -1; // (not the floor's own music)
 +    // (the floor as shown: 1F, B5F..., the dungeon's starting floor counted)
-+    n = Port_ExtraMusicFor(gDungeon->unk644.dungeonLocation.id, gDungeon->startFloorId + gDungeon->unk644.dungeonLocation.floor);
-+    return n < 0 ? -1 : Port_ExtraMusicTrack(n);
++    return Port_ExtraMusicFor(gDungeon->unk644.dungeonLocation.id, gDungeon->startFloorId + gDungeon->unk644.dungeonLocation.floor);
++}
++
++// The slot track to play for the background music `song` now (an Explorers
++// of Sky song), or -1
++s32 Port_ExtraMusicNow(u16 song)
++{
++    s32 n = FloorSong(song);
++    return n < 0 || (n & EXTRA_GBA) ? -1 : Port_ExtraMusicTrack(n);
++}
++
++// The song to start in place of `song` (StartNewBGM etc.): one of the game's
++// own, where the floor keeps a song on for longer than the game does
++// (Buried Relic's, Stormy Sea's); else `song`
++u16 Port_ExtraMusicSwap(u16 song)
++{
++    s32 n = FloorSong(song);
++    return n >= 0 && (n & EXTRA_GBA) ? (u16)(n & ~EXTRA_GBA) : song;
 +}
 +
 +#endif

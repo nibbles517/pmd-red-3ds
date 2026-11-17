@@ -73,13 +73,16 @@ ever). Turning it on the first time asks for Explorers of Sky's ROM, found as
 the DS ROM is (Explorers of Sky's only: another game's, even Explorers of Time
 or Darkness, is refused); it's remembered (`config.ini`, `Extra Music ROM`),
 and works with either Music Style. Which floors play which song is built in
-(port/core/music.c, `sExtraBuiltIn`), or, to try songs out, given by
+(port/core/music.c, `sExtraBuiltIn`: the post-game dungeons; Buried Relic
+1F-35F and Stormy Sea 1F-39F keep their own song on throughout), or, to try
+songs out, given by
 `extra-music.txt` in `SD:/3ds/pmd-red-3ds/` instead, one line each:
 `<dungeon> <first floor>-<last floor> = <song>` (or `<dungeon> <floor> =
 <song>`), where the dungeon is its number in `include/constants/dungeon.h`
 (Purity Forest 62, Western Cave 23, Wish Cave 26, Murky Cave 40, ...), the
 floors are as shown in the game, and the song is Explorers of Sky's
-`bgmNNNN` number (as the NDS Music Player lists them); `;` starts a comment.
+`bgmNNNN` number (as the NDS Music Player lists them), or `gba <n>` for one of
+this game's own songs (`include/constants/bg_music.h`); `;` starts a comment.
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 The Music Player lists the ROM's sound effects after its music (in green);

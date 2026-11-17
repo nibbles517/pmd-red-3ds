@@ -1203,14 +1203,69 @@ int Port_ExtraMusicTrack(int n)
 }
 
 // Which floors play which song: dungeon (its number in the game: constants/
-// dungeon.h), its floors first..last, Explorers of Sky's song number.
+// dungeon.h), its floors first..last (as shown: 1F, B5F...), and Explorers of
+// Sky's song number; or EXTRA_GBA | one of the game's own songs (constants/
+// bg_music.h), played there in place of the floor's own (through its DS
+// match with Music Style: DS), to keep a song on for longer than the game does.
 typedef struct {
     uint8_t dungeon, first, last;
     uint16_t song;
 } ExtraRule;
-// (built in: to be filled in)
+#define EXTRA_GBA 0x8000
+#define ALL_FLOORS 0, 255
+enum { // (constants/dungeon.h, constants/bg_music.h)
+    D_STORMY_SEA = 19, D_SILVER_TRENCH = 20, D_METEOR_CAVE = 21, D_WESTERN_CAVE = 23, D_WISH_CAVE = 26,
+    D_BURIED_RELIC = 27, D_PITFALL_VALLEY = 28, D_NORTHERN_RANGE = 29, D_DESERT_REGION = 31,
+    D_SOUTHERN_CAVERN = 32, D_WYVERN_HILL = 33, D_FIERY_FIELD = 34, D_NORTHWIND_FIELD = 35, D_SOLAR_CAVE = 36,
+    D_LIGHTNING_FIELD = 37, D_DARKNIGHT_RELIC = 38, D_MURKY_CAVE = 40, D_GRAND_SEA = 41, D_REMAINS_ISLAND = 44,
+    D_MARVELOUS_SEA = 45, D_FANTASY_STRAIT = 46, D_HOWLING_FOREST = 53, D_WATERFALL_POND = 56,
+    D_UNOWN_RELIC = 57, D_JOYOUS_TOWER = 58, D_FAR_OFF_SEA = 59, D_MT_FARAWAY = 60,
+    MUS_A_NEW_ADVENTURE = 13, // (Buried Relic's own)
+    MUS_STORMY_SEA = 21,
+};
 static const ExtraRule sExtraBuiltIn[] = {
-    { 0xFF, 0, 0, 0 }, // (none yet)
+    { D_HOWLING_FOREST, ALL_FLOORS, 149 },
+    { D_FIERY_FIELD, ALL_FLOORS, 34 },
+    { D_LIGHTNING_FIELD, ALL_FLOORS, 32 },
+    { D_NORTHWIND_FIELD, ALL_FLOORS, 38 },
+    { D_WATERFALL_POND, ALL_FLOORS, 24 },
+    { D_MT_FARAWAY, 1, 14, 155 },
+    { D_MT_FARAWAY, 15, 29, 157 },
+    { D_MT_FARAWAY, 30, 39, 158 },
+    { D_NORTHERN_RANGE, ALL_FLOORS, 145 },
+    { D_PITFALL_VALLEY, ALL_FLOORS, 147 },
+    { D_MURKY_CAVE, ALL_FLOORS, 39 },
+    { D_BURIED_RELIC, 1, 35, EXTRA_GBA | MUS_A_NEW_ADVENTURE }, // (its own song, all the way)
+    { D_BURIED_RELIC, 36, 70, 156 },
+    { D_BURIED_RELIC, 71, 99, 146 },
+    { D_DESERT_REGION, ALL_FLOORS, 57 },
+    { D_STORMY_SEA, 1, 39, EXTRA_GBA | MUS_STORMY_SEA }, // (its own song, all the way)
+    { D_SILVER_TRENCH, 1, 39, 46 },
+    { D_SILVER_TRENCH, 40, 69, 54 },
+    { D_SILVER_TRENCH, 70, 98, 55 },
+    { D_WESTERN_CAVE, 1, 49, 31 },
+    { D_WESTERN_CAVE, 50, 98, 30 },
+    { D_METEOR_CAVE, 1, 10, 48 },
+    { D_METEOR_CAVE, 11, 19, 49 },
+    { D_WISH_CAVE, 40, 49, 153 },
+    { D_WISH_CAVE, 50, 59, 154 },
+    { D_WISH_CAVE, 60, 69, 151 },
+    { D_WISH_CAVE, 70, 79, 144 },
+    { D_WISH_CAVE, 80, 89, 50 },
+    { D_WISH_CAVE, 90, 98, 51 },
+    { D_GRAND_SEA, ALL_FLOORS, 60 },
+    { D_FAR_OFF_SEA, ALL_FLOORS, 37 },
+    { D_SOLAR_CAVE, 1, 10, 43 },
+    { D_SOLAR_CAVE, 11, 19, 44 },
+    { D_MARVELOUS_SEA, ALL_FLOORS, 45 },
+    { D_FANTASY_STRAIT, ALL_FLOORS, 152 },
+    { D_REMAINS_ISLAND, ALL_FLOORS, 52 },
+    { D_DARKNIGHT_RELIC, ALL_FLOORS, 41 },
+    { D_SOUTHERN_CAVERN, ALL_FLOORS, 42 },
+    { D_UNOWN_RELIC, ALL_FLOORS, 61 },
+    { D_WYVERN_HILL, ALL_FLOORS, 29 },
+    { D_JOYOUS_TOWER, 1, 50, 148 },
+    { D_JOYOUS_TOWER, 51, 99, 150 },
 };
 #define EXTRA_RULES_MAX 256
 static ExtraRule sExtraRules[EXTRA_RULES_MAX];
@@ -1218,7 +1273,8 @@ static int sExtraRuleCount = -1; // -1: not read yet
 
 // extra-music.txt in the data folder, if it's there, in place of the
 // built-in ones: "<dungeon> <first>-<last> = <song>" (or one floor:
-// "<dungeon> <floor> = <song>"), all numbers; ; or # starts a comment
+// "<dungeon> <floor> = <song>"), all numbers; "= gba <song>" for one of the
+// game's own songs; ; or # starts a comment
 static void LoadExtraRules(void)
 {
     sExtraRuleCount = 0;
@@ -1239,12 +1295,19 @@ static void LoadExtraRules(void)
                 *next++ = 0;
             for (char *c = line; *c; c++)
                 if (*c == ';' || *c == '#') { *c = 0; break; }
+            int gba = 0;
+            for (char *c = line; *c; c++) // "gba <song>": the game's own song
+                if ((c[0] == 'g' || c[0] == 'G') && (c[1] == 'b' || c[1] == 'B') && (c[2] == 'a' || c[2] == 'A')) {
+                    gba = 1;
+                    c[0] = c[1] = c[2] = ' ';
+                    break;
+                }
             int d, a, b, song;
             if (sExtraRuleCount < EXTRA_RULES_MAX
                 && (sscanf(line, " %d %d - %d = %d", &d, &a, &b, &song) == 4
                     || (sscanf(line, " %d %d = %d", &d, &a, &song) == 3 && (b = a, 1)))
-                && d >= 0 && d < 255 && a >= 0 && b >= a && b < 256 && song >= 0) {
-                ExtraRule r = { (uint8_t)d, (uint8_t)a, (uint8_t)b, (uint16_t)song };
+                && d >= 0 && d < 255 && a >= 0 && b >= a && b < 256 && song >= 0 && song < EXTRA_GBA) {
+                ExtraRule r = { (uint8_t)d, (uint8_t)a, (uint8_t)b, (uint16_t)(song | (gba ? EXTRA_GBA : 0)) };
                 sExtraRules[sExtraRuleCount++] = r;
             }
             line = next;
@@ -1254,7 +1317,9 @@ static void LoadExtraRules(void)
     Backend_FileClose(f);
 }
 
-// Explorers of Sky's song for this dungeon's floor, or -1 (the floor's own music)
+// The song for this dungeon's floor: Explorers of Sky's song number, or
+// 0x8000 | one of the game's own songs (constants/bg_music.h), or -1 (the
+// floor's own music)
 int Port_ExtraMusicFor(int dungeon, int floor)
 {
     if (sExtraRuleCount < 0)
