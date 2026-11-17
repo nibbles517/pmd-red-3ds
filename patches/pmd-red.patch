@@ -350,10 +350,10 @@ index 00000000..d576cc98
 +#endif
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..553c562d
+index 00000000..76ba1d1c
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,51 @@
+@@ -0,0 +1,52 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -361,11 +361,12 @@ index 00000000..553c562d
 +#define PORT_RUN_OPTIONS 8
 +extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On; each Save Data's in config.ini
 +// What they do (index in gPortRunOptions):
-+// (dungeon_floor_spawns.c) Increased Sitrus Berries: a rolled Oran Berry is a
-+// Sitrus Berry 5% of the time; Increased Life Seeds: a rolled Blast Seed is
-+// a Life Seed 5% of the time; Increased Vitamins: a rolled Max Elixir is
-+// Protein, Iron, Calcium or Zinc (25% each) 5% of the time. 10% each while
-+// the team leader holds a Plain Ribbon.
++// (dungeon_floor_spawns.c, PortRunItemChange) Increased Sitrus Berries: any
++// other rolled Berry is a Sitrus Berry 2% of the time; Increased Life Seeds:
++// any other rolled Seed is a Life Seed 2% of the time; Increased Vitamins: a
++// rolled Max Elixir is Protein, Iron, Calcium or Zinc (25% each) 5% of the
++// time. Doubled (4%, 4%, 10%) while the team leader holds a Plain Ribbon,
++// except for a Kecleon Shop's items (always 2%, 2%, 5%).
 +#define PORT_RUN_ORAN_TO_SITRUS 0
 +#define PORT_RUN_BLAST_TO_LIFE 1
 +#define PORT_RUN_ELIXIR_TO_VITAMIN 2
@@ -1584,7 +1585,7 @@ index e8c2000a..73246781 100644
      if (var_24 || unkTile != NULL)
          DungeonWaitFrames_Async(0xA, 0x18);
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
-index 4506e559..76a3d8fa 100644
+index 4506e559..51a3ae26 100644
 --- a/src/dungeon_floor_spawns.c
 +++ b/src/dungeon_floor_spawns.c
 @@ -18,6 +18,9 @@
@@ -1597,7 +1598,7 @@ index 4506e559..76a3d8fa 100644
  #include "dungeon_config.h"
  #include "structs/dungeon_mapparam.h"
  
-@@ -104,6 +107,31 @@ u8 GetRandomFloorTrap(void)
+@@ -104,6 +107,72 @@ u8 GetRandomFloorTrap(void)
      return TRAP_CHESTNUT_TRAP;
  }
  
@@ -1605,10 +1606,14 @@ index 4506e559..76a3d8fa 100644
 +#include "dungeon_util.h"
 +#include "structs/dungeon_entity.h"
 +
-+// The item run options' chance (in 100) of changing an item: 5, or 10 while
-+// the team leader holds a Plain Ribbon (a hidden effect: its description
-+// doesn't say)
-+static s32 PortItemChangeChance(void)
++// Run options 1-3: a rolled item changed (GetRandomFloorItem)
++//   Increased Sitrus Berries: any other Berry is a Sitrus Berry
++//   Increased Life Seeds: any other Seed is a Life Seed
++//   Increased Vitamins: a Max Elixir is Protein, Iron, Calcium or Zinc (as likely each)
++// Rolled for a Kecleon Shop: 2, 2 and 5 times in 100. Anywhere else (floor,
++// Monster House, buried, held, Pickup...): the same, doubled while the team
++// leader holds a Plain Ribbon (4, 4, 10).
++static bool8 PortLeaderHasPlainRibbon(void)
 +{
 +    s32 i;
 +
@@ -1620,34 +1625,58 @@ index 4506e559..76a3d8fa 100644
 +            continue;
 +        info = GetEntInfo(e);
 +        if (info->isTeamLeader)
-+            return ((info->heldItem.flags & ITEM_FLAG_EXISTS) && info->heldItem.id == ITEM_PLAIN_RIBBON) ? 10 : 5;
++            return (info->heldItem.flags & ITEM_FLAG_EXISTS) && info->heldItem.id == ITEM_PLAIN_RIBBON;
 +    }
-+    return 5;
++    return FALSE;
++}
++
++static bool8 PortIsBerry(s32 id)
++{
++    switch (id) {
++        case ITEM_ORAN_BERRY: case ITEM_RAWST_BERRY: case ITEM_PECHA_BERRY:
++        case ITEM_CHERI_BERRY: case ITEM_CHESTO_BERRY:
++            return TRUE;
++    }
++    return FALSE; // (and the Sitrus Berry: it is one already)
++}
++
++static bool8 PortIsSeed(s32 id)
++{
++    switch (id) {
++        case ITEM_HEAL_SEED: case ITEM_EYEDROP_SEED: case ITEM_REVIVER_SEED: case ITEM_BLINKER_SEED:
++        case ITEM_DOOM_SEED: case ITEM_ALLURE_SEED: case ITEM_HUNGER_SEED: case ITEM_QUICK_SEED:
++        case ITEM_TOTTER_SEED: case ITEM_SLEEP_SEED: case ITEM_PLAIN_SEED: case ITEM_WARP_SEED:
++        case ITEM_BLAST_SEED: case ITEM_JOY_SEED: case ITEM_STUN_SEED:
++            return TRUE;
++    }
++    return FALSE; // (and the Life Seed: it is one already)
++}
++
++static s32 PortRunItemChange(s32 id, s32 spawnType)
++{
++    s32 mul = (spawnType != ITEM_SPAWN_IN_SHOP && PortLeaderHasPlainRibbon()) ? 2 : 1;
++
++    if (gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && PortIsBerry(id) && DungeonRandInt(100) < 2 * mul)
++        return ITEM_SITRUS_BERRY;
++    if (gPortRunOptions[PORT_RUN_BLAST_TO_LIFE] && PortIsSeed(id) && DungeonRandInt(100) < 2 * mul)
++        return ITEM_LIFE_SEED;
++    if (gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && id == ITEM_MAX_ELIXIR && DungeonRandInt(100) < 5 * mul) {
++        static const u8 sVitamins[4] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC };
++        return sVitamins[DungeonRandInt(4)];
++    }
++    return id;
 +}
 +#endif
 +
  u8 GetRandomFloorItem(s32 spawnType)
  {
      s32 i;
-@@ -121,6 +149,22 @@ u8 GetRandomFloorItem(s32 spawnType)
+@@ -121,6 +190,9 @@ u8 GetRandomFloorItem(s32 spawnType)
      rand = DungeonRandInt(ITEM_SETS_RANDOM_CAP + 1);
      for (i = 0; i < NUMBER_OF_ITEM_IDS; i++) {
          if (gDungeon->itemSpawns[spawnType].itemValues[i] != 0 && GetItemCategory(i) == category && gDungeon->itemSpawns[spawnType].itemValues[i] >= rand) {
 +#ifdef PLATFORM_3DS
-+            // Run options 1 and 2: an Oran Berry or a Blast Seed rolled here
-+            // (floor, shop, Monster House, buried, held, Pickup...) is a
-+            // Sitrus Berry or a Life Seed 5 times in 100 (10 with the leader's
-+            // Plain Ribbon)
-+            if (i == ITEM_ORAN_BERRY && gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && DungeonRandInt(100) < PortItemChangeChance())
-+                return ITEM_SITRUS_BERRY;
-+            if (i == ITEM_BLAST_SEED && gPortRunOptions[PORT_RUN_BLAST_TO_LIFE] && DungeonRandInt(100) < PortItemChangeChance())
-+                return ITEM_LIFE_SEED;
-+            // Run option 3: a Max Elixir is a vitamin 5 times in 100 (10): Protein,
-+            // Iron, Calcium or Zinc, as likely each
-+            if (i == ITEM_MAX_ELIXIR && gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && DungeonRandInt(100) < PortItemChangeChance()) {
-+                static const u8 sVitamins[4] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC };
-+                return sVitamins[DungeonRandInt(4)];
-+            }
++            i = PortRunItemChange(i, spawnType);
 +#endif
              return i;
          }
