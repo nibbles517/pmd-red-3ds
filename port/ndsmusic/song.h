@@ -9,6 +9,7 @@
 #ifndef NDSMUSIC_SONG_H
 #define NDSMUSIC_SONG_H
 
+#include "dse_set.h"
 #include "sdat.h"
 
 typedef struct Song Song;
@@ -17,6 +18,8 @@ typedef struct Song Song;
  * SSEQ songs copy what they need and don't depend on the Sdat afterwards. */
 Song *song_open_seq(const Sdat *s, uint32_t seq_index, uint32_t out_rate);
 Song *song_open_strm(const Sdat *s, uint32_t strm_index, uint32_t out_rate);
+/* Song idx of a DSE game (Explorers of Sky etc.); the set must stay alive while it plays. */
+Song *song_open_dse(DseSet *set, int idx, uint32_t out_rate);
 /* Entry `idx` of sequence archive `arc` (usually a sound effect). */
 Song *song_open_ssar(const Sdat *s, uint32_t arc, uint32_t idx, uint32_t out_rate);
 void song_close(Song *g);

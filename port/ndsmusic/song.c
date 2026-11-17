@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dse.h"
 #include "mixutil.h"
 #include "sseq.h"
 #include "strm.h"
@@ -19,6 +20,7 @@ struct Song {
     SdatSeqBundle bundle;
     SseqPlayer *seq;
     StrmPlayer *strm;
+    DsePlayer *dse;
     uint32_t rate;
     uint64_t pos; /* samples rendered */
 
@@ -59,6 +61,16 @@ Song *song_open_ssar(const Sdat *s, uint32_t arc, uint32_t idx, uint32_t rate) {
     return g;
 }
 
+Song *song_open_dse(DseSet *set, int idx, uint32_t rate) {
+    Song *g = song_new(rate);
+    if (!g) return NULL;
+    if (!(g->dse = dse_set_open(set, idx, rate))) {
+        song_close(g);
+        return NULL;
+    }
+    return g;
+}
+
 Song *song_open_strm(const Sdat *s, uint32_t idx, uint32_t rate) {
     DataSource src = sdat_strm_source(s, idx);
     if (src.size == 0) return NULL;
@@ -75,6 +87,7 @@ void song_close(Song *g) {
     if (!g) return;
     sseq_destroy(g->seq);
     strm_destroy(g->strm);
+    dse_destroy(g->dse);
     sdat_free_seq(&g->bundle);
     free(g);
 }
@@ -91,9 +104,11 @@ void song_set_loops(Song *g, int loops, uint32_t fade_ms) {
     if (!g->done) g->fade_start = UINT64_MAX; /* e.g. repeat switched on mid-fade */
 }
 
-int song_loops(const Song *g) { return g->seq ? sseq_loops(g->seq) : strm_loops(g->strm); }
+int song_loops(const Song *g) { return g->seq ? sseq_loops(g->seq) : g->dse ? dse_loops(g->dse) : strm_loops(g->strm); }
 
-static int finished(const Song *g) { return g->seq ? sseq_finished(g->seq) : strm_finished(g->strm); }
+static int finished(const Song *g) {
+    return g->seq ? sseq_finished(g->seq) : g->dse ? dse_finished(g->dse) : strm_finished(g->strm);
+}
 
 void song_render(Song *g, int16_t *out, uint32_t frames) {
     if (g->done) {
@@ -101,6 +116,7 @@ void song_render(Song *g, int16_t *out, uint32_t frames) {
         return;
     }
     if (g->seq) sseq_render(g->seq, out, frames);
+    else if (g->dse) dse_render(g->dse, out, frames);
     else strm_render(g->strm, out, frames);
 
     /* Decide when the fade starts. */
@@ -134,10 +150,11 @@ void song_render(Song *g, int16_t *out, uint32_t frames) {
 
 int song_done(const Song *g) { return g->done; }
 uint32_t song_pos_ms(const Song *g) { return (uint32_t)(g->pos * 1000 / g->rate); }
-uint16_t song_voices(const Song *g) { return g->seq ? sseq_voice_mask(g->seq) : 0; }
+uint16_t song_voices(const Song *g) { return g->seq ? sseq_voice_mask(g->seq) : g->dse ? dse_voice_mask(g->dse) : 0; }
 
 void song_set_volume(Song *g, int percent) {
     int32_t gain = percent * GAIN_UNITY / 100;
     if (g->seq) sseq_set_gain(g->seq, gain);
     if (g->strm) strm_set_gain(g->strm, gain);
+    if (g->dse) dse_set_gain(g->dse, gain);
 }

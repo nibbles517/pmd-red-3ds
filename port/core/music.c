@@ -33,6 +33,7 @@ typedef struct {
     uint8_t sdat;
     uint8_t isStream;
     uint8_t isEffect; // a sound effect: entry index of sequence archive arc
+    uint8_t isDse;    // a DSE song (Mystery Dungeon: Explorers etc.): index = its sRom.dse.songs index (sdat 0xFF)
     uint16_t arc;
     uint16_t index;
     uint16_t gain;    // its own volume, percent (sDefaultMusicGain/sDefaultGain, ds-volumes.txt)
@@ -272,6 +273,7 @@ int Port_MusicOpen(void)
             free(ents);
         }
     }
+    total += sRom.dse.num; // (games on Procyon's DSE engine: its songs)
     sTracks = calloc((size_t)(total ? total : 1), sizeof(Track));
     if (sTracks == NULL) {
         Port_MusicClose();
@@ -302,6 +304,19 @@ int Port_MusicOpen(void)
             t->index = (uint16_t)q;
             snprintf(t->label, sizeof(t->label), "%sS%02u %s", pre, (unsigned)q, nm ? nm : "(stream)");
         }
+    }
+    // Games on the DSE engine (Mystery Dungeon: Explorers): music from SOUND/BGM and SOUND/ME,
+    // as the player lists it
+    for (int i = 0; i < sRom.dse.num && sCount < total; i++) {
+        const DseSong *d = &sRom.dse.songs[i];
+        Track *t = &sTracks[sCount++];
+        t->sdat = 0xFF; // (no SDAT's: not matched with the GBA songs)
+        t->isDse = 1;
+        t->index = (uint16_t)i;
+        if (d->group == DSE_GROUP_ME)
+            snprintf(t->label, sizeof(t->label), "ME%02u %s", (unsigned)d->number, d->label);
+        else
+            snprintf(t->label, sizeof(t->label), "%03u %s", (unsigned)d->number, d->label);
     }
     sSongCount = sCount;
     // Then the sound effects (sequence archives' entries), as the player lists them
@@ -389,6 +404,8 @@ int Port_MusicSongCount(void)
 // A track's song, at the mixing rate
 static Song *OpenTrack(const Track *t)
 {
+    if (t->isDse)
+        return song_open_dse(&sRom.dse, t->index, sMixRate);
     const Sdat *s = &sRom.sdat[t->sdat];
     if (t->isEffect)
         return song_open_ssar(s, t->arc, t->index, sMixRate);
