@@ -3797,7 +3797,7 @@ index e5de5d56..c5591c72 100644
  const u8 *const gUnknown_80FE764 = _("Speed{MOVE_X_POSITION_BY_80}Slow{MOVE_X_POSITION_BY_136}Fast");
  const u8 *const gUnknown_80FE788 = _("Far-off pals{MOVE_X_POSITION_BY_80}Self{MOVE_X_POSITION_BY_136}Look");
 diff --git a/src/dungeon_tilemap.c b/src/dungeon_tilemap.c
-index 80a7d04f..ff6b0b99 100644
+index 80a7d04f..9067f69d 100644
 --- a/src/dungeon_tilemap.c
 +++ b/src/dungeon_tilemap.c
 @@ -33,6 +33,12 @@
@@ -3913,6 +3913,20 @@ index 80a7d04f..ff6b0b99 100644
      r5 = a1;
      if (r5 >= 96) {
          r5 = 96;
+@@ -718,6 +775,13 @@ void sub_8040094(u8 r0)
+     sub_803F7BC();
+     ToggleWindowBgBuffer();
+     IncrementPlayTime(gPlayTimeRef);
++#ifdef PLATFORM_3DS
++    // (a frame of the floor without the camera's update, as effects load:
++    // the wide view kept, else it lapses and comes back with the GBA's maps
++    // spread across the screen for two frames)
++    if (gPortWideView)
++        gPortWideView = 2;
++#endif
+     WaitForNextFrameAndAdvanceRNG();
+     LoadBufferedInputs();
+     xxx_call_update_bg_sound_input();
 diff --git a/src/dungeon_util.c b/src/dungeon_util.c
 index 60311546..1c3f273b 100644
 --- a/src/dungeon_util.c
@@ -4070,6 +4084,32 @@ index 94185342..7c26b40a 100644
                  DoAxFrame_800558C(axData,x,y,unkY,param_1->paletteNum,&param_1->unkC.spriteMasks);
              }
          }
+diff --git a/src/effect_sub_1.c b/src/effect_sub_1.c
+index 21df5f2c..57125237 100644
+--- a/src/effect_sub_1.c
++++ b/src/effect_sub_1.c
+@@ -1,4 +1,7 @@
+ #include "global.h"
++#ifdef PLATFORM_3DS
++#include "port_game.h"
++#endif
+ #include "globaldata.h"
+ #include "bg_control.h"
+ #include "code_800C9CC.h"
+@@ -223,6 +226,13 @@ void sub_800EF64(void)
+                     sub_800CD64(0, TRUE);
+                     sub_8052210(0);
+                     sub_803EAF0(5, NULL);
++#ifdef PLATFORM_3DS
++                    // (a frame without the floor drawn: the wide view kept,
++                    // else it lapses and comes back with the GBA's maps
++                    // spread across the screen for two frames)
++                    if (gPortWideView)
++                        gPortWideView = 2;
++#endif
+                     WaitForNextFrameAndAdvanceRNG();
+                     xxx_call_update_bg_vram();
+                 }
 diff --git a/src/exclusive_pokemon.c b/src/exclusive_pokemon.c
 index f0d5144c..02d25b30 100644
 --- a/src/exclusive_pokemon.c
