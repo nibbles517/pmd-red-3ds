@@ -31,7 +31,7 @@ SECTIONS
 
     . = ALIGN(16);
     __heap_start = .;
-    . += 0x100000;
+    . += 0x800000;
     __heap_end = .;
     . += 0x40000;
     __stack_top = .;
