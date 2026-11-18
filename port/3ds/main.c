@@ -1421,6 +1421,7 @@ static int sSubMode;
 static uint16_t sSubFrame[SUBSCREEN_W_MAX * SUBSCREEN_H_MAX];
 
 static void PrintStatus(void);
+static bool sBootMessage; // the start's message shown now (PrintStatus)
 
 static bool sSubModeIsPicture(void) { return sSubMode == SUB_PICTURE; }
 
@@ -1888,8 +1889,7 @@ static void ClearGameScreen(void)
 // The second screen while it has nothing of the game's to show: at start,
 // which save was loaded ("Loaded Save Slot 1"), until the game's intro scene
 // (the Pelipper Post Office) or the title menu begins (Port_BootMessageOver);
-// then nothing. (And, if so, that there's no sound.)
-static bool sBootMessage; // shown now
+// then nothing. (And, if so, that there's no sound.) sBootMessage: above.
 
 static void PrintCentered(int row, const char *text)
 {
