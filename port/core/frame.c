@@ -6,6 +6,7 @@
 // and HBlank DMA, renders the 160 visible lines, presents, and returns to the
 // game for the next frame.
 
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include "port.h"
@@ -553,8 +554,8 @@ static int ListTitleSea(void)
 
 // --- The title menu's picture (port_view.h) ------------------------------
 //
-// The pictures (Makefile: build/menu_bgs, made by tools/menu_bgs.py; not in
-// the harness or a build without them): gPortMenuPicCount of each size, DS
+// The pictures (Makefile: build/menu_bgs, made by tools/menu_bgs.py; in the
+// personal build only): gPortMenuPicCount of each size, DS
 // (256x192), then Fit (320x240), then 3DS (400x240), each BGR555 a row at a
 // time, at full brightness.
 extern const uint16_t gPortMenuPics[] __attribute__((weak));
@@ -563,9 +564,41 @@ uint8_t gPortMenuPic, gPortMenuPicIndex, gPortMenuPicLevel;
 static const int sPicW[3] = { 256, 320, 400 }, sPicH[3] = { 192, 240, 240 };
 static uint32_t sFrameCount; // (frames since the start: Port_MenuPicPick's chance)
 
+// Or, without them in the build (the shareable one: they're made from the
+// game's art), menu-bgs.bin in the data folder (the same, as tools/menu_bgs.py
+// makes it: a u32 count, then the pictures), read at the first need of it.
+static const uint16_t *sMenuPics;
+static int sMenuPicCount = -1;
+
 int Port_MenuPicCount(void)
 {
-    return &gPortMenuPicCount != NULL && gPortMenuPics != NULL ? (int)gPortMenuPicCount : 0;
+    if (sMenuPicCount >= 0)
+        return sMenuPicCount;
+    sMenuPicCount = 0;
+    if (&gPortMenuPicCount != NULL && gPortMenuPics != NULL && gPortMenuPicCount > 0) {
+        sMenuPics = gPortMenuPics;
+        sMenuPicCount = (int)gPortMenuPicCount;
+        return sMenuPicCount;
+    }
+    void *f = Backend_FileOpen("menu-bgs.bin");
+    if (f == NULL)
+        return 0;
+    uint32_t n = 0, each = 0;
+    for (int k = 0; k < 3; k++)
+        each += (uint32_t)sPicW[k] * sPicH[k] * 2;
+    if (Backend_FileRead(f, 0, &n, 4) && n > 0 && n <= 64 && Backend_FileSize(f) == 4 + n * each) {
+        uint16_t *pics = malloc(n * each);
+        if (pics != NULL && Backend_FileRead(f, 4, pics, n * each)) {
+            sMenuPics = pics;
+            sMenuPicCount = (int)n;
+        } else {
+            free(pics);
+        }
+    }
+    if (sMenuPicCount == 0)
+        Backend_Log("menu-bgs.bin: not the right size, not used");
+    Backend_FileClose(f);
+    return sMenuPicCount;
 }
 
 int Port_MenuPicPick(void)
@@ -599,7 +632,7 @@ static const uint16_t *MenuPicFrame(void)
     int key = (size * 64 + index) * 64 + level;
     if (key != sPicKey) {
         sPicKey = key;
-        const uint16_t *src = gPortMenuPics;
+        const uint16_t *src = sMenuPics;
         for (int k = 0; k < size; k++)
             src += (size_t)n * sPicW[k] * sPicH[k];
         src += (size_t)index * sPicW[size] * sPicH[size];

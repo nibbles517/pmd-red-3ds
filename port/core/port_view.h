@@ -89,9 +89,12 @@ extern uint8_t gPortTileBg[4];
 extern uint8_t gPortHudLines;
 // ... then also drawn this many pixels further left, and its HP bar (BG0
 // tiles from column 18) from gPortHudBar instead: 4bpp tiles of 8 rows, one
-// pixel per HP, up to PORT_HUD_BAR_MAX pixels (the game's own: 96).
+// pixel per HP, up to PORT_HUD_BAR_LEN pixels: as far as 8 pixels from the
+// screen's right (the HP bar starts at x 152 in every wide size: DS 96, the
+// game's own; Fit 160; 3DS 240). PORT_HUD_BAR_MAX: the most, for the storage.
 extern uint8_t gPortHudLeft;
-#define PORT_HUD_BAR_MAX 160
+#define PORT_HUD_BAR_MAX 240
+#define PORT_HUD_BAR_LEN (SCREEN_W - 160 < 96 ? 96 : SCREEN_W - 160 > PORT_HUD_BAR_MAX ? PORT_HUD_BAR_MAX : SCREEN_W - 160)
 extern uint32_t gPortHudBar[PORT_HUD_BAR_MAX];
 
 // GPU Drawing's fades (docs/GPU.md): for each palette entry as it is in

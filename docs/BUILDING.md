@@ -184,7 +184,9 @@ the ROM (`make romdata-list`, about 10 minutes; needs numpy) and commit it.
 `make harness-shared` builds the harness from the scrubbed objects (put
 `pmdred.gba` in the harness's data folder) to test it.
 
-The title menu backgrounds below are not in the shareable build.
+The title menu backgrounds below are not in the shareable build; it reads
+them from `menu-bgs.bin` in `SD:/3ds/pmd-red-3ds/` if it is there (as
+`python3 tools/menu_bgs.py build/menu_bgs menu-bgs.bin` makes it).
 
 ### Title menu backgrounds
 

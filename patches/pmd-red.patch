@@ -3803,7 +3803,7 @@ index e5de5d56..c5591c72 100644
  const u8 *const gUnknown_80FE764 = _("Speed{MOVE_X_POSITION_BY_80}Slow{MOVE_X_POSITION_BY_136}Fast");
  const u8 *const gUnknown_80FE788 = _("Far-off pals{MOVE_X_POSITION_BY_80}Self{MOVE_X_POSITION_BY_136}Look");
 diff --git a/src/dungeon_tilemap.c b/src/dungeon_tilemap.c
-index 80a7d04f..9067f69d 100644
+index 80a7d04f..0f020308 100644
 --- a/src/dungeon_tilemap.c
 +++ b/src/dungeon_tilemap.c
 @@ -33,6 +33,12 @@
@@ -3864,25 +3864,27 @@ index 80a7d04f..9067f69d 100644
  }
  
  void sub_803F9CC(void)
-@@ -404,6 +420,42 @@ void sub_803F9CC(void)
+@@ -404,6 +420,44 @@ void sub_803F9CC(void)
  
  IWRAM_DATA static u32 gUnknown_3001018[96] = {0};
  
 +#ifdef PLATFORM_3DS
-+// The HP bar as sub_803FA4C draws it, but up to PORT_HUD_BAR_MAX pixels long
-+// (Fit size, gPortHudBar: port_view.h)
++// The HP bar as sub_803FA4C draws it, but up to PORT_HUD_BAR_LEN pixels
++// long, as far as the screen's size goes (gPortHudBar: port_view.h)
++static s32 sPortHudBarLen; // (the length it was drawn for: drawn again when the size changes)
 +static void Port_DrawLongHpBar(s32 hp, s32 maxHp, bool8 a2)
 +{
-+    s32 i;
++    s32 i, len = PORT_HUD_BAR_LEN;
++    sPortHudBarLen = len;
 +    u32 *dst = gPortHudBar;
 +    u32 sp[9] = {0, 0xF, 0xFF, 0xFFF, 0xFFFF, 0xFFFFF, 0xFFFFFF, 0xFFFFFFF, 0xFFFFFFFF};
 +    u32 r10 = 0x22222222, r9 = a2 ? 0x44444444 : 0x55555555;
 +
 +    if (hp > maxHp) // (HP over the max: Others > Cheats, Infinite HP)
 +        hp = maxHp;
-+    if (maxHp >= PORT_HUD_BAR_MAX) {
-+        hp = (hp * PORT_HUD_BAR_MAX) / maxHp;
-+        maxHp = PORT_HUD_BAR_MAX;
++    if (maxHp >= len) {
++        hp = (hp * len) / maxHp;
++        maxHp = len;
 +    }
 +    for (i = 0; i < PORT_HUD_BAR_MAX; i += 8) {
 +        s32 id1 = hp >= 8 ? 8 : hp < 0 ? 0 : hp;
@@ -3907,7 +3909,20 @@ index 80a7d04f..9067f69d 100644
  static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
  {
      s32 i;
-@@ -423,6 +475,11 @@ static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
+@@ -415,7 +469,11 @@ static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
+ 
+     r10 = 0x22222222;
+     r9 = 0x44444444;
+-    if (a0 == strPtr->unk3E && a1 == strPtr->unk40)
++    if (a0 == strPtr->unk3E && a1 == strPtr->unk40
++#ifdef PLATFORM_3DS
++        && sPortHudBarLen == PORT_HUD_BAR_LEN
++#endif
++        )
+         return;
+     if (!a2) {
+         r9 = 0x55555555;
+@@ -423,6 +481,11 @@ static void sub_803FA4C(s32 a0, s32 a1, bool8 a2)
  
      strPtr->unk3E = a0;
      strPtr->unk40 = a1;
@@ -3919,7 +3934,7 @@ index 80a7d04f..9067f69d 100644
      r5 = a1;
      if (r5 >= 96) {
          r5 = 96;
-@@ -718,6 +775,13 @@ void sub_8040094(u8 r0)
+@@ -718,6 +781,13 @@ void sub_8040094(u8 r0)
      sub_803F7BC();
      ToggleWindowBgBuffer();
      IncrementPlayTime(gPlayTimeRef);
