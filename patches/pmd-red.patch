@@ -5861,7 +5861,7 @@ index 8a40a25c..8c094343 100644
  	pop {r0}
  	bx r0
 diff --git a/src/main_loops.c b/src/main_loops.c
-index 372641a7..c2012301 100644
+index 372641a7..63c03efc 100644
 --- a/src/main_loops.c
 +++ b/src/main_loops.c
 @@ -1,4 +1,11 @@
@@ -6080,14 +6080,18 @@ index 372641a7..c2012301 100644
  
      ClearScriptVarArray(NULL, EVENT_S08E01);
      while (TRUE) {
-@@ -1095,7 +1220,17 @@ static void nullsub_2(DungeonSetupStruct *r0)
+@@ -1095,7 +1220,21 @@ static void nullsub_2(DungeonSetupStruct *r0)
  // startMode: See enum "StartModeVal"
  static u32 xxx_script_related_8001334_Async(u32 startMode)
  {
 +#ifdef PLATFORM_3DS
-+    // The port's second screen wants to know when the ground is running.
++    // The port's second screen wants to know when the ground is running, and
++    // which of the opening's scenes (14 the warning, 15 the logos, 16 the
++    // Pelipper Post Office, 17...)
 +    extern bool8 gPortGroundRunning;
++    extern u32 gPortStartMode;
 +    u32 ret;
++    gPortStartMode = startMode;
 +    gPortGroundRunning = TRUE;
 +    ret = xxx_script_related_8098468_Async(startMode);
 +    gPortGroundRunning = FALSE;

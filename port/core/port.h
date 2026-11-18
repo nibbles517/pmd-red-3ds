@@ -176,6 +176,7 @@ void Backend_FileClose(void *file);
 // the DS ROM. Its path then opens with Backend_FileOpen("/roms/nds/..."))
 // Music Options: the DS ROM's path on the SD card, as picked there (Blue
 // Rescue Team's only, kept in config.ini); "" for none (options.c)
+int Port_BootMessageOver(void); // (subscreen.c) the start's "Loaded Save Slot N" message is over
 extern char gPortDsRom[256];
 extern char gPortExtraRom[256]; // Music Options > Extra Music: Explorers of Sky's ROM (music.c)
 void Port_SaveConfig(void);

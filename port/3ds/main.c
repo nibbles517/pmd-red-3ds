@@ -1440,6 +1440,8 @@ static void PresentSub(void)
             sSubMode = SUB_TEXT;
             sGpuCopiedTo[screen] = NULL; // (the text: one buffer, no swaps)
         }
+        else if (sBootMessage && Port_BootMessageOver())
+            PrintStatus(); // (the save's message gone)
         return;
     }
     // The second screen is double-buffered: what changed is drawn into this
@@ -1883,17 +1885,38 @@ static void ClearGameScreen(void)
     }
 }
 
+// The second screen while it has nothing of the game's to show: at start,
+// which save was loaded ("Loaded Save Slot 1"), until the game's intro scene
+// (the Pelipper Post Office) or the title menu begins (Port_BootMessageOver);
+// then nothing. (And, if so, that there's no sound.)
+static bool sBootMessage; // shown now
+
+static void PrintCentered(int row, const char *text)
+{
+    int col = (sConsole.consoleWidth - (int)strlen(text)) / 2;
+    printf("\x1b[%d;%dH%s", row, col > 0 ? col : 0, text);
+}
+
 static void PrintStatus(void)
 {
+    char text[40];
+    int slot = 0;
+
     consoleClear();
-    printf("\x1b[1mPokemon Mystery Dungeon: Red Rescue Team\x1b[0m\n");
-    printf("pmd-red-3ds (early test build)\n\n");
-    printf("Y      : 1:1 / larger picture\n");
-    printf("HOME   : exit (save in-game first)\n\n");
-    printf("Main Screen: Others > Game Options\n\n");
-    printf("Save: %s\n", SAVE_PATH);
-    if (!sAudioOn)
-        printf("\n\x1b[33mNo sound: sdmc:/3ds/dspfirm.cdc missing.\x1b[0m\n");
+    sBootMessage = false;
+    if (!Port_BootMessageOver()) {
+        for (int i = 0; i < 3; i++)
+            if (sSavePaths[i] == sSavePath)
+                slot = i;
+        snprintf(text, sizeof(text), "Loaded Save Slot %d", slot + 1);
+        PrintCentered(sConsole.consoleHeight / 2 - 1, text);
+        sBootMessage = true;
+    }
+    if (!sAudioOn) {
+        printf("\x1b[33m");
+        PrintCentered(sConsole.consoleHeight - 3, "No sound: sdmc:/3ds/dspfirm.cdc missing.");
+        printf("\x1b[0m");
+    }
 }
 
 int Backend_GameOnBottom(void)

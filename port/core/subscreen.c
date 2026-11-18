@@ -1951,6 +1951,18 @@ static bool8 sTransKeyValid;
 // title menu is up.
 bool8 gPortGroundRunning, gPortTitleMenu;
 
+// The second screen's message at start ("Loaded Save Slot 1", 3DS main.c):
+// over once the opening's Pelipper Post Office scene (start mode 16, ground
+// main_loops.c) plays, or anything after it: the title menu, a dungeon
+u32 gPortStartMode; // (main_loops.c: the ground's start mode, as it runs)
+int Port_BootMessageOver(void)
+{
+    static bool8 over;
+    if (!over && ((gPortGroundRunning && gPortStartMode >= 16) || gPortTitleMenu || gDungeon != NULL))
+        over = TRUE;
+    return over;
+}
+
 // The brightness (0-0x100) to show the second screen at, or -1 for normal.
 static int TransitionBrightness(void)
 {
