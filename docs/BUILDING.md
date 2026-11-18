@@ -25,7 +25,7 @@ The build has two halves:
 
    ```sh
    cd /c/
-   git clone https://github.com/ethangarsia517/pmd-red-3ds
+   git clone https://github.com/nibbles517/pmd-red-3ds
    cd pmd-red-3ds
    ```
 
