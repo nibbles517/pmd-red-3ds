@@ -46,6 +46,16 @@ it back.
 
 More detail: [docs/BUILDING.md](docs/BUILDING.md).
 
+## Performance
+
+| System  | Speed                                   |
+|---------|-----------------------------------------|
+| Old 3DS | Full speed (60 FPS), with some frame skipping |
+| New 3DS | Full speed (60 FPS), with no frame skipping   |
+
+It runs faster with the second screen turned off, or with a smaller main screen
+size.
+
 ## Known bugs
 
 **Graphics**
