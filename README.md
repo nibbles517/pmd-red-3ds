@@ -74,6 +74,13 @@ size.
   louder or quieter than others.
 - The Music Box doesn't play DS music yet.
 
+## Future updates
+
+This port isn't guaranteed to get future improvements or updates, beyond fixes
+for the known bugs above. I built it to play the game myself with the 3DS's
+screen space, and for that it's pretty much complete: it's in the state I want
+it to be in.
+
 ## Building
 
 GitHub Actions builds the shareable `.3dsx` with no ROM at all
