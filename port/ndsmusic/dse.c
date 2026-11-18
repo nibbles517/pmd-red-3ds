@@ -229,16 +229,22 @@ typedef struct {
     uint8_t env_mult, atkvol, attack, decay, sustain, hold, decay2, release;
 } Split;
 
-/* Pitch LFO (vibrato). Mapping measured against the game's engine:
- * rate/36 Hz, depth/64 semitones, delay and fade-in in milliseconds, sine wave. */
+/* Pitch LFOs, measured against the game's engine. Entry: [1] 1 = on (other values are left to the
+ * game), [2] 1 = pitch, [3] wave shape, u16 +4 depth in 1/128 semitone, u16 +8 rate (2 ms per
+ * unit), u16 +10 delay and u16 +12 fade-in in milliseconds. Shapes, with d = depth:
+ *   1 square +2d/-2d, period 2*rate ms      2 one-sided triangle 0..+2d, period 2*rate ms
+ *   3 triangle +-d starting upward, 2*rate   4 rising saw 0..+2d, period rate ms
+ * Several pitch LFOs on one program add up. */
+#define MAX_LFOS 4
 typedef struct {
-    float hz, semis, delay_ms, fade_ms;
+    float semis, period_ms, delay_ms, fade_ms;
+    uint8_t shape;
 } PitchLfo;
 
 typedef struct {
     uint8_t present, vol, pan;
-    uint8_t has_lfo;
-    PitchLfo lfo;
+    uint8_t nlfo;
+    PitchLfo lfo[MAX_LFOS];
     uint16_t nsplits;
     Split *splits;
 } Program;
@@ -257,6 +263,7 @@ typedef struct {
     const Wave *wave;
     const Split *split;
     const PitchLfo *lfo;
+    uint8_t nlfo;
     uint32_t frames; /* since key-on */
     uint8_t prg_vol, prg_pan;
     float base_rate;
@@ -323,13 +330,14 @@ static void parse_programs(DsePlayer *p, const uint8_t *swd, uint32_t size) {
             pr->pan = h[5];
             for (uint32_t l = 0; l < nlfo; l++) {
                 const uint8_t *e = h + 16 + 16 * l;
-                uint16_t rate = rd16(e + 4), depth = rd16(e + 8);
-                if (e[2] != 1 || !rate || !depth || pr->has_lfo) continue; /* dest 1 = pitch */
-                pr->has_lfo = 1;
-                pr->lfo.hz = rate / 36.0f;
-                pr->lfo.semis = depth / 64.0f;
-                pr->lfo.delay_ms = rd16(e + 10);
-                pr->lfo.fade_ms = rd16(e + 12);
+                uint16_t depth = rd16(e + 4), period = rd16(e + 8);
+                if (e[1] != 1 || e[2] != 1 || !depth || !period || pr->nlfo >= MAX_LFOS) continue;
+                PitchLfo *lf = &pr->lfo[pr->nlfo++];
+                lf->semis = depth / 128.0f;
+                lf->shape = e[3];
+                lf->period_ms = period * (e[3] == 4 ? 1.0f : 2.0f);
+                lf->delay_ms = rd16(e + 10);
+                lf->fade_ms = rd16(e + 12);
             }
             pr->nsplits = (uint16_t)ns;
             for (uint32_t k = 0; k < ns; k++) {
@@ -524,7 +532,8 @@ static void start_voice(DsePlayer *p, int ti, const Program *pr, const Split *s,
     v->split = s;
     v->prg_vol = pr->vol;
     v->prg_pan = pr->pan;
-    v->lfo = pr->has_lfo ? &pr->lfo : NULL;
+    v->lfo = pr->lfo;
+    v->nlfo = pr->nlfo;
     v->age = ++p->age_counter;
     v->length = (int32_t)dur;
     /* The tune fields give the sample's rate as semitones from 32728 Hz. */
@@ -559,13 +568,22 @@ static void voice_update(DsePlayer *p, Voice *v) {
     const Track *t = &p->trk[v->track];
     const Split *s = v->split;
     float semis = (float)(v->key - s->root) + (float)t->bend * t->bend_range / 8192.0f;
-    if (v->lfo) {
-        float ms = (float)v->frames * (float)(1000.0 / DSE_FRAME_HZ) - v->lfo->delay_ms;
-        if (ms > 0) {
-            float depth = v->lfo->semis;
-            if (v->lfo->fade_ms > 0 && ms < v->lfo->fade_ms) depth *= ms / v->lfo->fade_ms;
-            semis += depth * sinf(6.2831853f * v->lfo->hz * ms / 1000.0f);
+    for (int i = 0; i < v->nlfo; i++) {
+        const PitchLfo *lf = &v->lfo[i];
+        float ms = (float)v->frames * (float)(1000.0 / DSE_FRAME_HZ) - lf->delay_ms;
+        if (ms < 0) continue;
+        float depth = lf->semis;
+        if (lf->fade_ms > 0 && ms < lf->fade_ms) depth *= ms / lf->fade_ms;
+        float ph = ms / lf->period_ms, w;
+        ph -= floorf(ph);
+        switch (lf->shape) {
+        case 1: w = ph < 0.5f ? 2.0f : -2.0f; break;
+        case 2: ph += ph < 0.25f ? 0.75f : -0.25f; /* triangle shifted to start at 0 */
+                w = 1.0f + (ph < 0.25f ? 4.0f * ph : ph < 0.75f ? 2.0f - 4.0f * ph : 4.0f * ph - 4.0f); break;
+        case 4: w = 2.0f * ph; break;
+        default: w = ph < 0.25f ? 4.0f * ph : ph < 0.75f ? 2.0f - 4.0f * ph : 4.0f * ph - 4.0f; break;
         }
+        semis += depth * w;
     }
     v->frames++;
     float freq = v->base_rate * exp2f(semis / 12.0f);

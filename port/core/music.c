@@ -1203,6 +1203,25 @@ int Port_ExtraMusicOpen(void)
     return 1;
 }
 
+// Extra Music on: its ROM opened and its songs' shared sample bank (bgm.swd,
+// megabytes) read now, at start or when the settings are saved, instead of
+// at the first Extra Music song in a dungeon (options.c: on loading and saving
+// the settings; `on`: Extra Music is on)
+void Port_ExtraMusicPreload(int on)
+{
+    if (!on || !Port_ExtraMusicOpen())
+        return;
+    DseSet *s = &sExtra.dse;
+    int g = DSE_GROUP_BGM;
+    if (s->bank[g] != NULL || !s->has_bank[g])
+        return;
+    MusicSync();
+    uint8_t *b = ds_load(&s->src, s->bank_off[g], s->bank_len[g]);
+    if (b != NULL)
+        s->bank[g] = dse_bank_open(b, s->bank_len[g]); // (takes it)
+    Backend_Log("extra music: bank read (%u bytes)", (unsigned)s->bank_len[g]);
+}
+
 // extra-volumes.txt in the data folder: each song's own volume ("BGM 044 =
 // 85"; 100 for one not there)
 #define EXTRA_VOLUMES_FILE "extra-volumes.txt"

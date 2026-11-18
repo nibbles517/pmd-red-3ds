@@ -157,6 +157,7 @@ void Port_LoadConfig(void)
         gPortConfig = c;
     CheckConfig();
     IniSave();
+    Port_ExtraMusicPreload(gPortConfig.extraMusic); // (Extra Music on: its songs read at start)
 }
 
 // Settings out of their range (an edited config.ini, an older file) go back to
@@ -271,6 +272,7 @@ void Port_SaveConfig(void)
     IniSave();
     // (config.bin: only the test harness's backend still keeps it)
     Backend_StoreConfig((const uint8_t *)&gPortConfig, sizeof(gPortConfig));
+    Port_ExtraMusicPreload(gPortConfig.extraMusic); // (Extra Music turned on: its songs read now)
 }
 
 // ---- Run options (per Save Data) ----

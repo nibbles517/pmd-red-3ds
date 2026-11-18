@@ -40,6 +40,8 @@ it back.
 - Music Options: the DS version's music and sound effects from your own dump of
   *Blue Rescue Team*, picked from the SD card; Extra Music plays songs from your own
   *Explorers of Sky* on post-game dungeon floors.
+  With Extra Music on, its songs are read from that ROM when the game starts,
+  so starting takes a few seconds longer.
 - Cheats in dungeons (Others > Cheats).
 
 More detail: [docs/BUILDING.md](docs/BUILDING.md).

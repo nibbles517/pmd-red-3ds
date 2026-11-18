@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include "../core/port.h"
@@ -1965,12 +1966,22 @@ uint16_t Backend_PollKeys(void)
 
 // --- Audio -------------------------------------------------------------------
 
-#define AUDIO_BUFS 8
+#define AUDIO_BUFS 12
 #define AUDIO_MAX_SAMPLES 1024
+// The frames' sound queued ahead: AUDIO_TARGET of them, kept there by playing
+// a little faster or slower (up to AUDIO_DRIFT): the game makes a frame's
+// worth each frame at the 3DS's 59.83 Hz, a little more than the GBA's
+// 59.73 Hz rate plays, and a slow frame now and then would empty a short
+// queue. (Either way, before: a chunk dropped every few seconds, or a gap:
+// faint clicks in the music, heard most in the DS songs.)
+#define AUDIO_TARGET 4
+#define AUDIO_DRIFT 0.006f
 
 static int sAudioRate;
+static float sAudioSpeed = 1.0f, sAudioSetSpeed;
 static ndspWaveBuf sWave[AUDIO_BUFS];
 static int16_t *sWaveData;
+static u32 sAudioUnderruns, sAudioDrops;
 
 static void AudioInit(void)
 {
@@ -1992,27 +2003,70 @@ static void AudioInit(void)
     sAudioOn = 1;
 }
 
+static ndspWaveBuf *FreeWave(void)
+{
+    for (int i = 0; i < AUDIO_BUFS; i++)
+        if (sWave[i].status == NDSP_WBUF_DONE || sWave[i].status == NDSP_WBUF_FREE)
+            return &sWave[i];
+    return NULL;
+}
+
+static void AddWave(ndspWaveBuf *wb, const int16_t *stereo, int count)
+{
+    if (stereo != NULL)
+        memcpy(wb->data_pcm16, stereo, (size_t)count * 4);
+    else
+        memset(wb->data_pcm16, 0, (size_t)count * 4);
+    wb->nsamples = (u32)count;
+    DSP_FlushDataCache(wb->data_pcm16, (u32)count * 4);
+    ndspChnWaveBufAdd(0, wb);
+}
+
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate)
 {
     if (!sAudioOn || count <= 0)
         return;
     if (count > AUDIO_MAX_SAMPLES)
         count = AUDIO_MAX_SAMPLES;
+    int queued = 0;
+    for (int i = 0; i < AUDIO_BUFS; i++)
+        queued += sWave[i].status == NDSP_WBUF_QUEUED || sWave[i].status == NDSP_WBUF_PLAYING;
     if (rate != sAudioRate) {
         sAudioRate = rate;
-        ndspChnSetRate(0, (float)rate);
+        sAudioSetSpeed = 0; // (set below)
     }
-    for (int i = 0; i < AUDIO_BUFS; i++) {
-        ndspWaveBuf *wb = &sWave[i];
-        if (wb->status != NDSP_WBUF_DONE && wb->status != NDSP_WBUF_FREE)
-            continue;
-        memcpy(wb->data_pcm16, stereo, (size_t)count * 4);
-        wb->nsamples = (u32)count;
-        DSP_FlushDataCache(wb->data_pcm16, (u32)count * 4);
-        ndspChnWaveBufAdd(0, wb);
+    if (queued == 0) {
+        // (the start, or it ran dry: the queue filled again at once, with silence)
+        if (sAudioSetSpeed != 0)
+            sAudioUnderruns++;
+        for (int k = 1; k < AUDIO_TARGET; k++) {
+            ndspWaveBuf *wb = FreeWave();
+            if (wb != NULL)
+                AddWave(wb, NULL, count);
+        }
+        queued = AUDIO_TARGET - 1;
+    }
+    // Faster with more queued than AUDIO_TARGET, slower with fewer (eased in)
+    float want = 1.0f + (float)(queued - AUDIO_TARGET) * (AUDIO_DRIFT / 3);
+    if (want > 1.0f + AUDIO_DRIFT) want = 1.0f + AUDIO_DRIFT;
+    if (want < 1.0f - AUDIO_DRIFT) want = 1.0f - AUDIO_DRIFT;
+    sAudioSpeed += (want - sAudioSpeed) * 0.05f;
+    if (sAudioSetSpeed == 0 || fabsf(sAudioSpeed - sAudioSetSpeed) > 0.0005f) {
+        sAudioSetSpeed = sAudioSpeed;
+        ndspChnSetRate(0, (float)rate * sAudioSpeed);
+    }
+    ndspWaveBuf *wb = FreeWave();
+    if (wb == NULL) {
+        sAudioDrops++; // every buffer still queued: this chunk dropped
         return;
     }
-    // Every buffer is still queued: the game is running ahead, drop this chunk.
+    AddWave(wb, stereo, count);
+    static u32 sLogged, sCalls;
+    if (++sCalls % 300 == 0 && sAudioUnderruns + sAudioDrops != sLogged) { // (every 5 s at most)
+        sLogged = sAudioUnderruns + sAudioDrops;
+        Backend_Log("audio: %lu ran dry, %lu dropped (speed %.4f)", (unsigned long)sAudioUnderruns,
+                    (unsigned long)sAudioDrops, (double)sAudioSpeed);
+    }
 }
 
 // --- Saves -------------------------------------------------------------------

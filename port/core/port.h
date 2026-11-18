@@ -178,6 +178,8 @@ const char *Backend_AppDir(void);
 // the game starts (romdata.c); nothing for a build with the data in it
 bool Port_RomDataNeeded(void);
 void Port_LoadRomData(void);
+// Extra Music on: its ROM and sample bank read now (music.c)
+void Port_ExtraMusicPreload(int on);
 // A folder of the SD card ("/", "/roms/nds"): its folders and files (not
 // "." or ".."), up to max; -1 if it can't be read. (Music Options: finding
 // the DS ROM. Its path then opens with Backend_FileOpen("/roms/nds/..."))
