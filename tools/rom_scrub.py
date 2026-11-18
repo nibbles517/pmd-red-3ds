@@ -421,8 +421,17 @@ def main():
             elf.save(out)
             if opts:
                 subprocess.check_call([objcopy] + opts + [out])
-                renames = ['--rename-section=%s=.data.rom%s,alloc,load,contents,data' % (s['name'], s['name'])
-                           for s in elf.sections if s['name'] in by_sec and not (s['flags'] & 1)]
+                renames = []
+                for s in elf.sections:
+                    if s['name'] not in by_sec:
+                        continue
+                    whole = sum(l for _, _, l in by_sec[s['name']]) == s['size']
+                    if whole and s['name'].startswith(('.rodata', '.data')):
+                        # all of it the ROM's: no bytes in the .3dsx at all,
+                        # only room (zeroed at load) for romdata.c to fill
+                        renames.append('--rename-section=%s=.bss.rom%s,alloc' % (s['name'], s['name']))
+                    elif not (s['flags'] & 1):
+                        renames.append('--rename-section=%s=.data.rom%s,alloc,load,contents,data' % (s['name'], s['name']))
                 if renames:
                     subprocess.check_call([objcopy] + renames + [out])
         if listed:

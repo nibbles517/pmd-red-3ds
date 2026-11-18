@@ -168,7 +168,8 @@ does (see its INSTALL.md). For the test harness, also Unicorn: see
 `make prelink-shared` makes `build/pmd-red-game-shared.o` from the same
 objects with every stretch of the ROM's own data zeroed (tools/rom_scrub.py,
 from the list in `port/romdata.list.xz`: object, section, offset, ROM offset
-and length, no data). `make 3ds GAME_PRELINK=build/pmd-red-game-shared.o`
+and length, no data). Sections that are all the ROM's data take no room in the
+`.3dsx` (they become zeroed memory at load), so it is about 15 MB. `make 3ds GAME_PRELINK=build/pmd-red-game-shared.o`
 links it into a `.3dsx` that, when it starts (port/core/romdata.c), copies
 that data back from the player's `pmdred.gba` (next to the `.3dsx` or in
 `SD:/3ds/pmd-red-3ds/`), checks it against the sum in the list, and stops
