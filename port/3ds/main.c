@@ -47,7 +47,7 @@ static char sSaveTmpPath[64] = DATA_DIR "/pmd-red-1.sav.tmp";
 
 void AgbMain(void);
 
-const int Backend_Version18_UpdateRepoIfMissing = 18;
+const int Backend_Version19_UpdateRepoIfMissing = 19;
 
 
 static uint16_t sLut[0x8000]; // GBA BGR555 -> RGB565 (fades start from it)
@@ -2053,6 +2053,30 @@ typedef struct {
     uint32_t bufOff, bufLen;
 } DataFile;
 
+// The .3dsx's folder (from the path the Homebrew Launcher gave it, without
+// "sdmc:"), for pmdred.gba next to it
+static char sAppDir[256];
+const char *Backend_AppDir(void)
+{
+    return sAppDir[0] ? sAppDir : NULL;
+}
+
+static void SetAppDir(int argc, char **argv)
+{
+    if (argc < 1 || argv == NULL || argv[0] == NULL)
+        return;
+    const char *p = argv[0];
+    if (strncmp(p, "sdmc:", 5) == 0)
+        p += 5;
+    const char *slash = strrchr(p, '/');
+    if (p[0] != '/' || slash == NULL || (size_t)(slash - p) >= sizeof(sAppDir))
+        return;
+    memcpy(sAppDir, p, (size_t)(slash - p));
+    sAppDir[slash - p] = 0;
+    if (sAppDir[0] == 0)
+        strcpy(sAppDir, "/."); // (the SD card's root)
+}
+
 // A name starting with / is a path on the SD card (Music Options: the DS ROM,
 // wherever it was picked); else a file of the data folder.
 void *Backend_FileOpen(const char *name)
@@ -2318,9 +2342,10 @@ static void MoveOldSave(void)
     rename(OLD_SAVE_PATH, sSavePaths[0]);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     gfxInitDefault();
+    SetAppDir(argc, argv);
     osSetSpeedupEnable(true); // 804 MHz on New 3DS models
 
     mkdir("sdmc:/3ds", 0777);

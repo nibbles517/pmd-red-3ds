@@ -163,6 +163,28 @@ Needs an `arm-none-eabi` GCC, host GCC, libpng and Python 3, as pret/pmd-red
 does (see its INSTALL.md). For the test harness, also Unicorn: see
 `tools/harness.py`.
 
+### The shareable build (no ROM data)
+
+`make prelink-shared` makes `build/pmd-red-game-shared.o` from the same
+objects with every stretch of the ROM's own data zeroed (tools/rom_scrub.py,
+from the list in `port/romdata.list.xz`: object, section, offset, ROM offset
+and length, no data). `make 3ds GAME_PRELINK=build/pmd-red-game-shared.o`
+links it into a `.3dsx` that, when it starts (port/core/romdata.c), copies
+that data back from the player's `pmdred.gba` (next to the `.3dsx` or in
+`SD:/3ds/pmd-red-3ds/`), checks it against the sum in the list, and stops
+with a message if the ROM is missing or not the USA one. This needs no ROM to
+build: GitHub Actions does it (`.github/workflows/build.yml`) with pret's
+build run on a stand-in ROM of zeros.
+
+The list fits only objects built exactly as when it was made: the same pret
+commit (upstream.lock), patch and compiler (xPack arm-none-eabi-gcc
+14.2.1-1.1). After a change to the game's code or data, remake it here with
+the ROM (`make romdata-list`, about 10 minutes; needs numpy) and commit it.
+`make harness-shared` builds the harness from the scrubbed objects (put
+`pmdred.gba` in the harness's data folder) to test it.
+
+The title menu backgrounds below are not in the shareable build.
+
 ### Title menu backgrounds
 
 In the sizes past GBA, the title's main menu is shown like the overworld

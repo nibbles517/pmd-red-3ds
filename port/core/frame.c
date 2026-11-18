@@ -186,8 +186,9 @@ static void SetLine(int line)
 
 void Port_Init(void)
 {
-    if (Backend_Version18_UpdateRepoIfMissing != 18)
+    if (Backend_Version19_UpdateRepoIfMissing != 19)
         Backend_Fatal("backend version mismatch");
+    Port_LoadRomData(); // (a shared build: the game's data, from pmdred.gba)
     memset(gPortRegs, 0, sizeof(gPortRegs));
     memset(gPortVram, 0, sizeof(gPortVram));
     memset(gPortPltt, 0, sizeof(gPortPltt));

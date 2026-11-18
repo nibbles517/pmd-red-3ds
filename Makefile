@@ -8,13 +8,13 @@
 
 ROOT     := $(abspath .)
 UPSTREAM ?= $(ROOT)/build/upstream
-BUILD    := $(ROOT)/build
+BUILD    ?= $(ROOT)/build
 GAME_OBJ := $(BUILD)/game
 PREFIX   ?= arm-none-eabi-
 
 include port/game.mk
 
-.PHONY: all game upstream harness prelink 3ds clean
+.PHONY: all game upstream harness prelink 3ds clean prelink-shared harness-shared romdata-list
 all: game
 
 upstream:
@@ -29,7 +29,7 @@ clean:
 # Platform core and the test-harness build
 
 CORE_CFLAGS := $(ARCH_FLAGS) -O2 -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections
-CORE_SRCS   := port/core/frame.c port/core/ppu.c port/core/gpulist.c port/core/bgcache.c port/core/dma.c port/core/save.c port/core/cgb.c port/core/music.c
+CORE_SRCS   := port/core/romdata.c port/core/romdata_none.c port/core/frame.c port/core/ppu.c port/core/gpulist.c port/core/bgcache.c port/core/dma.c port/core/save.c port/core/cgb.c port/core/music.c
 CORE_OBJ    := $(BUILD)/core
 
 $(CORE_OBJ)/ppu.o $(CORE_OBJ)/frame.o $(CORE_OBJ)/bgcache.o $(CORE_OBJ)/gpulist.o: port/core/bgcache.h port/core/gpulist.h
@@ -127,6 +127,45 @@ prelink: $(GAME_OBJS) $(PORT_OBJS) $(GAME_DATA_OBJS)
 	@$(PREFIX)ld -r -S -o $(PRELINK) $(PORT_OBJS) $(CORE_OBJ)/stamp.o $(GAME_OBJS) $(GAME_DATA_OBJS)
 	@echo "  LD   $(PRELINK) (partial)"
 
+# The shared build: the same without the ROM's data, which the .3dsx copies
+# in from the player's own pmdred.gba at start (port/core/romdata.c). Every
+# stretch of the game's objects that is the ROM's bytes is zeroed, as listed
+# in port/romdata.list.xz (object, section, offset, ROM offset, length: no
+# data), by tools/rom_scrub.py. The objects must be built exactly as they
+# were for the list (same pret commit, patch and compiler: see
+# .github/workflows/build.yml), which the start's check of the data finds.
+#   make prelink-shared   -> build/pmd-red-game-shared.o (shareable)
+#   make harness-shared   the harness build of it (tests)
+#   make romdata-list     (with the ROM) remake the list after game changes
+ROMDATA_LIST   := port/romdata.list.xz
+SCRUB          := $(BUILD)/scrub
+SCRUB_IN        = $(GAME_OBJS) $(GAME_DATA_OBJS)
+SCRUB_OBJS      = $(patsubst $(GAME_OBJ)/%,$(SCRUB)/game/%,$(SCRUB_IN)) $(SCRUB)/romdata_table.o
+PRELINK_SHARED := $(BUILD)/pmd-red-game-shared.o
+
+$(SCRUB)/.done: $(SCRUB_IN) $(ROMDATA_LIST) tools/rom_scrub.py
+	@mkdir -p $(SCRUB)
+	@python3 tools/rom_scrub.py --from-list $(ROMDATA_LIST) $(SCRUB)/game $(SCRUB)/romdata_table.s \
+		--strip $(GAME_OBJ) --objcopy $(PREFIX)objcopy $(SCRUB_IN)
+	@$(PREFIX)as -o $(SCRUB)/romdata_table.o $(SCRUB)/romdata_table.s
+	@touch $@
+
+prelink-shared: $(SCRUB)/.done $(PORT_OBJS)
+	@printf 'const char gPortBuildStamp[] = "%s %s";\n' "$$(git describe --always --dirty 2>/dev/null || echo unknown)" "$$(date -u '+%Y-%m-%d %H:%M UTC')" > $(CORE_OBJ)/stamp.c
+	@$(GAME_CC) $(CORE_CFLAGS) -c $(CORE_OBJ)/stamp.c -o $(CORE_OBJ)/stamp.o
+	@$(PREFIX)ld -r -S -o $(PRELINK_SHARED) $(PORT_OBJS) $(CORE_OBJ)/stamp.o $(SCRUB_OBJS)
+	@echo "  LD   $(PRELINK_SHARED) (partial, without the ROM's data)"
+
+harness-shared: $(SCRUB)/.done $(PORT_OBJS) $(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/backend.o
+	@$(GAME_CC) -marm -march=armv5te+fp -mfloat-abi=hard -nostartfiles -T port/harness/harness.ld -L port \
+		-Wl,--no-warn-rwx-segments -Wl,-Map,$(BUILD)/pmd-red-harness-shared.map -o $(BUILD)/pmd-red-harness-shared.elf \
+		$(HARNESS_OBJ)/start.o $(HARNESS_OBJ)/backend.o $(PORT_OBJS) $(SCRUB_OBJS) -lm -lc -lnosys -lgcc
+	@echo "  LD   $(BUILD)/pmd-red-harness-shared.elf"
+
+romdata-list: $(SCRUB_IN)
+	python3 tools/rom_scrub.py --list $(BUILD)/romdata.list $(UPSTREAM)/pmd_red.map $(UPSTREAM)/baserom.gba --strip $(GAME_OBJ) $(SCRUB_IN)
+	xz -9e -T0 -c $(BUILD)/romdata.list > $(ROMDATA_LIST)
+
 DEVKITPRO ?= /opt/devkitpro
 DEVKITARM ?= $(DEVKITPRO)/devkitARM
 CTRU      := $(DEVKITPRO)/libctru
@@ -135,7 +174,7 @@ CC_3DS    := $(DEVKITARM)/bin/arm-none-eabi-gcc
 GAME_PRELINK ?= $(PRELINK)
 
 APP_TITLE  := PMD Red Rescue Team
-APP_DESC   := pmd-red-3ds port (personal build)
+APP_DESC   := Native 3DS port of pret/pmd-red
 APP_AUTHOR := pret / pmd-red-3ds
 
 3DS_OBJ := $(BUILD)/3ds

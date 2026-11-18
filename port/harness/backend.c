@@ -27,7 +27,7 @@ enum { CMD_SAVE_STORE = 1, CMD_SAVE_LOAD = 2, CMD_CONFIG_STORE = 3, CMD_CONFIG_L
        CMD_FILE_OPEN = 6, CMD_FILE_SIZE = 7, CMD_FILE_READ = 8, CMD_FILE_CLOSE = 9, CMD_FILE_WRITE = 10,
        CMD_DIR_LIST = 11 };
 
-const int Backend_Version18_UpdateRepoIfMissing = 18;
+const int Backend_Version19_UpdateRepoIfMissing = 19;
 
 // Dual Core: one core here, so the second core's part is drawn at once.
 void Backend_RunAsync(void (*fn)(void *), void *arg) { fn(arg); }
@@ -157,6 +157,8 @@ void Backend_SetSaveSlot(int slot)
 }
 
 // Data files: harness.py --data DIR (default: the --save file's folder).
+const char *Backend_AppDir(void) { return NULL; } // (pmdred.gba: in the data folder, --data)
+
 void *Backend_FileOpen(const char *name)
 {
     IO[IO_BUF] = (uint32_t)(uintptr_t)name;

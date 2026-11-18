@@ -138,7 +138,7 @@ void Backend_Fatal(const char *msg) __attribute__((noreturn));
 // Renamed whenever a backend must change together with the core: linking an
 // older backend (port/3ds/main.c from an old copy of the repo) with a newer
 // pmd-red-game.o then fails with an undefined reference naming this symbol.
-extern const int Backend_Version18_UpdateRepoIfMissing;
+extern const int Backend_Version19_UpdateRepoIfMissing;
 // One frame of audio: `count` interleaved 16-bit stereo samples at `rate` Hz.
 void Backend_QueueAudio(const int16_t *stereo, int count, int rate);
 // 128 KiB flash save image.
@@ -171,6 +171,13 @@ void *Backend_FileOpen(const char *name);
 uint32_t Backend_FileSize(void *file);
 bool Backend_FileRead(void *file, uint32_t offset, void *dest, uint32_t size);
 void Backend_FileClose(void *file);
+// The folder the .3dsx was started from, as an SD card path ("/3ds"), for
+// pmdred.gba next to it; NULL if unknown (romdata.c)
+const char *Backend_AppDir(void);
+// A shared build's ROM data, copied in from the player's pmdred.gba before
+// the game starts (romdata.c); nothing for a build with the data in it
+bool Port_RomDataNeeded(void);
+void Port_LoadRomData(void);
 // A folder of the SD card ("/", "/roms/nds"): its folders and files (not
 // "." or ".."), up to max; -1 if it can't be read. (Music Options: finding
 // the DS ROM. Its path then opens with Backend_FileOpen("/roms/nds/..."))

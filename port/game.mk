@@ -56,7 +56,7 @@ $(GAME_OBJ)/songs/%.o: $(UPSTREAM)/sound/songs/%.s $(ROOT)/tools/port_song.py
 
 $(GAME_OBJ)/%.o: $(UPSTREAM)/src/%.c
 	@mkdir -p $(dir $@)
-	@$(GAME_CC) -E $(GAME_CPPFLAGS) -MMD -MP -MT $@ -MF $(GAME_OBJ)/$*.d $< -o $(GAME_OBJ)/$*.i
+	@$(GAME_CC) -E $(GAME_CPPFLAGS) -fmacro-prefix-map=$(UPSTREAM)/= -MMD -MP -MT $@ -MF $(GAME_OBJ)/$*.d $< -o $(GAME_OBJ)/$*.i
 	@# preproc reads INCBIN files relative to the upstream tree, so run it there.
 	@cd $(UPSTREAM) && $(GAME_PREPROC) $(GAME_OBJ)/$*.i $(GAME_CHARMAP) | $(GAME_CC1) -quiet $(GAME_CFLAGS) -o $(GAME_OBJ)/$*.s
 	@$(GAME_AS) -march=armv6k -mfloat-abi=hard -o $@ $(GAME_OBJ)/$*.s
