@@ -46,6 +46,24 @@ it back.
 
 More detail: [docs/BUILDING.md](docs/BUILDING.md).
 
+## Known bugs
+
+**Graphics**
+- Clouds in the overworld and the sun rays at Stratus Lookout flicker slightly
+  once every 20–30 seconds.
+- With GPU Drawing on, too many sprites in a dungeon can make an item's sprite
+  show corrupted.
+- In most cutscenes, Pokémon outside the original GBA screen pop in and out, or
+  freeze there.
+- In sizes bigger than DS, some scenes have black edges at the sides: their
+  backgrounds don't cover the whole screen. This can't be fixed without redrawing
+  the art.
+
+**Sound**
+- The DS music and sound effects are only partly evened out in volume, so some are
+  louder or quieter than others.
+- The Music Box doesn't play DS music yet.
+
 ## Building
 
 GitHub Actions builds the shareable `.3dsx` with no ROM at all
