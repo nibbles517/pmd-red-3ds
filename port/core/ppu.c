@@ -1705,7 +1705,15 @@ int Ppu_ListObjects(int lines)
                                     GpuObjLook(tileNum, shape, size, color256, palBank, oneD), changed,
                                     color256 ? 0xFFFF : (uint16_t)palBank, &made);
         if (semiBgs && (made || dst != NULL)) {
-            if (sSemiN == SEMI_MAX) { l->fallback = GPU_WHY_OBJ_SEMI; return 0; }
+            if (sSemiN == SEMI_MAX) {
+                // (its slot was taken to be made, and won't be: forgotten.
+                // Kept, it was taken as made, with another sprite's pixels in
+                // it: an item drawn wrong after a busy dungeon frame)
+                if (dst != NULL)
+                    GpuList_ObjForget();
+                l->fallback = GPU_WHY_OBJ_SEMI;
+                return 0;
+            }
             sSemiQuad[sSemiN] = (uint16_t)(l->quadCount - 1);
             sSemiBgs[sSemiN++] = (uint8_t)semiBgs;
         }

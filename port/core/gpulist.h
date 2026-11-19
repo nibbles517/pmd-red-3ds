@@ -126,6 +126,9 @@ void GpuList_StripLine(int line, int bg, uint16_t key, int flags, const uint16_t
 // palette bank (0xFFFF: 256 colours).
 uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key, uint32_t look, uint32_t changed,
                       uint16_t bank, int *made);
+// The pixels GpuList_Obj last asked for won't be made after all (the frame
+// isn't listed): its slot forgotten, so it isn't taken as made later
+void GpuList_ObjForget(void);
 // The OBJ tiles (sprite VRAM, 1024 of 32 bytes): the frame each last changed
 // (GpuList_ObjTiles compares them with a copy: once a frame, before the sprites)
 extern uint32_t gGpuObjTileChanged[1024];

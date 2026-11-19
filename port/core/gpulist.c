@@ -237,6 +237,9 @@ int GpuList_ObjOverlap(const GpuQuad *a, const GpuQuad *b)
     return 0;
 }
 
+// (the slot GpuList_Obj last gave pixels to make: GpuList_ObjForget)
+static int sObjLastMade = -1;
+
 uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key, uint32_t look, uint32_t changed,
                       uint16_t bank, int *made)
 {
@@ -288,7 +291,15 @@ uint16_t *GpuList_Obj(int x, int y, int w, int h, int flags, uint16_t key, uint3
     }
     s->built = l->frame;
     s->gpuDirty = 1;
+    sObjLastMade = slot;
     return &gGpuObj[s->y][s->x];
+}
+
+void GpuList_ObjForget(void)
+{
+    if (sObjLastMade >= 0)
+        gGpuObjSlots[sObjLastMade].look = 0; // (free: its look made again when next shown)
+    sObjLastMade = -1;
 }
 
 // The base palette and the fade: every entry the frame shows (the palette
