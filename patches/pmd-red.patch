@@ -787,10 +787,10 @@ index 55f3b5f3..4bfc40f9 100644
  ALIGNED(4) static const u8 sGreen[] = _("Green");
 diff --git a/src/data/port_cutscene_spawns.h b/src/data/port_cutscene_spawns.h
 new file mode 100644
-index 00000000..6ff67bfd
+index 00000000..28ddc0d4
 --- /dev/null
 +++ b/src/data/port_cutscene_spawns.h
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,68 @@
 +// 3DS port: where story scenes' Pokémon start, moved for the wider sizes so
 +// they come in from off the screen instead of appearing on it (they walk to
 +// the same places after: scripts walk to points on the map). Pixels, + right
@@ -834,6 +834,12 @@ index 00000000..6ff67bfd
 +    { MAP_THUNDERWAVE_CAVE_END, 1, 0, 1, 0, 0, 24, FALSE },
 +    // EVENT_M01E02B_L004B (team base): the partner
 +    { MAP_TEAM_BASE, 26, 0, 1, 0, 0, 24, TRUE },
++    // EVENT_M01E03A_L005 (team base, Team Meanies visit): Gengar, Ekans and
++    // Medicham come up from further down; Pelipper starts off the right
++    { MAP_TEAM_BASE, 30, 0, 2, 0, 0, 128, FALSE },
++    { MAP_TEAM_BASE, 30, 0, 3, 0, 0, 128, FALSE },
++    { MAP_TEAM_BASE, 30, 0, 4, 0, 0, 128, FALSE },
++    { MAP_TEAM_BASE, 30, 0, 5, 136, 176, 0, FALSE },
 +};
 +
 +// ... and points on the map scenes walk Pokémon to (s_gs<map>_links), moved
