@@ -838,10 +838,10 @@ index 55f3b5f3..4bfc40f9 100644
  ALIGNED(4) static const u8 sGreen[] = _("Green");
 diff --git a/src/data/port_cutscene_spawns.h b/src/data/port_cutscene_spawns.h
 new file mode 100644
-index 00000000..28ddc0d4
+index 00000000..2d128a8c
 --- /dev/null
 +++ b/src/data/port_cutscene_spawns.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,85 @@
 +// 3DS port: where story scenes' Pokémon start, moved for the wider sizes so
 +// they come in from off the screen instead of appearing on it (they walk to
 +// the same places after: scripts walk to points on the map). Pixels, + right
@@ -891,6 +891,17 @@ index 00000000..28ddc0d4
 +    { MAP_TEAM_BASE, 30, 0, 3, 0, 0, 128, FALSE },
 +    { MAP_TEAM_BASE, 30, 0, 4, 0, 0, 128, FALSE },
 +    { MAP_TEAM_BASE, 30, 0, 5, 136, 176, 0, FALSE },
++    // EVENT_M01E03A_L007 (team base, Team Meanies again): the partner, and
++    // Gengar, Ekans and Medicham, come up from further down
++    { MAP_TEAM_BASE, 31, 0, 1, 0, 0, 128, FALSE },
++    { MAP_TEAM_BASE, 31, 0, 2, 0, 0, 128, FALSE },
++    { MAP_TEAM_BASE, 31, 0, 3, 0, 0, 128, FALSE },
++    { MAP_TEAM_BASE, 31, 0, 4, 0, 0, 128, FALSE },
++    // EVENT_M01E03A_L011 (Sinister Woods' end): Metapod comes down from further up
++    { MAP_SINISTER_WOODS_END, 1, 0, 2, 0, 0, -120, FALSE },
++    // EVENT_M01E04A_L002 (team base): the partner, then Jumpluff, come up from further down
++    { MAP_TEAM_BASE, 35, 1, 0, 0, 0, 128, FALSE },
++    { MAP_TEAM_BASE, 35, 2, 0, 0, 0, 128, FALSE },
 +};
 +
 +// ... and points on the map scenes walk Pokémon to (s_gs<map>_links), moved
@@ -909,6 +920,12 @@ index 00000000..28ddc0d4
 +    // EVENT_M01E02A_L006 (Thunderwave Cave's entrance): the Magnemite leave downwards
 +    { MAP_THUNDERWAVE_CAVE_ENTRY, 2, 0, 0, 24 },
 +    { MAP_THUNDERWAVE_CAVE_ENTRY, 3, 0, 0, 24 },
++    // EVENT_M01E03A_L011 (Sinister Woods' end): Team Meanies run off to the left
++    { MAP_SINISTER_WOODS_END, 1, -64, -104, 0 },
++    { MAP_SINISTER_WOODS_END, 2, -64, -104, 0 },
++    { MAP_SINISTER_WOODS_END, 3, -64, -104, 0 },
++    // The team base: where Caterpie and Metapod walk off to the right (EVENT_M01E03A_L011)
++    { MAP_TEAM_BASE, 40, 48, 88, 0 },
 +};
 diff --git a/src/data/port_shiny_palettes.h b/src/data/port_shiny_palettes.h
 new file mode 100644
