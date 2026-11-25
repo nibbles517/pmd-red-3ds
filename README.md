@@ -59,8 +59,6 @@ size.
 ## Known bugs
 
 **Graphics**
-- Clouds in the overworld and the sun rays at Stratus Lookout flicker slightly
-  once every 20–30 seconds.
 - With GPU Drawing on, too many sprites in a dungeon can make an item's sprite
   show corrupted.
 - In most cutscenes, Pokémon outside the original GBA screen pop in and out, or

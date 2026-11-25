@@ -4812,7 +4812,7 @@ index 1179e657..2f5761d8 100644
 +#endif
  }
 diff --git a/src/ground_bg.c b/src/ground_bg.c
-index 069cfc94..103f9576 100644
+index 069cfc94..bc9eabfb 100644
 --- a/src/ground_bg.c
 +++ b/src/ground_bg.c
 @@ -1,4 +1,7 @@
@@ -4823,7 +4823,7 @@ index 069cfc94..103f9576 100644
  #include "globaldata.h"
  #include "code_8099360.h"
  #include "ground_bg.h"
-@@ -812,9 +815,182 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
+@@ -812,9 +815,243 @@ static void UpdateMapCameraPosition(MapRender *mapRender, PixelPos *cameraPos)
      }
  }
  
@@ -4847,13 +4847,70 @@ index 069cfc94..103f9576 100644
 +// there: repeated across, nothing below or above (not black).
 +extern GroundBg *gUnknown_3001B78; // ground_weather.c
 +
++// A layer that wraps (the weather's clouds and light, moving on and on) has
++// its camera taken back by the map's size as it goes past the edge. Its wide
++// map is a ring (each tile at its column and row & 63), and the frame is drawn
++// with the scroll of the frame before (frame.c: the wide view waits a frame,
++// as the sprites do), while the ring is already the new frame's: had the
++// scroll jumped back by the map's size, that frame read the ring's columns as
++// another place's, a flicker each time the layer wrapped. So the scroll goes on
++// smoothly instead, the tiles worked out from it wrapped as before; brought
++// back only by a whole number of both the map's widths and the ring's.
++static const MapRender *sWrapRender[4];
++static s32 sWrapLastX[4], sWrapLastY[4], sWrapAddX[4], sWrapAddY[4];
++
++static s32 Port_WrapStep(s32 d, s32 size, s32 add)
++{
++    s32 a = size, b = 512, lcm;
++    if (size <= 0)
++        return 0;
++    if (d > size / 2)
++        add -= size;
++    else if (d < -(size / 2))
++        add += size;
++    while (b != 0) {
++        s32 t = a % b;
++        a = b;
++        b = t;
++    }
++    lcm = size / a * 512;
++    if (add >= lcm || add <= -lcm)
++        add %= lcm;
++    return add;
++}
++
++static void Port_WideUnwrap(const MapRender *mapRender, s32 bg, bool8 overlay, s32 *camX, s32 *camY)
++{
++    s32 x = mapRender->cameraPos.x, y = mapRender->cameraPos.y;
++
++    if (gPortGroundTitle || !(mapRender->wrapAround || overlay)) {
++        sWrapRender[bg] = NULL;
++        *camX = x;
++        *camY = y;
++        return;
++    }
++    if (sWrapRender[bg] != mapRender) {
++        sWrapRender[bg] = mapRender;
++        sWrapAddX[bg] = sWrapAddY[bg] = 0;
++    }
++    else {
++        sWrapAddX[bg] = Port_WrapStep(x - sWrapLastX[bg], mapRender->mapSizePixels.x, sWrapAddX[bg]);
++        if (mapRender->wrapAround)
++            sWrapAddY[bg] = Port_WrapStep(y - sWrapLastY[bg], mapRender->mapSizePixels.y, sWrapAddY[bg]);
++    }
++    sWrapLastX[bg] = x;
++    sWrapLastY[bg] = y;
++    *camX = x + sWrapAddX[bg];
++    *camY = y + sWrapAddY[bg];
++}
++
 +static void Port_RenderWideLayers(MapRender *mapRender)
 +{
 +    s32 j;
 +    s32 cd = mapRender->chunkDimensions == CHUNK_DIMENSIONS_2x2 ? 2
 +           : mapRender->chunkDimensions == CHUNK_DIMENSIONS_3x3 ? 3 : 0;
 +    s32 mapW = mapRender->mapSizePixels.x / 8, mapH = mapRender->mapSizePixels.y / 8;
-+    s32 tx0 = (mapRender->cameraPos.x - WIDE_OX) >> 3, ty0 = mapRender->cameraPos.y >> 3;
++    s32 tx0, ty0;
 +
 +    bool8 overlay;
 +    s32 titleY0 = mapRender->cameraPos.y >> 3;
@@ -4865,6 +4922,7 @@ index 069cfc94..103f9576 100644
 +        u16 *tilemap = mapRender->bgTilemaps[j];
 +        const u16 *chunks = mapRender->chunkMappings[j];
 +        s32 bg, tx, ty;
++        s32 camX, camY;
 +        u16 *dst;
 +
 +        if (tilemap == NULL)
@@ -4873,6 +4931,9 @@ index 069cfc94..103f9576 100644
 +        if (bg < 2 || bg > 3)
 +            continue;
 +        dst = sPortWideMaps[bg - 2];
++        Port_WideUnwrap(mapRender, bg, overlay, &camX, &camY);
++        tx0 = (camX - WIDE_OX) >> 3;
++        ty0 = camY >> 3;
 +        if (cd == 0 || chunks == NULL) {
 +            for (ty = ty0; ty < ty0 + SCREEN_H / 8 + 1; ty++)
 +                for (tx = tx0; tx < tx0 + SCREEN_W / 8 + 1; tx++)
@@ -4923,8 +4984,8 @@ index 069cfc94..103f9576 100644
 +            }
 +        }
 +        gPortWideBg[bg].map = dst;
-+        gPortWideBg[bg].scrollX = mapRender->cameraPos.x;
-+        gPortWideBg[bg].scrollY = mapRender->cameraPos.y;
++        gPortWideBg[bg].scrollX = camX;
++        gPortWideBg[bg].scrollY = camY;
 +        // (the title's logo, in Fit and 3DS sizes: 8 lines higher than the
 +        // rest, which port/core/frame.c moves down)
 +        if (gPortGroundTitle && !mapRender->wrapAround && SCREEN_H >= 240)
