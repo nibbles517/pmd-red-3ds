@@ -362,7 +362,7 @@ index 00000000..d576cc98
 +#endif
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..fc99f9ec
+index 00000000..79b57bb2
 --- /dev/null
 +++ b/include/port_new_run.h
 @@ -0,0 +1,71 @@
@@ -386,19 +386,19 @@ index 00000000..fc99f9ec
 +// the Ginseng is the PP Up (name, description), eaten by the team leader on
 +// one move it picks (dungeon_menu_items.c), up to PORT_PP_UP_MAX on each (its
 +// count: the move's ginseng, kept as before). Each raises the move's max PP by
-+// 10% of its base PP (in all, rounded: base * (10 + n) / 10), or by 1 for a
-+// base under 10; shown as a star each after the move's PP. It no longer adds
-+// power, and the team's other Pokémon don't eat it.
++// 1, whatever its base PP; shown as a star each (the IQ skills' and cheats'
++// star) after the move's PP. It no longer adds power, and the team's other
++// Pokémon don't eat it.
 +#define PORT_RUN_GINSENG_PP 5
-+#define PORT_PP_UP_MAX 3
++#define PORT_PP_UP_MAX 5
 +#define PORT_PP_UP_CAP 99 // (the most PP: two digits)
 +u32 PortPpUpMaxPP(u32 basePP, u32 ups);
 +extern s8 gPortPpUpMove; // (the move the leader picked for its PP Up; -1: none)
 +struct Entity;
 +s32 Port_ShowPpUpMovesMenu(struct Entity *entity); // (dungeon_menu_moves.c: the move picked, or -1)
 +#define PORT_PP_UP_ON() (gPortRunOptions[PORT_RUN_GINSENG_PP] != 0)
-+// The moves windows a column wider with it on (for the stars)
-+#define PORT_MOVES_WIDER(w) ((w) + (PORT_PP_UP_ON() ? 2 : 0))
++// The moves windows wider with it on (for the stars: up to five)
++#define PORT_MOVES_WIDER(w) ((w) + (PORT_PP_UP_ON() ? 6 : 0))
 +// Blue Exclusive Pokémon: Blue Rescue Team's exclusives (Magikarp, Lapras...)
 +// count as unlocked, without Wonder Mail (exclusive_pokemon.c)
 +#define PORT_RUN_BLUE_EXCLUSIVES 3
@@ -6057,7 +6057,7 @@ index ea417ae6..41e5e92a 100644
      if (ptr->unk52 >= 0) {
          sub_80A6EFC(ptr, 0x300, 0);
 diff --git a/src/items.c b/src/items.c
-index a2ebfc31..c3b1c5c2 100644
+index a2ebfc31..6fe12a29 100644
 --- a/src/items.c
 +++ b/src/items.c
 @@ -16,6 +16,33 @@
@@ -6175,7 +6175,7 @@ index a2ebfc31..c3b1c5c2 100644
  
 +#ifdef PLATFORM_3DS
 +// Ginseng -> PP Up: the Ginseng's name and description (port_new_run.h)
-+ALIGNED(4) static const u8 sPpUpDescription[] = _("A drink that raises the maximum {color YELLOW}PP{reset} of{NEW_LINE}one of the Pokémon's moves by 10%.{NEW_LINE}It can be used up to three times on{NEW_LINE}each move.{NEW_LINE}It also slightly fills the Pokémon's {color YELLOW}Belly{reset}.");
++ALIGNED(4) static const u8 sPpUpDescription[] = _("A drink that raises the maximum {color YELLOW}PP{reset} of{NEW_LINE}one of the Pokémon's moves by 1.{NEW_LINE}It can be used up to five times on{NEW_LINE}each move.{NEW_LINE}It also slightly fills the Pokémon's {color YELLOW}Belly{reset}.");
 +#endif
 +
  // arm9.bin::02060B6C
@@ -6880,7 +6880,7 @@ index b864a98d..09f7e8ab 100644
            PP += param_3;
            if (PP > basePP) {
 diff --git a/src/moves.c b/src/moves.c
-index 19803cc6..09d4eee7 100644
+index 19803cc6..d7221705 100644
 --- a/src/moves.c
 +++ b/src/moves.c
 @@ -13,6 +13,9 @@
@@ -6893,11 +6893,11 @@ index 19803cc6..09d4eee7 100644
  
  static EWRAM_DATA OpenedFile *sWazaParametersFile = { NULL }; // NDS=213C188
  static EWRAM_DATA MoveDataEntry *sMovesData = { NULL }; // NDS=213C18C
-@@ -69,10 +72,18 @@ void BufferMoveName(u8 *buffer, Move *move, const MoveBufferStruct *bufferParams
+@@ -69,10 +72,19 @@ void BufferMoveName(u8 *buffer, Move *move, const MoveBufferStruct *bufferParams
      if (bufferParams == NULL)
          bufferParams = &sDefaultMoveBufferParams;
  
-+    u8 stars[PORT_PP_UP_MAX + 1] = { 0 };
++    u8 stars[PORT_PP_UP_MAX * 2 + 1] = { 0 };
 +
      if (move->ginseng != 0)
          sprintfStatic(ginsengBoostStr, _("%+d"), move->ginseng);
@@ -6906,13 +6906,14 @@ index 19803cc6..09d4eee7 100644
 +    if (PORT_PP_UP_ON()) { // (Ginseng -> PP Up: its count, as stars after the PP)
 +        s32 n;
 +        ginsengBoostStr[0] = '\0';
++        static const u8 sStar[] = _("{STAR_BULLET}"); // (the IQ skills' and cheats' star)
 +        for (n = 0; n < move->ginseng && n < PORT_PP_UP_MAX; n++)
-+            stars[n] = '*';
++            memcpy(stars + n * 2, sStar, 2);
 +    }
  
      if (bufferParams->redColor)
          color = COLOR_RED;
-@@ -85,28 +96,28 @@ void BufferMoveName(u8 *buffer, Move *move, const MoveBufferStruct *bufferParams
+@@ -85,28 +97,28 @@ void BufferMoveName(u8 *buffer, Move *move, const MoveBufferStruct *bufferParams
                  color, sMovesData[move->id].name, ginsengBoostStr);
              break;
          case BUFFER_MOVE_SET_ICON_POSITIONED_PP_UNUSED:
@@ -6953,7 +6954,7 @@ index 19803cc6..09d4eee7 100644
              break;
      }
  }
-@@ -200,6 +211,29 @@ u32 GetMoveBasePP(Move *move)
+@@ -200,6 +212,26 @@ u32 GetMoveBasePP(Move *move)
      return sMovesData[move->id].basePP;
  }
  
@@ -6971,10 +6972,7 @@ index 19803cc6..09d4eee7 100644
 +
 +    if (ups > PORT_PP_UP_MAX)
 +        ups = PORT_PP_UP_MAX;
-+    if (basePP < 10)
-+        pp = basePP + ups;
-+    else
-+        pp = (basePP * (10 + ups) + 5) / 10; // (+10% each, rounded to the nearest)
++    pp = basePP + ups; // (+1 each)
 +    if (pp > PORT_PP_UP_CAP)
 +        pp = basePP > PORT_PP_UP_CAP ? basePP : PORT_PP_UP_CAP;
 +    return pp;
@@ -6983,7 +6981,7 @@ index 19803cc6..09d4eee7 100644
  u32 GetMoveMaxUpgradeLevel(Move *move)
  {
      return sMovesData[move->id].maxUpgradeLevel;
-@@ -1381,6 +1415,7 @@ static void CopyAndResetMove(Move *dest, Move *src)
+@@ -1381,6 +1413,7 @@ static void CopyAndResetMove(Move *dest, Move *src)
          dest->id = src->id;
          dest->PP = sMovesData[src->id].basePP;
          dest->ginseng = src->PP; // This seems horribly bugged
@@ -6991,7 +6989,7 @@ index 19803cc6..09d4eee7 100644
      }
      else
          dest->moveFlags = 0;
-@@ -1397,6 +1432,7 @@ void CopyAndResetMoves(Moves *destMoves, Move *srcMoves)
+@@ -1397,6 +1430,7 @@ void CopyAndResetMoves(Moves *destMoves, Move *srcMoves)
              destMoves->moves[i].id = srcMoves[i].id;
              destMoves->moves[i].PP = sMovesData[srcMoves[i].id].basePP;
              destMoves->moves[i].ginseng = srcMoves[i].PP; // This seems horribly bugged
