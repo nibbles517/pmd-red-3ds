@@ -6056,6 +6056,155 @@ index ea417ae6..41e5e92a 100644
      ptr->unk54 = file;
      if (ptr->unk52 >= 0) {
          sub_80A6EFC(ptr, 0x300, 0);
+diff --git a/src/gulpin_shop_801FB50.c b/src/gulpin_shop_801FB50.c
+index c46396e2..951bd3cf 100644
+--- a/src/gulpin_shop_801FB50.c
++++ b/src/gulpin_shop_801FB50.c
+@@ -18,6 +18,9 @@
+ #include "recruited_mon_summary_menu.h"
+ #include "string_format.h"
+ #include "text_1.h"
++#ifdef PLATFORM_3DS
++#include "port_new_run.h"
++#endif
+ 
+ EWRAM_INIT unkStruct_203B27C *gUnknown_203B27C = {NULL};
+ 
+@@ -40,8 +43,32 @@ enum menuActions {
+     REMEMBERING_MOVES_ACTION,
+     YES_ACTION,
+     NO_ACTION,
++#ifdef PLATFORM_3DS
++    PORT_UPGRADE_ACTION, // (Ginseng -> PP Up: a PP Up on the move, for money)
++#endif
+ };
+ 
++#ifdef PLATFORM_3DS
++// 3DS port: with Ginseng -> PP Up on, a move's menu has Upgrade, under
++// Forget: a PP Up on the move (as the item, port_new_run.h) for
++// PORT_UPGRADE_PRICE, paid at once; greyed once the move has all its PP Ups.
++// States: PORT_STATE_UPGRADE_ASK (Yes/No), PORT_STATE_UPGRADED (done).
++#define PORT_UPGRADE_PRICE 15000
++#define PORT_STATE_UPGRADE_ASK 0x40
++#define PORT_STATE_UPGRADED 0x41
++ALIGNED(4) static const u8 sPortUpgrade[] = _("Upgrade");
++ALIGNED(4) static const u8 sPortUpgradeAsk[] = _(
++    " I can increase the PP of\n"
++    "{COLOR CYAN}{POKEMON_0}{RESET} for 15000 {POKE}.\n"
++    "Sounds good?");
++ALIGNED(4) static const u8 sPortUpgraded[] = _(
++    " OK, here goes!{EXTRA_MSG}"
++    " Gggggggg...{WAIT_PRESS} Pwah, Gulpin!{EXTRA_MSG}"
++    " {COLOR CYAN}{POKEMON_0}{RESET} has been upgraded\n"
++    "to have more PP!");
++static void PortUpgradeAskInput(void);
++#endif
++
+ static void CreateGulpinLinkMenu(void);
+ static void CreateGulpinShopMenu(void);
+ 
+@@ -163,6 +190,11 @@ u32 sub_801FC40(void)
+         case 0x22:
+             sub_80210E4();
+             break;
++#ifdef PLATFORM_3DS
++        case PORT_STATE_UPGRADE_ASK:
++            PortUpgradeAskInput();
++            break;
++#endif
+         case 0xd:
+             if (gUnknown_203B27C->unk15 == TRUE)
+                 gTeamInventoryRef->teamMoney -= 150;
+@@ -415,6 +447,19 @@ static void sub_801FF28(void)
+                 CreateDialogueBoxAndPortrait(gCommonGulpin[gUnknown_203B27C->mode][GULPIN_DLG_19],0,gUnknown_203B27C->monPortraitPtr,0x10d);
+             }
+             break;
++#ifdef PLATFORM_3DS
++        case PORT_STATE_UPGRADE_ASK:
++            sub_80208B0();
++            sub_8092C84(gFormatBuffer_Monsters[0], gUnknown_203B27C->moves[gUnknown_203B27C->moveIndex].id);
++            CreateMenuDialogueBoxAndPortrait(sPortUpgradeAsk, 0, YES_ACTION, gUnknown_203B27C->unk7C, gUnknown_203B27C->unkBC, 4, 0,
++                        gUnknown_203B27C->monPortraitPtr, 0xc);
++            break;
++        case PORT_STATE_UPGRADED:
++            gUnknown_203B27C->fallbackState = 0x1f;
++            sub_8092C84(gFormatBuffer_Monsters[0], gUnknown_203B27C->moves[gUnknown_203B27C->moveIndex].id);
++            CreateDialogueBoxAndPortrait(sPortUpgraded, 0, gUnknown_203B27C->monPortraitPtr, 0x10d);
++            break;
++#endif
+     }
+ }
+ 
+@@ -552,6 +597,15 @@ static void CreateGulpinLinkMenu(void)
+     gUnknown_203B27C->unk7C[loopMax].menuAction = FORGET_ACTION;
+ 
+     loopMax++;
++#ifdef PLATFORM_3DS
++    if (PORT_PP_UP_ON()) {
++        gUnknown_203B27C->unk7C[loopMax].text = sPortUpgrade;
++        gUnknown_203B27C->unk7C[loopMax].menuAction = PORT_UPGRADE_ACTION;
++        if (gUnknown_203B27C->moves[gUnknown_203B27C->moveIndex].PP >= PORT_PP_UP_MAX) // (its count, out of dungeons)
++            gUnknown_203B27C->unkBC[loopMax] = 1; // (all its PP Ups: greyed)
++        loopMax++;
++    }
++#endif
+     gUnknown_203B27C->unk7C[loopMax].text = gCommonInfo[0];
+     gUnknown_203B27C->unk7C[loopMax].menuAction = INFO_ACTION;
+ 
+@@ -1026,11 +1080,53 @@ static void sub_8020EB4(void)
+         case INFO_ACTION:
+             sub_801FDA8(33);
+             break;
++#ifdef PLATFORM_3DS
++        case PORT_UPGRADE_ACTION:
++            if (gTeamInventoryRef->teamMoney < PORT_UPGRADE_PRICE) {
++                PlayMenuSoundEffect(MENU_SFX_FAIL);
++                sub_801FDA8(0x3); // ("You don't have enough money?")
++            }
++            else {
++                PlaySound(0x133);
++                sub_801FDA8(PORT_STATE_UPGRADE_ASK);
++            }
++            break;
++#endif
+         case CHECK_IQ_ACTION ... REMEMBERING_MOVES_ACTION:
+             break;
+     }
+ }
+ 
++#ifdef PLATFORM_3DS
++// Upgrade's Yes/No: Yes pays, and the move has a PP Up more
++static void PortUpgradeAskInput(void)
++{
++    s32 menuAction;
++
++    if (sub_80144A4(&menuAction) == 0) {
++        switch (menuAction) {
++            case YES_ACTION: {
++                Move *move = &gUnknown_203B27C->moves[gUnknown_203B27C->moveIndex];
++                if (gTeamInventoryRef->teamMoney < PORT_UPGRADE_PRICE || move->PP >= PORT_PP_UP_MAX) {
++                    PlayMenuSoundEffect(MENU_SFX_FAIL);
++                    sub_801FDA8(0x1f);
++                    break;
++                }
++                gTeamInventoryRef->teamMoney -= PORT_UPGRADE_PRICE;
++                move->PP++; // (out of dungeons, a move's PP byte keeps its count: CopyAndResetMoves)
++                PlaySound(0x14c); // (paying)
++                sub_801FDA8(PORT_STATE_UPGRADED);
++                break;
++            }
++            case CANCEL_ACTION:
++            case NO_ACTION:
++                sub_801FDA8(0x1f);
++                break;
++        }
++    }
++}
++#endif
++
+ static void sub_80210C8(void)
+ {
+     switch (sub_801F890()) {
 diff --git a/src/items.c b/src/items.c
 index a2ebfc31..6fe12a29 100644
 --- a/src/items.c
