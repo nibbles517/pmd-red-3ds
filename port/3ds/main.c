@@ -822,8 +822,18 @@ static void GpuListUpload(const GpuList *l)
     // over, not animating it (the ending's flash to white and back, the team
     // base faded in by its colours), whose tiles left in the old colours
     // showed as blocks for frames. A palette animation changes a few.)
+    // (Nor when the colours change again within a few frames: an animation
+    // changing them every frame or two (the personality test's colours
+    // cycling across the whole screen) never caught up, 250 tiles a frame,
+    // and the screen's bottom showed old colours in a band.)
+    static int sGlFramesSincePal = 1 << 20;
+    bool recent = sGlFramesSincePal < 4;
+    if (changedCount > 0)
+        sGlFramesSincePal = 0;
+    else if (sGlFramesSincePal < (1 << 20))
+        sGlFramesSincePal++;
     bool spread = l->palette != GPU_PAL_OTHER && sGlLastClass >= 0 && sGlLastClass != GPU_PAL_OTHER
-                  && changedCount <= 48;
+                  && changedCount <= 48 && !recent;
     sGlLastClass = (l->quadCount == 0 || sGlNoBudget) ? -1 : l->palette;
     for (int b = 0; !spread && b < 4; b++) // (tiles still waiting from a palette animation: now, whole)
         if (sGlPalAny[b]) {
