@@ -66,8 +66,6 @@ size.
 - In sizes bigger than DS, some scenes have black edges at the sides: their
   backgrounds don't cover the whole screen. This can't be fixed without redrawing
   the art.
-- In sizes bigger than DS, the wavy background in the Personality Test doesn't
-  cycle through its colors properly. The dream scenes are unaffected.
 
 **Sound**
 - The DS music and sound effects are only partly evened out in volume, so some are
