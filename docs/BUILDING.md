@@ -88,6 +88,16 @@ later (as the game does between floors); the same song plays on from floor to
 floor. Extra Volume (10%-400%) sets all its songs' volume, and Extra Music
 Volumes lists them (A plays/stops, L/R 1%, ZL/ZR 10%, START saves) for each
 one's own, kept in `extra-volumes.txt` (`BGM 044 = 85`).
+In dungeons, using the Music Box plays its tune, then asks where its song
+comes from: Blue Rescue Team Music (the DS ROM above), Explorers of Sky Music
+(Extra Music's ROM), or Custom DS Music (any game's `.nds` on the SD card, found
+as the DS ROM is: A opens a folder or picks a file, B goes up a folder). The
+first two are red, and do nothing, while their ROM isn't set. Then a list of
+that ROM's songs, in pages (left/right a page; a star marks the one playing):
+the song picked plays in place of the floor's music (as Extra Music's do: a
+Monster House or a boss still has its own), from floor to floor, until the
+Music Box leaves the Toolbox (or the team: put down, thrown...) or the dungeon
+ends. The Music Box isn't used up (src/port_music_box.c).
 Its Music Style (GBA | DS) then picks which music the game plays: with DS,
 each GBA song plays as the DS track it is matched with.
 The Music Player lists the ROM's sound effects after its music (in green);

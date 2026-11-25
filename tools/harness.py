@@ -42,7 +42,7 @@ def load_elf(uc, path):
         lo = p_vaddr if lo is None else min(lo, p_vaddr)
         hi = max(hi, p_vaddr + p_memsz)
     lo &= ~0xFFFFF
-    hi = (hi + 0xBFFFFF) & ~0xFFFFF  # covers .bss, heap (8 MiB) and stack after the last segment
+    hi = (hi + 0x1BFFFFF) & ~0xFFFFF  # covers .bss, heap (24 MiB) and stack after the last segment
     uc.mem_map(lo, hi - lo, UC_PROT_ALL)
     for off, vaddr, filesz, memsz in segs:
         uc.mem_write(vaddr, data[off:off + filesz])

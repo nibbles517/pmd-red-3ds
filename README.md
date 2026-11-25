@@ -42,6 +42,9 @@ it back.
   *Explorers of Sky* on post-game dungeon floors.
   With Extra Music on, its songs are read from that ROM when the game starts,
   so starting takes a few seconds longer.
+- The Music Box plays a DS song of your choice in dungeons, from Blue Rescue
+  Team, Explorers of Sky or any other DS game on the SD card, and is no longer
+  used up.
 - Cheats in dungeons (Others > Cheats).
 
 More detail: [docs/BUILDING.md](docs/BUILDING.md).
@@ -70,7 +73,6 @@ size.
 **Sound**
 - The DS music and sound effects are only partly evened out in volume, so some are
   louder or quieter than others.
-- The Music Box doesn't play DS music yet.
 
 ## Future updates
 

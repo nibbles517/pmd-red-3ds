@@ -130,6 +130,22 @@ void Port_ExtraGainSet(int song, int percent);
 int Port_ExtraGainMax(void);
 int Port_ExtraGainsSave(void); // extra-volumes.txt
 int Port_ExtraMusicSongs(int *out, int max); // the songs the floors name, by number
+// The Music Box (in dungeons, port_music_box.c): a song's slot track from
+// Blue Rescue Team's ROM (Music Options'), Explorers of Sky's (Extra Music's),
+// or another game's picked on the SD card (Custom DS Music); by index
+int Port_MusicBoxBlueReady(void);
+int Port_MusicBoxBlueCount(void);
+const char *Port_MusicBoxBlueLabel(int i);
+int Port_MusicBoxBlueTrack(int i);
+int Port_MusicBoxSkyReady(void);
+int Port_MusicBoxSkyCount(void);
+const char *Port_MusicBoxSkyLabel(int i);
+int Port_MusicBoxSkyTrack(int i);
+int Port_MusicBoxCustomTryRom(const char *path); // its music's count, or -1
+const char *Port_MusicBoxCustomPath(void);
+int Port_MusicBoxCustomCount(void);
+const char *Port_MusicBoxCustomLabel(int i);
+int Port_MusicBoxCustomTrack(int i);
 void Port_ExtraMusicSongWhere(int song, char *out, int size); // "Solar Cave 11F-20F"
 
 #ifndef PORT_DIR_ENTRY_DEFINED

@@ -31,7 +31,7 @@ SECTIONS
 
     . = ALIGN(16);
     __heap_start = .;
-    . += 0x800000;
+    . += 0x1800000; /* 24 MiB (the DS music too) */
     __heap_end = .;
     . += 0x40000;
     __stack_top = .;

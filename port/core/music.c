@@ -49,6 +49,12 @@ static int sOpen;
 static NdsMusic sExtra;
 static int sExtraOpen;
 #define EXTRA_TRACK 0x4000
+// The Music Box's Custom DS Music (in dungeons): another game's ROM picked on
+// the SD card, its music played in the background music's slot as track
+// CUSTOM_TRACK + its index in sCustomTracks.
+static NdsMusic sCustom;
+static int sCustomOpen;
+#define CUSTOM_TRACK 0x6000
 static uint8_t *sExtraGain;     // each of its songs' own volume (percent; extra-volumes.txt)
 static int sExtraVolume = 100;  // Music Options > Extra Volume (percent): all its songs
 #define EXTRA_GAIN_MAX 200
@@ -866,6 +872,8 @@ int Port_SfxMapGet(int se)
     return se >= SFX_FIRST && se <= SFX_LAST ? sSfxMap[se - SFX_FIRST] : -1;
 }
 
+static Song *CustomOpenTrack(int i);
+
 // --- Music Style: DS -------------------------------------------------------------
 
 static void InitSlots(void)
@@ -895,14 +903,19 @@ static void ApplySlots(void)
 {
     for (int i = 0; i < SLOTS; i++) {
         Slot *s = &sSlots[i];
-        int want = (s->want >= EXTRA_TRACK ? sExtraOpen : sOpen) ? s->want : -1;
+        int want = (s->want >= CUSTOM_TRACK ? sCustomOpen : s->want >= EXTRA_TRACK ? sExtraOpen : sOpen) ? s->want : -1;
         if (want != s->track || s->wantSerial != s->serial) {
             song_close(s->song);
             s->song = NULL;
             s->track = want;
             s->serial = s->wantSerial;
             s->ended = 0;
-            if (want >= EXTRA_TRACK) { // (Extra Music: an Explorers of Sky song)
+            if (want >= CUSTOM_TRACK) { // (the Music Box's Custom DS Music)
+                s->song = CustomOpenTrack(want - CUSTOM_TRACK);
+                if (s->song != NULL)
+                    song_set_loops(s->song, 0, 0);
+            }
+            else if (want >= EXTRA_TRACK) { // (Extra Music: an Explorers of Sky song)
                 s->song = song_open_dse(&sExtra.dse, want - EXTRA_TRACK, sMixRate);
                 if (s->song != NULL)
                     song_set_loops(s->song, s->loop ? 0 : 1, 0);
@@ -1082,7 +1095,7 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
         sMixRate = 2 * (uint32_t)rate;
     // (at twice the rate whenever the ROM is open, so that the rate doesn't
     // change, nor the sound with it, between one track and the next)
-    if ((!sOpen && !sExtraOpen) || count <= 0 || count > 1024)
+    if ((!sOpen && !sExtraOpen && !sCustomOpen) || count <= 0 || count > 1024)
         return 0;
     MusicSync(); // the samples made for this frame
     InitSlots();
@@ -1122,6 +1135,7 @@ int Port_MusicMix(const int16_t *in, int count, int rate, int16_t *out2, int *ou
         Slot *s = &sSlots[k];
         if (s->song != NULL)
             song_set_volume(s->song, k >= SLOT_SFX ? sSfxVolume * s->volume64 / 64 * Port_SfxGainGet(s->track) / 100
+                                     : s->track >= CUSTOM_TRACK ? sVolume * s->volume64 / 64
                                      : s->track >= EXTRA_TRACK ? ExtraVolume(s->track) * s->volume64 / 64 // (Extra Volume: its own)
                                                    : sVolume * s->volume64 / 64 * TrackGain(s->track) / 100);
         sJobSong[JOB_SLOT0 + k] = s->paused ? NULL : s->song;
@@ -1300,7 +1314,7 @@ int Port_ExtraGainsSave(void)
 // Explorers of Time or Darkness): not taken; -1 not a ROM that opens
 int Port_ExtraMusicTryRom(const char *path)
 {
-    NdsMusic m;
+    static NdsMusic m; // (large: not on the stack)
     if (strlen(path) >= sizeof(gPortExtraRom))
         return -1;
     MusicSync();
@@ -1520,3 +1534,162 @@ void Port_ExtraMusicSongWhere(int song, char *out, int size)
             snprintf(out, size, "%s %uF-%uF", name != NULL ? name : d, r->first, r->last);
     }
 }
+
+// --- The Music Box (in dungeons) ----------------------------------------------------
+//
+// Using it, the player picks a song (port_music_box.c): from Blue Rescue
+// Team's ROM (the one Music Options plays: the music's tracks, by index), from
+// Explorers of Sky's (Extra Music's: its songs, by index), or from another
+// game's ROM picked on the SD card (Custom DS Music: its sequences and
+// streams, or songs on the DSE engine). The game plays the song's slot track
+// in place of the floor's music, as Extra Music does.
+
+// Blue Rescue Team's ROM open (the one Music Options plays)
+int Port_MusicBoxBlueReady(void)
+{
+    return Port_MusicOpen() > 0 && Port_MusicRomIsBlue() && sSongCount > 0;
+}
+
+int Port_MusicBoxBlueCount(void) { return sOpen ? sSongCount : 0; }
+const char *Port_MusicBoxBlueLabel(int i) { return i >= 0 && i < sSongCount ? sTracks[i].label : ""; }
+int Port_MusicBoxBlueTrack(int i) { return i >= 0 && i < sSongCount ? i : -1; }
+
+// Explorers of Sky's ROM (Extra Music's) open, with its songs
+int Port_MusicBoxSkyReady(void)
+{
+    return Port_ExtraMusicOpen() && sExtra.dse.num > 0;
+}
+
+int Port_MusicBoxSkyCount(void) { return sExtraOpen ? sExtra.dse.num : 0; }
+
+const char *Port_MusicBoxSkyLabel(int i)
+{
+    static char label[LABEL_LEN];
+    if (!sExtraOpen || i < 0 || i >= sExtra.dse.num)
+        return "";
+    const DseSong *d = &sExtra.dse.songs[i];
+    if (d->group == DSE_GROUP_ME)
+        snprintf(label, sizeof(label), "ME%02u %s", (unsigned)d->number, d->label);
+    else
+        snprintf(label, sizeof(label), "%03u %s", (unsigned)d->number, d->label);
+    return label;
+}
+
+int Port_MusicBoxSkyTrack(int i) { return sExtraOpen && i >= 0 && i < sExtra.dse.num ? EXTRA_TRACK + i : -1; }
+
+// Custom DS Music: the ROM's music, as the NDS Music Player lists it
+// (sequences, then streams; songs on the DSE engine after)
+typedef struct {
+    uint8_t sdat, kind; // kind: 0 sequence, 1 stream, 2 DSE song
+    uint16_t index;
+    char label[LABEL_LEN];
+} CustomTrack;
+static CustomTrack *sCustomTracks;
+static int sCustomCount;
+static char sCustomPath[256];
+
+static Song *CustomOpenTrack(int i)
+{
+    if (!sCustomOpen || i < 0 || i >= sCustomCount)
+        return NULL;
+    const CustomTrack *t = &sCustomTracks[i];
+    if (t->kind == 2)
+        return song_open_dse(&sCustom.dse, t->index, sMixRate);
+    const Sdat *s = &sCustom.sdat[t->sdat];
+    return t->kind == 1 ? song_open_strm(s, t->index, sMixRate) : song_open_seq(s, t->index, sMixRate);
+}
+
+static void CustomClose(void)
+{
+    MusicSync();
+    for (int i = 0; i < SLOTS; i++) // (its songs read the ROM as they play)
+        if (sSlots[i].track >= CUSTOM_TRACK) {
+            song_close(sSlots[i].song);
+            sSlots[i].song = NULL;
+            sSlots[i].track = -1;
+        }
+    if (sCustomOpen)
+        nds_music_close(&sCustom);
+    sCustomOpen = 0;
+    free(sCustomTracks);
+    sCustomTracks = NULL;
+    sCustomCount = 0;
+    sCustomPath[0] = 0;
+}
+
+// A ROM picked on the SD card (path "/..."): its music's count (and it open,
+// in place of the one before), or -1 (not a ROM that opens, or no music: the
+// one before stays)
+int Port_MusicBoxCustomTryRom(const char *path)
+{
+    static NdsMusic m; // (large: not on the stack)
+    int total = 0;
+
+    if (sCustomOpen && strcmp(path, sCustomPath) == 0)
+        return sCustomCount;
+    MusicSync();
+    if (nds_music_open(&m, path) != NDSM_OK)
+        return -1;
+    for (int i = 0; i < m.num_sdats; i++)
+        total += (int)(m.sdat[i].num_seq + m.sdat[i].num_strm);
+    total += m.dse.num;
+    CustomTrack *list = total > 0 ? calloc((size_t)total, sizeof(CustomTrack)) : NULL;
+    if (list == NULL) {
+        nds_music_close(&m);
+        return -1;
+    }
+    int n = 0;
+    for (int i = 0; i < m.num_sdats; i++) {
+        const Sdat *s = &m.sdat[i];
+        char pre[8] = "";
+        if (m.num_sdats > 1)
+            snprintf(pre, sizeof(pre), "%d:", i + 1);
+        for (uint32_t q = 0; q < s->num_seq && n < total; q++) {
+            if (!s->seq[q].present)
+                continue;
+            const char *nm = sdat_seq_name(s, q);
+            CustomTrack *t = &list[n++];
+            t->sdat = (uint8_t)i;
+            t->index = (uint16_t)q;
+            snprintf(t->label, sizeof(t->label), "%s%03u %s", pre, (unsigned)q, nm ? nm : "(sequence)");
+        }
+        for (uint32_t q = 0; q < s->num_strm && n < total; q++) {
+            if (!s->strm[q].present)
+                continue;
+            const char *nm = sdat_strm_name(s, q);
+            CustomTrack *t = &list[n++];
+            t->sdat = (uint8_t)i;
+            t->kind = 1;
+            t->index = (uint16_t)q;
+            snprintf(t->label, sizeof(t->label), "%sS%02u %s", pre, (unsigned)q, nm ? nm : "(stream)");
+        }
+    }
+    for (int i = 0; i < m.dse.num && n < total; i++) {
+        const DseSong *d = &m.dse.songs[i];
+        CustomTrack *t = &list[n++];
+        t->kind = 2;
+        t->index = (uint16_t)i;
+        if (d->group == DSE_GROUP_ME)
+            snprintf(t->label, sizeof(t->label), "ME%02u %s", (unsigned)d->number, d->label);
+        else
+            snprintf(t->label, sizeof(t->label), "%03u %s", (unsigned)d->number, d->label);
+    }
+    if (n == 0) {
+        free(list);
+        nds_music_close(&m);
+        return -1;
+    }
+    CustomClose();
+    sCustom = m;
+    sCustomOpen = 1;
+    sCustomTracks = list;
+    sCustomCount = n;
+    snprintf(sCustomPath, sizeof(sCustomPath), "%s", path);
+    InitSlots();
+    return n;
+}
+
+const char *Port_MusicBoxCustomPath(void) { return sCustomPath; }
+int Port_MusicBoxCustomCount(void) { return sCustomOpen ? sCustomCount : 0; }
+const char *Port_MusicBoxCustomLabel(int i) { return sCustomOpen && i >= 0 && i < sCustomCount ? sCustomTracks[i].label : ""; }
+int Port_MusicBoxCustomTrack(int i) { return sCustomOpen && i >= 0 && i < sCustomCount ? CUSTOM_TRACK + i : -1; }
