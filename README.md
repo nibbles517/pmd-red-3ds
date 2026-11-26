@@ -46,6 +46,11 @@ it back.
   Team, Explorers of Sky or any other DS game on the SD card, and is no longer
   used up.
 - Cheats in dungeons (Others > Cheats).
+- Run options, picked once when you start a New Game, among them:
+  - **Ginseng → PP Up**: Ginseng becomes PP Up, adding 1 max PP to a move (up
+    to five times), and Gulpin's Link Shop can upgrade a move for 10000 Poké.
+  - **Tutor Moves**: Gulpin's Link Shop teaches a Pokémon its Generation III
+    egg, tutor and event moves, for 15000 or 25000 Poké.
 
 More detail: [docs/BUILDING.md](docs/BUILDING.md).
 
