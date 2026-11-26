@@ -340,7 +340,7 @@ static const char *const sIniSlots[] = { "1", "2", "3", NULL };
 // The run options, by their names in the menu (port_new_run.c sNames)
 static const char *const sRunOptionNames[PORT_RUN_OPTIONS] = {
     "Increased Sitrus Berries", "Increased Life Seeds", "Increased Vitamins", "Blue Exclusive Pok\xC3\xA9mon",
-    "Shiny Pok\xC3\xA9mon", "Ginseng -> PP Up", "Option 7", "Normalized Shop Prices",
+    "Shiny Pok\xC3\xA9mon", "Ginseng -> PP Up", "Tutor Moves", "Normalized Shop Prices",
 };
 
 typedef struct {
