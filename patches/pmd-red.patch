@@ -362,10 +362,10 @@ index 00000000..d576cc98
 +#endif
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..0cc7dc19
+index 00000000..79f67552
 --- /dev/null
 +++ b/include/port_new_run.h
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,85 @@
 +#ifndef GUARD_PORT_NEW_RUN_H
 +#define GUARD_PORT_NEW_RUN_H
 +
@@ -376,9 +376,11 @@ index 00000000..0cc7dc19
 +// (dungeon_floor_spawns.c, PortRunItemChange) Increased Sitrus Berries: any
 +// other rolled Berry is a Sitrus Berry 2% of the time; Increased Life Seeds:
 +// any other rolled Seed is a Life Seed 2% of the time; Increased Vitamins: a
-+// rolled Max Elixir is Protein, Iron, Calcium or Zinc (25% each) 5% of the
-+// time. Doubled (4%, 4%, 10%) while the team leader holds a Plain Ribbon,
-+// except for a Kecleon Shop's items (always 2%, 2%, 5%).
++// rolled Max Elixir is Protein, Iron, Calcium or Zinc (or, with Ginseng -> PP
++// Up on, a PP Up: each as often) 5% of the time. Doubled (4%, 4%, 10%) while
++// the team leader holds a Plain Ribbon, except for a Kecleon Shop's items
++// (always 2%, 2%, 5%, the town's too).
++s32 PortRunItemTransform(s32 id, s32 mul, s32 (*randInt)(s32)); // (port_new_run.c)
 +#define PORT_RUN_ORAN_TO_SITRUS 0
 +#define PORT_RUN_BLAST_TO_LIFE 1
 +#define PORT_RUN_ELIXIR_TO_VITAMIN 2
@@ -2300,7 +2302,7 @@ index e8c2000a..73246781 100644
      if (var_24 || unkTile != NULL)
          DungeonWaitFrames_Async(0xA, 0x18);
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
-index 4506e559..93f2c73c 100644
+index 4506e559..df3ba549 100644
 --- a/src/dungeon_floor_spawns.c
 +++ b/src/dungeon_floor_spawns.c
 @@ -18,9 +18,89 @@
@@ -2404,7 +2406,7 @@ index 4506e559..93f2c73c 100644
      CloseFile(file);
  }
  
-@@ -104,6 +188,72 @@ u8 GetRandomFloorTrap(void)
+@@ -104,6 +188,41 @@ u8 GetRandomFloorTrap(void)
      return TRAP_CHESTNUT_TRAP;
  }
  
@@ -2436,48 +2438,17 @@ index 4506e559..93f2c73c 100644
 +    return FALSE;
 +}
 +
-+static bool8 PortIsBerry(s32 id)
-+{
-+    switch (id) {
-+        case ITEM_ORAN_BERRY: case ITEM_RAWST_BERRY: case ITEM_PECHA_BERRY:
-+        case ITEM_CHERI_BERRY: case ITEM_CHESTO_BERRY:
-+            return TRUE;
-+    }
-+    return FALSE; // (and the Sitrus Berry: it is one already)
-+}
-+
-+static bool8 PortIsSeed(s32 id)
-+{
-+    switch (id) {
-+        case ITEM_HEAL_SEED: case ITEM_EYEDROP_SEED: case ITEM_REVIVER_SEED: case ITEM_BLINKER_SEED:
-+        case ITEM_DOOM_SEED: case ITEM_ALLURE_SEED: case ITEM_HUNGER_SEED: case ITEM_QUICK_SEED:
-+        case ITEM_TOTTER_SEED: case ITEM_SLEEP_SEED: case ITEM_PLAIN_SEED: case ITEM_WARP_SEED:
-+        case ITEM_BLAST_SEED: case ITEM_JOY_SEED: case ITEM_STUN_SEED:
-+            return TRUE;
-+    }
-+    return FALSE; // (and the Life Seed: it is one already)
-+}
-+
 +static s32 PortRunItemChange(s32 id, s32 spawnType)
 +{
 +    s32 mul = (spawnType != ITEM_SPAWN_IN_SHOP && PortLeaderHasPlainRibbon()) ? 2 : 1;
-+
-+    if (gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && PortIsBerry(id) && DungeonRandInt(100) < 2 * mul)
-+        return ITEM_SITRUS_BERRY;
-+    if (gPortRunOptions[PORT_RUN_BLAST_TO_LIFE] && PortIsSeed(id) && DungeonRandInt(100) < 2 * mul)
-+        return ITEM_LIFE_SEED;
-+    if (gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && id == ITEM_MAX_ELIXIR && DungeonRandInt(100) < 5 * mul) {
-+        static const u8 sVitamins[4] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC };
-+        return sVitamins[DungeonRandInt(4)];
-+    }
-+    return id;
++    return PortRunItemTransform(id, mul, DungeonRandInt);
 +}
 +#endif
 +
  u8 GetRandomFloorItem(s32 spawnType)
  {
      s32 i;
-@@ -121,6 +271,9 @@ u8 GetRandomFloorItem(s32 spawnType)
+@@ -121,6 +240,9 @@ u8 GetRandomFloorItem(s32 spawnType)
      rand = DungeonRandInt(ITEM_SETS_RANDOM_CAP + 1);
      for (i = 0; i < NUMBER_OF_ITEM_IDS; i++) {
          if (gDungeon->itemSpawns[spawnType].itemValues[i] != 0 && GetItemCategory(i) == category && gDungeon->itemSpawns[spawnType].itemValues[i] >= rand) {
@@ -7121,7 +7092,7 @@ index c46396e2..86e644f3 100644
 +}
 +#endif
 diff --git a/src/items.c b/src/items.c
-index a2ebfc31..6fe12a29 100644
+index a2ebfc31..0682fc12 100644
 --- a/src/items.c
 +++ b/src/items.c
 @@ -16,6 +16,33 @@
@@ -7308,7 +7279,7 @@ index a2ebfc31..6fe12a29 100644
    }
  
    if (slot->flags & ITEM_FLAG_STICKY) {
-@@ -1071,7 +1123,20 @@ void ChooseKecleonShopInventory(u8 index)
+@@ -1071,11 +1123,29 @@ void ChooseKecleonShopInventory(u8 index)
      for (i = 0; i < MAX_KECLEON_ITEM_SHOP_ITEMS; i++)
          InitKecleonShopItem(i);
  
@@ -7316,7 +7287,8 @@ index a2ebfc31..6fe12a29 100644
 +    i = 0;
 +    // Run options Increased Sitrus Berries / Life Seeds / Vitamins (any of
 +    // them): a chance of a Plain Ribbon in the first slot (4% in the first 3
-+    // story tiers, 1% post-game), the other 7 rolled as usual
++    // story tiers, 1% post-game), the other 7 rolled as usual, then changed as
++    // the options change a dungeon's items (port_new_run.c: 2%, 2%, 5%)
 +    if ((gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] || gPortRunOptions[PORT_RUN_BLAST_TO_LIFE]
 +         || gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN]) && RandInt(100) < (index == 3 ? 1 : 4)) {
 +        AddKecleonShopItem(ITEM_PLAIN_RIBBON);
@@ -7329,6 +7301,14 @@ index a2ebfc31..6fe12a29 100644
          s32 rand_1 = RandInt(9999);
          s32 rand_2 = RandInt(9999);
  
++#ifdef PLATFORM_3DS
++        AddKecleonShopItem(PortRunItemTransform(GetRandomItemForSet(setIds[index], rand_1, rand_2), 1, RandInt));
++#else
+         AddKecleonShopItem(GetRandomItemForSet(setIds[index], rand_1, rand_2));
++#endif
+     }
+ 
+     SortKecleonShopInventory();
 diff --git a/src/kecleon_bros4.c b/src/kecleon_bros4.c
 index 13f60671..7e437b54 100644
 --- a/src/kecleon_bros4.c
@@ -11561,10 +11541,10 @@ index 00000000..ee450c96
 +#endif
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
-index 00000000..d5b3b70d
+index 00000000..e62ff490
 --- /dev/null
 +++ b/src/port_new_run.c
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,206 @@
 +// 3DS port: the run options, chosen once when a new adventure starts.
 +//
 +// After New Game (main_loops.c), before the personality quiz: a window over
@@ -11585,6 +11565,7 @@ index 00000000..d5b3b70d
 +#include "menu_input.h"
 +#include "port_game.h"
 +#include "port_new_run.h"
++#include "constants/item.h"
 +#include "string_format.h"
 +#include "text_1.h"
 +#include "text_2.h"
@@ -11729,6 +11710,47 @@ index 00000000..d5b3b70d
 +}
 +
 +#endif // PLATFORM_3DS
++
++// Increased Sitrus Berries / Life Seeds / Vitamins: an item rolled (on a
++// dungeon's floor, dungeon_floor_spawns.c, or in the town's Kecleon Shop,
++// items.c) as the option changes it: 2%, 2% and 5%, `mul` times as often;
++// a Max Elixir's vitamin is Protein, Iron, Calcium or Zinc, or with Ginseng
++// -> PP Up on a PP Up as often as each
++static bool8 PortIsBerry(s32 id)
++{
++    switch (id) {
++        case ITEM_ORAN_BERRY: case ITEM_RAWST_BERRY: case ITEM_PECHA_BERRY:
++        case ITEM_CHERI_BERRY: case ITEM_CHESTO_BERRY:
++            return TRUE;
++    }
++    return FALSE; // (and the Sitrus Berry: it is one already)
++}
++
++static bool8 PortIsSeed(s32 id)
++{
++    switch (id) {
++        case ITEM_HEAL_SEED: case ITEM_EYEDROP_SEED: case ITEM_REVIVER_SEED: case ITEM_BLINKER_SEED:
++        case ITEM_DOOM_SEED: case ITEM_ALLURE_SEED: case ITEM_HUNGER_SEED: case ITEM_QUICK_SEED:
++        case ITEM_TOTTER_SEED: case ITEM_SLEEP_SEED: case ITEM_PLAIN_SEED: case ITEM_WARP_SEED:
++        case ITEM_BLAST_SEED: case ITEM_JOY_SEED: case ITEM_STUN_SEED:
++            return TRUE;
++    }
++    return FALSE; // (and the Life Seed: it is one already)
++}
++
++s32 PortRunItemTransform(s32 id, s32 mul, s32 (*randInt)(s32))
++{
++    if (gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && PortIsBerry(id) && randInt(100) < 2 * mul)
++        return ITEM_SITRUS_BERRY;
++    if (gPortRunOptions[PORT_RUN_BLAST_TO_LIFE] && PortIsSeed(id) && randInt(100) < 2 * mul)
++        return ITEM_LIFE_SEED;
++    if (gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && id == ITEM_MAX_ELIXIR && randInt(100) < 5 * mul) {
++        static const u8 sVitamins[5] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC, ITEM_GINSENG };
++        return sVitamins[randInt(PORT_PP_UP_ON() ? 5 : 4)]; // (the Ginseng: the PP Up)
++    }
++    return id;
++}
++
 diff --git a/src/port_screen_menu.c b/src/port_screen_menu.c
 new file mode 100644
 index 00000000..189cd504
