@@ -851,6 +851,59 @@ index cf978c03..c1f5de60 100644
          sUnknown_20399E8.unk44 = 1;
      }
  }
+diff --git a/src/code_80A26CC.c b/src/code_80A26CC.c
+index 73774a91..4768d91c 100644
+--- a/src/code_80A26CC.c
++++ b/src/code_80A26CC.c
+@@ -1063,15 +1063,36 @@ static const s16 sRescueToScriptDungeonIdTable[RESCUE_DUNGEON_COUNT] = {
+     [RESCUE_DUNGEON_FANTASY_STRAIT]     = SCRIPT_DUNGEON_FANTASY_STRAIT,
+ };
+ 
++#ifdef PLATFORM_3DS
++// 3DS port, for testing: the dungeon list's unused slot (the Dummy, after Sky
++// Tower) is Boss 9, always there (dungeon_floor_spawns.c: its floors)
++static const DungeonInfo sPortBoss9Info = {
++    .mapID1 = MAP_TEAM_BASE,
++    .mapID2 = MAP_TEAM_BASE_INSIDE,
++    .mapID3 = MAP_TEAM_BASE_INSIDE,
++    .scriptID1 = -1,
++    .scriptID2 = -1,
++    .scriptID3 = GETOUT_S01E01A,
++    .dungeonID = DUNGEON_BOSS_9,
++    .rescueDungeonID = RESCUE_DUNGEON_DUMMY,
++    .unk10 = 1,
++    .unk11 = TRUE,
++};
++#endif
++
+ const DungeonInfo *GetScriptDungeonInfo(s32 scriptDungeon_)
+ {
+     s32 scriptDungeon = (s16)scriptDungeon_;
++#ifdef PLATFORM_3DS
++    if (scriptDungeon == SCRIPT_DUNGEON_DUMMY)
++        return &sPortBoss9Info;
++#endif
+     return &sScriptDungeonData[scriptDungeon];
+ }
+ 
+ static const DungeonInfo *GetRescueDungeonInfo(s16 rescueDungeonId)
+ {
+-    return &sScriptDungeonData[RescueDungeonToScriptDungeonId(rescueDungeonId)];
++    return GetScriptDungeonInfo(RescueDungeonToScriptDungeonId(rescueDungeonId));
+ }
+ 
+ UNUSED static s16 sub_80A2644(u32 index)
+@@ -1200,6 +1221,10 @@ bool8 IsRescueDungeonAvailable(s16 _rescueDungeonId)
+         return FALSE;
+     if (CheckQuest(QUEST_UNK5))
+         return FALSE;
++#ifdef PLATFORM_3DS
++    if (rescueDungeonId == RESCUE_DUNGEON_DUMMY) // (Boss 9, for testing: always)
++        return TRUE;
++#endif
+     if (sub_8097384(_rescueDungeonId))
+         return TRUE;
+     if (!CheckQuest(QUEST_UNK1))
 diff --git a/src/cpu.c b/src/cpu.c
 index 000bd33a..a901a2d5 100644
 --- a/src/cpu.c
@@ -2247,10 +2300,10 @@ index e8c2000a..73246781 100644
      if (var_24 || unkTile != NULL)
          DungeonWaitFrames_Async(0xA, 0x18);
 diff --git a/src/dungeon_floor_spawns.c b/src/dungeon_floor_spawns.c
-index 4506e559..51a3ae26 100644
+index 4506e559..fd1df581 100644
 --- a/src/dungeon_floor_spawns.c
 +++ b/src/dungeon_floor_spawns.c
-@@ -18,6 +18,9 @@
+@@ -18,9 +18,82 @@
  #include "pokemon_3.h"
  #include "text_1.h"
  #include "text_3.h"
@@ -2260,7 +2313,91 @@ index 4506e559..51a3ae26 100644
  #include "dungeon_config.h"
  #include "structs/dungeon_mapparam.h"
  
-@@ -104,6 +107,72 @@ u8 GetRandomFloorTrap(void)
++#ifdef PLATFORM_3DS
++// 3DS port, for testing: Boss 9 (unused in the game; picked south of the team
++// base: code_80A26CC.c) has on floor N the Pokédex's Pokémon 10N-9 to 10N
++// (each 10%, level 10) and sPortBoss9Items (each about 4%), as densely as the
++// game's densest floors (8 Pokémon, 6 items). Its Kecleon and Decoy stay.
++static const u8 sPortBoss9Items[] = {
++    ITEM_ORAN_BERRY, ITEM_PECHA_BERRY, ITEM_RAWST_BERRY, ITEM_CHESTO_BERRY, ITEM_CHERI_BERRY,
++    ITEM_REVIVER_SEED, ITEM_HEAL_SEED, ITEM_PLAIN_SEED, ITEM_SLEEP_SEED, ITEM_BLAST_SEED,
++    ITEM_MAX_ELIXIR, ITEM_POKE, ITEM_MUSIC_BOX, ITEM_BANANA, ITEM_APPLE, ITEM_GRAVELEROCK,
++    ITEM_IRON_THORN, ITEM_SILVER_SPIKE, ITEM_ESCAPE_ORB, ITEM_TM_FLAMETHROWER, ITEM_LINK_BOX,
++    ITEM_FRIEND_BOW, ITEM_METAL_COAT, ITEM_CHESTNUT, ITEM_PINK_GUMMI,
++};
++#define PORT_BOSS9_LEVEL 10
++#define PORT_BOSS9_ENEMY_DENSITY 8
++#define PORT_BOSS9_ITEM_DENSITY 6
++
++static void PortBoss9TestFloor(s32 floor)
++{
++    SpawnPokemonData keep[MONSTER_SPAWNS_ARR_COUNT];
++    s32 i, j, n = 0, kept = 0, c;
++    s32 perCategory[NUM_ITEM_CATEGORIES] = { 0 };
++    s32 sum, done;
++
++    if (floor < 1)
++        floor = 1;
++    // (the floor's Kecleon, Decoy and such, never spawned at random, kept)
++    for (i = 0; i < MONSTER_SPAWNS_ARR_COUNT; i++) {
++        if (ExtractSpeciesIndex(&gDungeon->fileMonsterSpawns[i]) == 0)
++            break;
++        if (gDungeon->fileMonsterSpawns[i].randNum[0] == 0 && gDungeon->fileMonsterSpawns[i].randNum[1] == 0 && kept < 4)
++            keep[kept++] = gDungeon->fileMonsterSpawns[i];
++    }
++    for (i = 0; i < 10 && n < MONSTER_SPAWNS_ARR_COUNT - 1; i++) {
++        s32 species = (floor - 1) * 10 + 1 + i; // (the Pokédex's number: the same in this game, to Unown)
++        SetSpeciesLevelToExtract(&gDungeon->fileMonsterSpawns[n], PORT_BOSS9_LEVEL, species);
++        gDungeon->fileMonsterSpawns[n].randNum[0] = gDungeon->fileMonsterSpawns[n].randNum[1] = (i + 1) * 1000;
++        n++;
++    }
++    for (i = 0; i < kept && n < MONSTER_SPAWNS_ARR_COUNT - 1; i++)
++        gDungeon->fileMonsterSpawns[n++] = keep[i];
++    for (; n < MONSTER_SPAWNS_ARR_COUNT; n++)
++        SetSpeciesToExtract(&gDungeon->fileMonsterSpawns[n], 0);
++    gDungeon->monsterSpawnsPopulated = FALSE;
++
++    // Items: each category's share as its items' (all alike), then each item
++    // alike within it (both cumulative, to 10000, as the game's tables are)
++    for (i = 0; i < (s32)ARRAY_COUNT(sPortBoss9Items); i++)
++        perCategory[GetItemCategory(sPortBoss9Items[i])]++;
++    for (j = 0; j < ITEM_SPAWN_TYPES_COUNT; j++) {
++        sum = 0;
++        for (c = 0; c < NUM_ITEM_CATEGORIES; c++) {
++            sum += perCategory[c];
++            gDungeon->itemSpawns[j].categoryValues[c] = perCategory[c] ? sum * 10000 / (s32)ARRAY_COUNT(sPortBoss9Items) : 0;
++        }
++        for (i = 0; i < NUMBER_OF_ITEM_IDS; i++)
++            gDungeon->itemSpawns[j].itemValues[i] = 0;
++        for (c = 0; c < NUM_ITEM_CATEGORIES; c++) {
++            done = 0;
++            for (i = 0; i < (s32)ARRAY_COUNT(sPortBoss9Items); i++)
++                if (GetItemCategory(sPortBoss9Items[i]) == c) {
++                    done++;
++                    gDungeon->itemSpawns[j].itemValues[sPortBoss9Items[i]] = done * 10000 / perCategory[c];
++                }
++        }
++    }
++    gDungeon->floorProperties.enemyDensity = PORT_BOSS9_ENEMY_DENSITY;
++    gDungeon->floorProperties.itemDensity = PORT_BOSS9_ITEM_DENSITY;
++}
++#endif
++
+ void sub_803D4AC(void)
+ {
+     gDungeon->unk1C570.id = DUNGEON_INVALID;
+@@ -89,6 +162,10 @@ void SetFloorItemMonsterSpawns(void)
+         }
+     }
+ 
++#ifdef PLATFORM_3DS
++    if (gDungeon->unk644.dungeonLocation.id == DUNGEON_BOSS_9)
++        PortBoss9TestFloor(gDungeon->unk644.dungeonLocation.floor);
++#endif
+     CloseFile(file);
+ }
+ 
+@@ -104,6 +181,72 @@ u8 GetRandomFloorTrap(void)
      return TRAP_CHESTNUT_TRAP;
  }
  
@@ -2333,7 +2470,7 @@ index 4506e559..51a3ae26 100644
  u8 GetRandomFloorItem(s32 spawnType)
  {
      s32 i;
-@@ -121,6 +190,9 @@ u8 GetRandomFloorItem(s32 spawnType)
+@@ -121,6 +264,9 @@ u8 GetRandomFloorItem(s32 spawnType)
      rand = DungeonRandInt(ITEM_SETS_RANDOM_CAP + 1);
      for (i = 0; i < NUMBER_OF_ITEM_IDS; i++) {
          if (gDungeon->itemSpawns[spawnType].itemValues[i] != 0 && GetItemCategory(i) == category && gDungeon->itemSpawns[spawnType].itemValues[i] >= rand) {
@@ -12445,6 +12582,29 @@ index e6872a26..c6368b99 100644
      SoundBiasSet();
  
      REG_IME = 0;
+diff --git a/src/rescue_scenario.c b/src/rescue_scenario.c
+index 8c6dc0c5..0bdaa609 100644
+--- a/src/rescue_scenario.c
++++ b/src/rescue_scenario.c
+@@ -1,6 +1,7 @@
+ #include "global.h"
+ #include "globaldata.h"
+ #include "rescue_scenario.h"
++#include "constants/dungeon.h"
+ #include "dungeon_info.h"
+ #include "event_flag.h"
+ #include "exclusive_pokemon.h"
+@@ -176,6 +177,10 @@ UNUSED static const u8 *UnusedGetRescueDungeonName(s16 index)
+ 
+ const u8 *GetRescueDungeonName(s16 rescueDungeonId)
+ {
++#ifdef PLATFORM_3DS
++    if (rescueDungeonId == RESCUE_DUNGEON_DUMMY) // (Boss 9, for testing: code_80A26CC.c)
++        return GetDungeonName1(DUNGEON_BOSS_9);
++#endif
+     if (rescueDungeonId == RESCUE_DUNGEON_DUMMY) {
+         return gDummyScenarioText;
+     }
 diff --git a/src/run_dungeon.c b/src/run_dungeon.c
 index f6108c72..39b325bd 100644
 --- a/src/run_dungeon.c
