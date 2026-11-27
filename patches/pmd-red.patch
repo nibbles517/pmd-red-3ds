@@ -362,7 +362,7 @@ index 00000000..d576cc98
 +#endif
 diff --git a/include/port_new_run.h b/include/port_new_run.h
 new file mode 100644
-index 00000000..79f67552
+index 00000000..5614a1a7
 --- /dev/null
 +++ b/include/port_new_run.h
 @@ -0,0 +1,85 @@
@@ -374,12 +374,12 @@ index 00000000..79f67552
 +extern u8 gPortRunOptions[PORT_RUN_OPTIONS]; // 0 Off, 1 On; each Save Data's in config.ini
 +// What they do (index in gPortRunOptions):
 +// (dungeon_floor_spawns.c, PortRunItemChange) Increased Sitrus Berries: any
-+// other rolled Berry is a Sitrus Berry 2% of the time; Increased Life Seeds:
-+// any other rolled Seed is a Life Seed 2% of the time; Increased Vitamins: a
++// other rolled Berry is a Sitrus Berry 3% of the time; Increased Life Seeds:
++// any other rolled Seed is a Life Seed 3% of the time; Increased Vitamins: a
 +// rolled Max Elixir is Protein, Iron, Calcium or Zinc (or, with Ginseng -> PP
-+// Up on, a PP Up: each as often) 5% of the time. Doubled (4%, 4%, 10%) while
++// Up on, a PP Up: each as often) 5% of the time. Doubled (6%, 6%, 10%) while
 +// the team leader holds a Plain Ribbon, except for a Kecleon Shop's items
-+// (always 2%, 2%, 5%, the town's too).
++// (always 3%, 3%, 5%, the town's too).
 +s32 PortRunItemTransform(s32 id, s32 mul, s32 (*randInt)(s32)); // (port_new_run.c)
 +#define PORT_RUN_ORAN_TO_SITRUS 0
 +#define PORT_RUN_BLAST_TO_LIFE 1
@@ -7092,7 +7092,7 @@ index c46396e2..86e644f3 100644
 +}
 +#endif
 diff --git a/src/items.c b/src/items.c
-index a2ebfc31..0682fc12 100644
+index a2ebfc31..cdd2fb6a 100644
 --- a/src/items.c
 +++ b/src/items.c
 @@ -16,6 +16,33 @@
@@ -7288,7 +7288,7 @@ index a2ebfc31..0682fc12 100644
 +    // Run options Increased Sitrus Berries / Life Seeds / Vitamins (any of
 +    // them): a chance of a Plain Ribbon in the first slot (4% in the first 3
 +    // story tiers, 1% post-game), the other 7 rolled as usual, then changed as
-+    // the options change a dungeon's items (port_new_run.c: 2%, 2%, 5%)
++    // the options change a dungeon's items (port_new_run.c: 3%, 3%, 5%)
 +    if ((gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] || gPortRunOptions[PORT_RUN_BLAST_TO_LIFE]
 +         || gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN]) && RandInt(100) < (index == 3 ? 1 : 4)) {
 +        AddKecleonShopItem(ITEM_PLAIN_RIBBON);
@@ -11541,7 +11541,7 @@ index 00000000..ee450c96
 +#endif
 diff --git a/src/port_new_run.c b/src/port_new_run.c
 new file mode 100644
-index 00000000..e62ff490
+index 00000000..78a23f5a
 --- /dev/null
 +++ b/src/port_new_run.c
 @@ -0,0 +1,206 @@
@@ -11713,7 +11713,7 @@ index 00000000..e62ff490
 +
 +// Increased Sitrus Berries / Life Seeds / Vitamins: an item rolled (on a
 +// dungeon's floor, dungeon_floor_spawns.c, or in the town's Kecleon Shop,
-+// items.c) as the option changes it: 2%, 2% and 5%, `mul` times as often;
++// items.c) as the option changes it: 3%, 3% and 5%, `mul` times as often;
 +// a Max Elixir's vitamin is Protein, Iron, Calcium or Zinc, or with Ginseng
 +// -> PP Up on a PP Up as often as each
 +static bool8 PortIsBerry(s32 id)
@@ -11740,9 +11740,9 @@ index 00000000..e62ff490
 +
 +s32 PortRunItemTransform(s32 id, s32 mul, s32 (*randInt)(s32))
 +{
-+    if (gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && PortIsBerry(id) && randInt(100) < 2 * mul)
++    if (gPortRunOptions[PORT_RUN_ORAN_TO_SITRUS] && PortIsBerry(id) && randInt(100) < 3 * mul)
 +        return ITEM_SITRUS_BERRY;
-+    if (gPortRunOptions[PORT_RUN_BLAST_TO_LIFE] && PortIsSeed(id) && randInt(100) < 2 * mul)
++    if (gPortRunOptions[PORT_RUN_BLAST_TO_LIFE] && PortIsSeed(id) && randInt(100) < 3 * mul)
 +        return ITEM_LIFE_SEED;
 +    if (gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN] && id == ITEM_MAX_ELIXIR && randInt(100) < 5 * mul) {
 +        static const u8 sVitamins[5] = { ITEM_PROTEIN, ITEM_IRON, ITEM_CALCIUM, ITEM_ZINC, ITEM_GINSENG };
