@@ -7092,7 +7092,7 @@ index c46396e2..86e644f3 100644
 +}
 +#endif
 diff --git a/src/items.c b/src/items.c
-index a2ebfc31..cdd2fb6a 100644
+index a2ebfc31..155fbddb 100644
 --- a/src/items.c
 +++ b/src/items.c
 @@ -16,6 +16,33 @@
@@ -7191,7 +7191,7 @@ index a2ebfc31..cdd2fb6a 100644
  }
  
  // arm9.bin::02060BD0
-@@ -307,6 +334,12 @@ s32 GetItemOrder(u8 id)
+@@ -307,6 +334,23 @@ s32 GetItemOrder(u8 id)
  // arm9.bin::02060BB8
  s32 GetItemPalette(u8 id)
  {
@@ -7200,11 +7200,22 @@ index a2ebfc31..cdd2fb6a 100644
 +    // apart from the other seeds
 +    if (id == ITEM_LIFE_SEED && gPortRunOptions[PORT_RUN_BLAST_TO_LIFE])
 +        return 10;
++    // Increased Vitamins: each vitamin, and the Ginseng (PP Up), in a palette
++    // of its own, apart from the Max Elixir (all share its sprite)
++    if (gPortRunOptions[PORT_RUN_ELIXIR_TO_VITAMIN]) {
++        switch (id) {
++            case ITEM_PROTEIN: return 11;
++            case ITEM_IRON: return 0;
++            case ITEM_CALCIUM: return 6;
++            case ITEM_ZINC: return 5;
++            case ITEM_GINSENG: return 3;
++        }
++    }
 +#endif
      return gItemParametersData[id].palette;
  }
  
-@@ -322,9 +355,18 @@ u32 GetThrownItemQuantityLimit(u8 id, u32 rangeIndex)
+@@ -322,9 +366,18 @@ u32 GetThrownItemQuantityLimit(u8 id, u32 rangeIndex)
      return gItemParametersData[id].spawnAmountRange[rangeIndex];
  }
  
@@ -7223,7 +7234,7 @@ index a2ebfc31..cdd2fb6a 100644
      return gItemParametersData[id].description;
  }
  
-@@ -337,13 +379,23 @@ bool8 TestItemAIFlag(u8 id, u32 aiFlag)
+@@ -337,13 +390,23 @@ bool8 TestItemAIFlag(u8 id, u32 aiFlag)
  // a2 is always NULL
  // This func probably appends the quantity of 1, but I haven't checked
  // If it appends quantity, we can rename the func
@@ -7248,7 +7259,7 @@ index a2ebfc31..cdd2fb6a 100644
      ItemIdToItem(&unkItem, id, 0);
      unkItem.quantity = 1;
      sub_8090F58(dest, acStack104, &unkItem, a2);
-@@ -361,25 +413,25 @@ void sub_8090E14(u8* ext_buffer, Item* slot, const struct unkStruct_8090F58* a3)
+@@ -361,25 +424,25 @@ void sub_8090E14(u8* ext_buffer, Item* slot, const struct unkStruct_8090F58* a3)
    if (GetItemCategory(slot->id) == CATEGORY_THROWN_LINE) {
      // I feel like these labels might actually be there...
      if (unk8) {
@@ -7279,7 +7290,7 @@ index a2ebfc31..cdd2fb6a 100644
    }
  
    if (slot->flags & ITEM_FLAG_STICKY) {
-@@ -1071,11 +1123,29 @@ void ChooseKecleonShopInventory(u8 index)
+@@ -1071,11 +1134,29 @@ void ChooseKecleonShopInventory(u8 index)
      for (i = 0; i < MAX_KECLEON_ITEM_SHOP_ITEMS; i++)
          InitKecleonShopItem(i);
  
